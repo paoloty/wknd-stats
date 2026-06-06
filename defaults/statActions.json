@@ -1,0 +1,101 @@
+[
+  {
+    "id": "pts_1",
+    "label": "+1 FT",
+    "category": "score",
+    "stat": "pts",
+    "val": 1,
+    "colorClass": "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-sm",
+    "trackingStat": "ftm"
+  },
+  {
+    "id": "pts_2",
+    "label": "2pt Made",
+    "category": "score",
+    "stat": "pts",
+    "val": 2,
+    "colorClass": "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-md",
+    "trackingStat": "fg2m"
+  },
+  {
+    "id": "pts_3",
+    "label": "3pt Made",
+    "category": "score",
+    "stat": "pts",
+    "val": 3,
+    "colorClass": "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-md",
+    "trackingStat": "fg3m"
+  },
+  {
+    "id": "ast",
+    "label": "+1 AST",
+    "category": "play",
+    "stat": "ast",
+    "val": 1,
+    "colorClass": "bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-600 shadow-sm"
+  },
+  {
+    "id": "reb",
+    "label": "+1 REB",
+    "category": "play",
+    "stat": "reb",
+    "val": 1,
+    "colorClass": "bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-600 shadow-sm"
+  },
+  {
+    "id": "stl",
+    "label": "+1 STL",
+    "category": "play",
+    "stat": "stl",
+    "val": 1,
+    "colorClass": "bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-600 shadow-sm"
+  },
+  {
+    "id": "blk",
+    "label": "+1 BLK",
+    "category": "play",
+    "stat": "blk",
+    "val": 1,
+    "colorClass": "bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-600 shadow-sm"
+  },
+  {
+    "id": "fg2m_miss",
+    "label": "2pt Miss",
+    "category": "miss",
+    "stat": "fg2m_miss",
+    "val": 1,
+    "colorClass": "bg-red-600 hover:bg-red-500 text-white border-red-500 shadow-md"
+  },
+  {
+    "id": "fg3m_miss",
+    "label": "3pt Miss",
+    "category": "miss",
+    "stat": "fg3m_miss",
+    "val": 1,
+    "colorClass": "bg-red-600 hover:bg-red-500 text-white border-red-500 shadow-md"
+  },
+  {
+    "id": "ft_miss",
+    "label": "FT Miss",
+    "category": "miss",
+    "stat": "ft_miss",
+    "val": 1,
+    "colorClass": "bg-red-600 hover:bg-red-500 text-white border-red-550 shadow-md"
+  },
+  {
+    "id": "to",
+    "label": "+1 TO",
+    "category": "deficit",
+    "stat": "to",
+    "val": 1,
+    "colorClass": "bg-red-700 hover:bg-red-600 text-white border-red-600 shadow-sm"
+  },
+  {
+    "id": "pf",
+    "label": "+1 FOUL",
+    "category": "deficit",
+    "stat": "pf",
+    "val": 1,
+    "colorClass": "bg-red-800 hover:bg-red-700 text-white border-red-700 shadow-sm"
+  }
+]

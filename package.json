@@ -1,0 +1,17 @@
+{
+  "name": "wknd-stats",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WKND League Stats with Node + SQLite persistence",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "expose": "npx cloudflared tunnel --url http://localhost:3000",
+    "expose:local": "npx localtunnel --port 3000"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "ws": "^8.21.0"
+  }
+}
