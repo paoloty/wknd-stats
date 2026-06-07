@@ -5,6 +5,8 @@
   "description": "WKND League Stats with Node + SQLite persistence",
   "main": "server.js",
   "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "prestart": "npm run build:client",
     "start": "node server.js",
     "tunnel:login": "npx cloudflared tunnel login",
     "tunnel:create": "npx cloudflared tunnel create wknd-stats-site",
@@ -18,5 +20,8 @@
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10"
   }
 }
