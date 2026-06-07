@@ -777,13 +777,46 @@ function mergeEventLists(existingList = [], incomingList = [], fallbackPrefix = 
 function mergeActiveSession(existingSession, incomingSession) {
   const existing = existingSession && typeof existingSession === 'object' ? existingSession : {};
   const incoming = incomingSession && typeof incomingSession === 'object' ? incomingSession : {};
+  const existingLineupRevision = toInt(existing.lineupRevision);
+  const incomingLineupRevision = toInt(incoming.lineupRevision);
+  const hasIncomingGameLog = Object.prototype.hasOwnProperty.call(incoming, 'gameLog');
+  const hasIncomingLoggedHistory = Object.prototype.hasOwnProperty.call(incoming, 'loggedHistory');
+  const hasIncomingPlayedPlayers = Object.prototype.hasOwnProperty.call(incoming, 'playedPlayers');
+  // Prefer incoming rotation on equal revisions to avoid reverting lineup arrays
+  // when multiple lineup events are generated within the same millisecond.
+  const preferIncomingRotation = incomingLineupRevision >= existingLineupRevision;
+
+  const pickRotationArray = (key) => {
+    const incomingArr = Array.isArray(incoming[key]) ? incoming[key] : null;
+    const existingArr = Array.isArray(existing[key]) ? existing[key] : null;
+    if (preferIncomingRotation) {
+      if (incomingArr) return incomingArr;
+      if (existingArr) return existingArr;
+    } else {
+      if (existingArr) return existingArr;
+      if (incomingArr) return incomingArr;
+    }
+    return [];
+  };
 
   return {
     ...existing,
     ...incoming,
-    gameLog: mergeEventLists(existing.gameLog || [], incoming.gameLog || [], 'glog', 300),
-    loggedHistory: mergeEventLists(existing.loggedHistory || [], incoming.loggedHistory || [], 'hist', 300),
-    playedPlayers: Array.from(new Set([...(existing.playedPlayers || []), ...(incoming.playedPlayers || [])]))
+    lineupRevision: Math.max(existingLineupRevision, incomingLineupRevision),
+    teamALineup: pickRotationArray('teamALineup'),
+    teamABench: pickRotationArray('teamABench'),
+    teamBLineup: pickRotationArray('teamBLineup'),
+    teamBBench: pickRotationArray('teamBBench'),
+    // If payload explicitly includes these fields (even empty), treat them as authoritative.
+    gameLog: hasIncomingGameLog
+      ? mergeEventLists([], Array.isArray(incoming.gameLog) ? incoming.gameLog : [], 'glog', 300)
+      : mergeEventLists(existing.gameLog || [], incoming.gameLog || [], 'glog', 300),
+    loggedHistory: hasIncomingLoggedHistory
+      ? mergeEventLists([], Array.isArray(incoming.loggedHistory) ? incoming.loggedHistory : [], 'hist', 300)
+      : mergeEventLists(existing.loggedHistory || [], incoming.loggedHistory || [], 'hist', 300),
+    playedPlayers: hasIncomingPlayedPlayers
+      ? Array.from(new Set(Array.isArray(incoming.playedPlayers) ? incoming.playedPlayers : []))
+      : Array.from(new Set([...(existing.playedPlayers || []), ...(incoming.playedPlayers || [])]))
   };
 }
 
@@ -862,6 +895,11 @@ function clearActiveSession(sourceClientId = null) {
   deleteActiveSessionStmt.run();
   deleteLiveEventsStmt.run();
   broadcastSync({ sourceClientId });
+}
+
+function clearLiveEvents(sourceClientId = null) {
+  lastActiveSessionSourceId = sourceClientId;
+  deleteLiveEventsStmt.run();
 }
 
 function migrateLegacyIfNeeded() {
@@ -1035,6 +1073,12 @@ app.post('/api/live-events', (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to append live event' });
   }
+});
+
+app.post('/api/live-events/reset', (req, res) => {
+  const { sourceClientId } = req.body || {};
+  clearLiveEvents(sourceClientId || null);
+  res.json({ ok: true });
 });
 
 app.put('/api/active-session', (req, res) => {
