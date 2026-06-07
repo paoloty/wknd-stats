@@ -1716,7 +1716,8 @@
 
                 try {
                     const savedPending = localStorage.getItem(LIVE_EVENTS_QUEUE_KEY);
-                    pendingLiveEventsRef.current = Array.isArray(JSON.parse(savedPending || '[]')) ? JSON.parse(savedPending || '[]') : [];
+                    const parsedPending = savedPending ? JSON.parse(savedPending) : [];
+                    pendingLiveEventsRef.current = Array.isArray(parsedPending) ? parsedPending : [];
                 } catch (e) {
                     pendingLiveEventsRef.current = [];
                 }
@@ -1737,26 +1738,37 @@
                 }
 
                 const loadActiveSession = async () => {
+                    let hydratedFromRemote = false;
                     try {
                         const payload = await apiRequest('/api/active-session');
                         if (payload?.session) {
                             hydrateSession(payload.session);
-                            return;
+                            hydratedFromRemote = true;
                         }
                     } catch (e) {
                         // Fall back to local browser cache if DB temp cache is unavailable.
                     }
 
-                    try {
-                        const activeSession = localStorage.getItem('active_live_session');
-                        if (activeSession) {
-                            hydrateSession(JSON.parse(activeSession));
-                        }
-                    } catch (e) {}
+                    if (!hydratedFromRemote) {
+                        try {
+                            const activeSession = localStorage.getItem('active_live_session');
+                            if (activeSession) {
+                                hydrateSession(JSON.parse(activeSession));
+                            }
+                        } catch (e) {}
+                    }
 
-                    await fetchMissingLiveEvents();
-                    await flushPendingLiveEvents();
-                    await flushPendingActiveSessionSync();
+                    const runSyncWarmup = () => {
+                        fetchMissingLiveEvents();
+                        flushPendingLiveEvents();
+                        flushPendingActiveSessionSync();
+                    };
+
+                    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+                        window.requestIdleCallback(() => runSyncWarmup(), { timeout: 1500 });
+                    } else {
+                        setTimeout(runSyncWarmup, 0);
+                    }
                 };
 
                 loadActiveSession();
@@ -4370,8 +4382,51 @@
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                                        {/* COMPACT MOBILE SCOREBAR */}
-                                        <div className="col-span-12 sticky top-2 z-30 bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-xl">
+                                        {/* MOBILE BOTTOM STICKY COMPACT 2-ROW SCOREBAR */}
+                                        <div className="md:hidden col-span-12 sticky top-2 z-20">
+                                            <div className="bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl p-1.5 backdrop-blur-sm">
+                                                <div className="grid grid-cols-7 items-center px-1.5 py-1 rounded-lg bg-slate-950 border border-slate-900">
+                                                    <div className="col-span-3 text-center">
+                                                        <div className="flex items-center gap-1 mb-0.5">
+                                                            {Array.from({ length: timeoutLimit }).map((_, idx) => (
+                                                                <span key={`timeout-a-${idx}`} className={`w-1.5 h-1.5 rounded-full ${idx < teamATimeoutUsed ? 'bg-amber-300' : 'bg-slate-800'}`} />
+                                                            ))}
+                                                        </div>
+                                                        <span className="text-[9px] text-slate-400 font-bold block truncate">{teams.find(t => t.id === teamAId)?.name}</span>
+                                                        <div className={`mt-0.5 text-3xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamA ? 'score-burst text-amber-200 drop-shadow-[0_0_10px_rgba(251,191,36,0.7)]' : 'text-white'}`}>{teamAScore}</div>
+                                                    </div>
+                                                    <div className="col-span-1 text-center">
+                                                        <div className="text-slate-600 font-black font-mono text-[10px]">VS</div>
+                                                        <div className="mt-0.5 text-[12px] font-black tracking-wide text-orange-300 uppercase leading-none">{getPeriodLabel(currentQuarter)}</div>
+                                                    </div>
+                                                    <div className="col-span-3 text-center">
+                                                        <div className="flex items-center justify-end gap-1 mb-0.5">
+                                                            {Array.from({ length: timeoutLimit }).map((_, idx) => (
+                                                                <span key={`timeout-b-${idx}`} className={`w-1.5 h-1.5 rounded-full ${idx < teamBTimeoutUsed ? 'bg-amber-300' : 'bg-slate-800'}`} />
+                                                            ))}
+                                                        </div>
+                                                        <span className="text-[9px] text-slate-400 font-bold block truncate">{teams.find(t => t.id === teamBId)?.name}</span>
+                                                        <div className={`mt-0.5 text-3xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamB ? 'score-burst text-amber-200 drop-shadow-[0_0_10px_rgba(251,191,36,0.7)]' : 'text-white'}`}>{teamBScore}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-7 items-center gap-1 mt-1 px-1.5">
+                                                    <div className="col-span-3 flex gap-1">
+                                                        {Array.from({ length: foulBarMax }).map((_, idx) => (
+                                                            <span key={`foul-a-${idx}`} className={`h-1.5 flex-1 rounded ${idx < teamAFoulsForDisplay ? 'bg-rose-400' : 'bg-slate-800'}`} />
+                                                        ))}
+                                                    </div>
+                                                    <div className="col-span-1 text-center text-[8px] font-bold uppercase tracking-wide text-slate-500">PF</div>
+                                                    <div className="col-span-3 flex gap-1">
+                                                        {Array.from({ length: foulBarMax }).map((_, idx) => (
+                                                            <span key={`foul-b-${idx}`} className={`h-1.5 flex-1 rounded ${idx < teamBFoulsForDisplay ? 'bg-rose-400' : 'bg-slate-800'}`} />
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* DESKTOP / TABLET TOP SCOREBAR */}
+                                        <div className="hidden md:block col-span-12 sticky top-2 z-30 bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-xl">
                                             <div className="grid grid-cols-7 items-center bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-lg">
                                                 <div className="col-span-3 relative text-center pb-4">
                                                     <div className="absolute top-0 left-0 flex items-center gap-1 pointer-events-none">
@@ -4466,7 +4521,7 @@
                                         )}
 
                                         {/* QUICK ACTION DECK GRID WITH RESPONSIVE DISPLAY & TIERED PRIORITY */}
-                                        {canOperateLive && <div className="col-span-12 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-xl space-y-4">
+                                        {canOperateLive && <div className="col-span-12 bg-slate-900 border border-slate-800 p-2.5 md:p-4 rounded-xl shadow-xl space-y-2 md:space-y-4 max-h-[calc(100vh-245px)] overflow-y-auto md:max-h-none md:overflow-visible">
                                             <div className="flex items-center border-b border-slate-800 pb-1.5">
                                                 <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1"><Icons.Zap /> Tap action first, then select player on court</span>
                                             </div>
@@ -4481,14 +4536,14 @@
                                             {/* TIER 1: GIANT PRIMARY KEYS (Shooting metrics) */}
                                             <div>
                                                 <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🏀 Primary Shooting Keys & Attempts</span>
-                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-3">
                                                         {canOperateLive && primaryActions.map(act => (
                                                         <button 
                                                             key={act.id} 
                                                             disabled={!canTriggerStatLogging}
                                                             onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                             title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
-                                                            className={`py-5 md:py-6 px-4 rounded-2xl text-center text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
+                                                            className={`py-3.5 md:py-6 px-1.5 md:px-4 rounded-lg md:rounded-2xl text-center text-[9px] md:text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                         >
                                                             {act.label}
                                                         </button>
@@ -4501,14 +4556,14 @@
                                                 {/* TIER 2: LARGE SECONDARY KEYS (Rebounds & Assists) */}
                                                 <div className="lg:col-span-5">
                                                     <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🛡️ Transition Keys (Very Common)</span>
-                                                    <div className="grid grid-cols-2 gap-3">
+                                                    <div className="grid grid-cols-2 gap-1.5 md:gap-3">
                                                         {canOperateLive && secondaryActions.map(act => (
                                                             <button 
                                                                 key={act.id} 
                                                                 disabled={!canTriggerStatLogging}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
-                                                                className={`py-4 px-4 rounded-xl text-center text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
+                                                                className={`py-3.5 md:py-4 px-2 md:px-4 rounded-lg md:rounded-xl text-center text-[10px] md:text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
                                                             </button>
@@ -4519,14 +4574,14 @@
                                                 {/* TIER 3: COMPACT TERTIARY KEYS ("FT Miss" is neatly located here) */}
                                                 <div className="lg:col-span-12">
                                                     <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">⚙️ Auxiliary Game Events</span>
-                                                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                                                    <div className="grid grid-cols-2 md:grid-cols-6 gap-1.5 md:gap-2">
                                                         {canOperateLive && tertiaryActions.map(act => (
                                                             <button 
                                                                 key={act.id} 
                                                                 disabled={!canTriggerStatLogging}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
-                                                                className={`py-2.5 px-2 rounded-lg text-center text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
+                                                                className={`py-[11px] md:py-2.5 px-1.5 md:px-2 rounded-lg text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
                                                             </button>
@@ -4545,7 +4600,7 @@
                                                                 disabled={!canTriggerStatLogging}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
-                                                                className={`py-2.5 px-3 rounded-lg text-center text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
+                                                                className={`py-[11px] md:py-2.5 px-1.5 md:px-3 rounded-lg text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
                                                             </button>
@@ -5097,7 +5152,7 @@
                                             </div>
 
                                             <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                                                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Other Season Averages</div>
+                                                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Season Averages</div>
                                                 <div className="space-y-2 font-mono">
                                                     <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">STL</div><div className="text-sm font-black text-teal-300">{selectedRosterAthleteAverages?.stl || '0.0'}</div></div>
