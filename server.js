@@ -18,6 +18,15 @@ const AUTH_PASSWORDS = {
   admin: process.env.WKND_ADMIN_PASSWORD || 'admin123!!!'
 };
 
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+const GEMINI_FALLBACK_MODELS = [
+  GEMINI_MODEL,
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash-latest'
+];
+
 const defaultsDir = path.join(__dirname, 'defaults');
 
 function readJsonFileSafe(filePath, fallback) {
@@ -51,6 +60,13 @@ function ensureGamesYouTubeColumn() {
   const columns = db.prepare('PRAGMA table_info(games)').all();
   if (!columns.some((column) => column.name === 'youtube_url')) {
     db.exec('ALTER TABLE games ADD COLUMN youtube_url TEXT NOT NULL DEFAULT ""');
+  }
+}
+
+function ensureGamesWriteupColumn() {
+  const columns = db.prepare('PRAGMA table_info(games)').all();
+  if (!columns.some((column) => column.name === 'game_writeup')) {
+    db.exec('ALTER TABLE games ADD COLUMN game_writeup TEXT NOT NULL DEFAULT ""');
   }
 }
 
@@ -253,6 +269,7 @@ db.exec(`
     team_a_score INTEGER NOT NULL,
     team_b_score INTEGER NOT NULL,
     youtube_url TEXT NOT NULL DEFAULT '',
+    game_writeup TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0
   );
 
@@ -317,6 +334,7 @@ db.exec(`
 
 ensureGamesLogColumn();
 ensureGamesYouTubeColumn();
+ensureGamesWriteupColumn();
 ensurePlayerProfileColumns();
 ensurePlayerTotalsTable();
 ensurePlayersTableWithoutLegacyStats();
@@ -366,9 +384,9 @@ const upsertPlayerTotalsStmt = db.prepare(`
 
 const insertGameStmt = db.prepare(`
   INSERT INTO games (
-    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, youtube_url, sort_order
+    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, youtube_url, game_writeup, sort_order
   ) VALUES (
-    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @youtube_url, @sort_order
+    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @youtube_url, @game_writeup, @sort_order
   )
 `);
 
@@ -418,7 +436,7 @@ const selectPlayersStmt = db.prepare(`
   ORDER BY p.sort_order ASC, p.id ASC
 `);
 const selectGamesStmt = db.prepare(`
-  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, youtube_url
+  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, youtube_url, game_writeup
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
@@ -580,7 +598,8 @@ function readState() {
     teamBScore: toInt(game.team_b_score),
     playerStats: statsByGame.get(game.id) || {},
     gameLog: parseJsonSafe(game.game_log_json, []),
-    youtubeUrl: game.youtube_url || ''
+    youtubeUrl: game.youtube_url || '',
+    gameWriteup: game.game_writeup || ''
   }));
 
   return {
@@ -656,6 +675,7 @@ const writeGamesTransaction = db.transaction((nextGames) => {
       team_b_score: toInt(game.teamBScore),
       game_log_json: JSON.stringify(Array.isArray(game.gameLog) ? game.gameLog : []),
       youtube_url: typeof game.youtubeUrl === 'string' ? game.youtubeUrl : '',
+      game_writeup: typeof game.gameWriteup === 'string' ? game.gameWriteup : '',
       sort_order: gameIndex
     });
 
@@ -1030,6 +1050,130 @@ app.get('/api/stats', (_req, res) => {
   }));
 
   res.json({ stats: rows });
+});
+
+app.post('/api/generate-writeup', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    res.status(400).json({ error: 'Gemini API key is not configured on the server.' });
+    return;
+  }
+
+  const { game, playerOfTheGame, bestPerformers, playByPlay, finalMoments } = req.body || {};
+  if (!game || typeof game !== 'object') {
+    res.status(400).json({ error: 'Body must include game object.' });
+    return;
+  }
+
+  const pbpLines = Array.isArray(playByPlay)
+    ? playByPlay.slice(-220).map((entry) => {
+        const time = String(entry?.time || '').trim() || '--';
+        const team = String(entry?.team || 'Neutral').trim() || 'Neutral';
+        const text = String(entry?.text || '').trim();
+        return text ? `[${time}] (${team}) ${text}` : null;
+      }).filter(Boolean)
+    : [];
+
+  const finalMomentLines = Array.isArray(finalMoments)
+    ? finalMoments.slice(-60).map((entry) => {
+        const time = String(entry?.time || '').trim() || '--';
+        const team = String(entry?.team || 'Neutral').trim() || 'Neutral';
+        const text = String(entry?.text || '').trim();
+        return text ? `[${time}] (${team}) ${text}` : null;
+      }).filter(Boolean)
+    : pbpLines.slice(-30);
+
+  const performerLines = Array.isArray(bestPerformers)
+    ? bestPerformers.slice(0, 8).map((p) => {
+        const name = `#${p?.number ?? '-'} ${p?.name || 'Unknown'}`;
+        const team = p?.teamName || 'Unknown Team';
+        const stats = p?.stats || {};
+        return `${name} (${team}) - PTS ${Number(stats.pts || 0)}, REB ${Number(stats.reb || 0)}, AST ${Number(stats.ast || 0)}, STL ${Number(stats.stl || 0)}, BLK ${Number(stats.blk || 0)}, TO ${Number(stats.to || 0)}, Impact ${Number(p?.perScore || 0).toFixed(1)}`;
+      })
+    : [];
+
+  const potgLine = playerOfTheGame
+    ? `#${playerOfTheGame.number || '-'} ${playerOfTheGame.name || 'Unknown'} (${playerOfTheGame.teamName || 'Unknown Team'}) - Impact ${Number(playerOfTheGame.perScore || 0).toFixed(1)}, PTS ${Number(playerOfTheGame?.stats?.pts || 0)}, REB ${Number(playerOfTheGame?.stats?.reb || 0)}, AST ${Number(playerOfTheGame?.stats?.ast || 0)}`
+    : 'No clear player of the game identified from the provided stats.';
+
+  const prompt = [
+    'You are writing a concise basketball game recap.',
+    'Use the provided data only.',
+    'Write 3 short paragraphs in plain text (no markdown).',
+    'Prioritize events from FINAL MOMENTS when describing turning points and clutch plays.',
+    'Paragraph 1: game summary and turning points from play-by-play logs, with extra focus on FINAL MOMENTS.',
+    'Paragraph 2: highlight Player of the Game with justification tied to play-by-play impact.',
+    'Paragraph 3: mention top performers ranked by PER impact and key stat contributions.',
+    '',
+    `Game: ${game.teamAName || 'Team A'} ${Number(game.teamAScore || 0)} - ${Number(game.teamBScore || 0)} ${game.teamBName || 'Team B'} (${game.date || ''})`,
+    `Player of the Game: ${potgLine}`,
+    'Best performers (ordered by PER impact):',
+    ...(performerLines.length ? performerLines : ['No performer list provided.']),
+    'Final moments (most recent events):',
+    ...(finalMomentLines.length ? finalMomentLines : ['No final-moments events provided.']),
+    'Play-by-play events:',
+    ...(pbpLines.length ? pbpLines : ['No play-by-play events provided.'])
+  ].join('\n');
+
+  try {
+    const attemptedModels = [];
+    let data = null;
+    let lastErrorStatus = 0;
+    let lastErrorText = '';
+
+    const uniqueModels = Array.from(new Set(GEMINI_FALLBACK_MODELS.filter(Boolean)));
+
+    for (const modelName of uniqueModels) {
+      attemptedModels.push(modelName);
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.5,
+            maxOutputTokens: 450
+          }
+        })
+      });
+
+      if (response.ok) {
+        data = await response.json();
+        break;
+      }
+
+      lastErrorStatus = response.status;
+      lastErrorText = await response.text();
+
+      // 404 means model unavailable; continue through fallbacks.
+      if (response.status === 404) {
+        continue;
+      }
+
+      // For non-404 errors, stop immediately and report details.
+      res.status(502).json({ error: `Gemini request failed (${response.status}) on ${modelName}: ${lastErrorText.slice(0, 260)}` });
+      return;
+    }
+
+    if (!data) {
+      res.status(502).json({ error: `Gemini model unavailable. Tried: ${attemptedModels.join(', ')}. Last error (${lastErrorStatus}): ${String(lastErrorText || '').slice(0, 260)}` });
+      return;
+    }
+
+    const writeup = (data?.candidates || [])
+      .flatMap((candidate) => candidate?.content?.parts || [])
+      .map((part) => String(part?.text || ''))
+      .join('\n')
+      .trim();
+
+    if (!writeup) {
+      res.status(502).json({ error: 'Gemini returned an empty response.' });
+      return;
+    }
+
+    res.json({ writeup });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate writeup with Gemini.' });
+  }
 });
 
 app.post('/api/auth/login', (req, res) => {

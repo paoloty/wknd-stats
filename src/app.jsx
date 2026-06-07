@@ -9,12 +9,22 @@
                 ...options
             });
 
-            if (!response.ok) {
-                throw new Error(`Request failed: ${response.status}`);
+            const text = await response.text();
+            let payload = null;
+            if (text) {
+                try {
+                    payload = JSON.parse(text);
+                } catch {
+                    payload = null;
+                }
             }
 
-            const text = await response.text();
-            return text ? JSON.parse(text) : null;
+            if (!response.ok) {
+                const detail = payload?.error || (text ? text.slice(0, 240) : 'Unknown server error');
+                throw new Error(`Request failed (${response.status}): ${detail}`);
+            }
+
+            return payload;
         }
 
         const Icons = {
@@ -82,6 +92,8 @@
             const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
             const [historyDetailTab, setHistoryDetailTab] = useState('potg');
             const [historyVideoInput, setHistoryVideoInput] = useState('');
+            const [historyWriteupInput, setHistoryWriteupInput] = useState('');
+            const [generatingWriteupGameId, setGeneratingWriteupGameId] = useState(null);
             const [awaitingOvertimeDecision, setAwaitingOvertimeDecision] = useState(false);
             const [awaitingPeriodStart, setAwaitingPeriodStart] = useState(false);
 
@@ -1367,7 +1379,8 @@
                     homeTeam: g.teamAName,
                     homeScore: g.teamAScore,
                     awayTeam: g.teamBName,
-                    awayScore: g.teamBScore
+                    awayScore: g.teamBScore,
+                    writeupSnippet: String(g.gameWriteup || '').trim().slice(0, 140)
                 }))
             ];
             const teamStandings = teams.map((team) => {
@@ -1565,6 +1578,14 @@
                 }
                 setHistoryVideoInput(selectedHistoryGame?.youtubeUrl || '');
             }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.youtubeUrl : '']);
+
+            useEffect(() => {
+                if (!selectedHistoryGameId) {
+                    setHistoryWriteupInput('');
+                    return;
+                }
+                setHistoryWriteupInput(selectedHistoryGame?.gameWriteup || '');
+            }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.gameWriteup : '']);
 
             /* Managing body scrolling locks */
             useEffect(() => {
@@ -2099,6 +2120,111 @@
                 setGames(updatedGames);
                 await saveFullState(teams, updatedGames);
                 showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
+            };
+
+            const handleSaveGameWriteup = async (gameId) => {
+                if (!gameId) return;
+                const writeupText = String(historyWriteupInput || '');
+
+                const updatedGames = games.map((existingGame) => {
+                    if (existingGame.id !== gameId) return existingGame;
+                    const nextGame = { ...existingGame };
+                    if (writeupText.trim()) {
+                        nextGame.gameWriteup = writeupText;
+                    } else {
+                        delete nextGame.gameWriteup;
+                    }
+                    return nextGame;
+                });
+
+                setGames(updatedGames);
+                await saveFullState(teams, updatedGames);
+                showToast(writeupText.trim() ? 'Game recap saved.' : 'Game recap removed.', 'success');
+            };
+
+            const handleGenerateGameWriteup = async ({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers }) => {
+                if (!game || !canOperateLive) return;
+                setGeneratingWriteupGameId(game.id);
+
+                try {
+                    const bestPerformers = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])]
+                        .map((entry) => {
+                            const belongsToTeamA = !!teamAObj?.players?.some((p) => p.id === entry.id);
+                            return {
+                                name: entry.name,
+                                number: entry.number,
+                                teamName: belongsToTeamA ? game.teamAName : game.teamBName,
+                                perScore: Number(entry.perScore || 0),
+                                stats: {
+                                    pts: Number(entry.stats?.pts || 0),
+                                    reb: Number(entry.stats?.reb || 0),
+                                    ast: Number(entry.stats?.ast || 0),
+                                    stl: Number(entry.stats?.stl || 0),
+                                    blk: Number(entry.stats?.blk || 0),
+                                    to: Number(entry.stats?.to || 0)
+                                }
+                            };
+                        })
+                        .sort((a, b) => b.perScore - a.perScore || b.stats.pts - a.stats.pts)
+                        .slice(0, 8);
+
+                    const orderedGameLog = [...(Array.isArray(game.gameLog) ? game.gameLog : [])].reverse();
+
+                    const pbpForPrompt = orderedGameLog
+                        .slice(-220)
+                        .map((entry) => ({
+                            time: String(entry?.time || ''),
+                            team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : 'Neutral',
+                            text: String(entry?.text || '')
+                        }))
+                        .filter((entry) => entry.text.trim());
+
+                    const finalMomentsForPrompt = orderedGameLog
+                        .slice(-45)
+                        .map((entry) => ({
+                            time: String(entry?.time || ''),
+                            team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : 'Neutral',
+                            text: String(entry?.text || '')
+                        }))
+                        .filter((entry) => entry.text.trim());
+
+                    const response = await apiRequest('/api/generate-writeup', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            game: {
+                                id: game.id,
+                                date: game.date,
+                                teamAName: game.teamAName,
+                                teamBName: game.teamBName,
+                                teamAScore: Number(game.teamAScore || 0),
+                                teamBScore: Number(game.teamBScore || 0)
+                            },
+                            playerOfTheGame: playerOfTheGame ? {
+                                name: playerOfTheGame.name,
+                                number: playerOfTheGame.number,
+                                teamName: playerOfTheGame.teamName,
+                                perScore: Number(playerOfTheGame.perScore || 0),
+                                stats: playerOfTheGame.stats || {}
+                            } : null,
+                            bestPerformers,
+                            playByPlay: pbpForPrompt,
+                            finalMoments: finalMomentsForPrompt
+                        })
+                    });
+
+                    const generated = String(response?.writeup || '').trim();
+                    if (!generated) {
+                        showToast('Could not generate a writeup for this game.', 'error');
+                        return;
+                    }
+
+                    setHistoryWriteupInput(generated);
+                    showToast('Writeup generated. Review and save when ready.', 'success');
+                } catch (error) {
+                    showToast(error?.message || 'Failed to generate writeup.', 'error');
+                } finally {
+                    setGeneratingWriteupGameId(null);
+                }
             };
 
             const handleExportData = () => {
@@ -5678,7 +5804,7 @@
                                     {homepageGameSummaries.length === 0 ? (
                                         <p className="text-xs text-slate-500 italic text-center py-6">No games yet. Start and finish a match to record your first result.</p>
                                     ) : (
-                                        <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                                        <div className="space-y-2 max-h-[calc(100vh-240px)] overflow-y-auto pr-1">
                                             {homepageGameSummaries.map((game) => {
                                                 const winner = game.homeScore === game.awayScore
                                                     ? 'Draw'
@@ -5713,6 +5839,11 @@
                                                         <div className="mt-1 text-[11px] text-slate-400">
                                                             Home: {game.homeTeam} | Away: {game.awayTeam} | Winner: <span className="text-slate-300 font-bold">{winner}</span>
                                                         </div>
+                                                        {game.status === 'ENDED' && game.writeupSnippet ? (
+                                                            <div className="mt-1.5 text-[11px] text-slate-500 italic line-clamp-2">
+                                                                {game.writeupSnippet}{game.writeupSnippet.length >= 140 ? '...' : ''}
+                                                            </div>
+                                                        ) : null}
                                                     </button>
                                                 );
                                             })}
@@ -5800,6 +5931,48 @@
                                                         </button>
                                                     </div>
                                                 </div>
+
+                                                {(canOperateLive || String(game.gameWriteup || '').trim()) && (
+                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-2">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <h5 className="text-[11px] font-bold uppercase tracking-wider text-slate-300">Game Recap</h5>
+                                                            <span className="text-[10px] text-slate-500">Recap and key moments</span>
+                                                        </div>
+
+                                                        {canOperateLive ? (
+                                                            <>
+                                                                <textarea
+                                                                    value={historyWriteupInput}
+                                                                    onChange={(e) => setHistoryWriteupInput(e.target.value)}
+                                                                    placeholder="Add a quick game recap..."
+                                                                    rows={4}
+                                                                    className="w-full resize-y bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                                                                />
+                                                                <div className="flex justify-end gap-2">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleGenerateGameWriteup({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers })}
+                                                                        disabled={generatingWriteupGameId === game.id}
+                                                                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        {generatingWriteupGameId === game.id ? 'Generating...' : 'Generate Recap'}
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleSaveGameWriteup(game.id)}
+                                                                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                                                                    >
+                                                                        Save Recap
+                                                                    </button>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
+                                                                {game.gameWriteup}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                )}
 
                                                 <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-2 flex flex-wrap gap-2">
                                                     {tabButtons.map((tab) => (
@@ -6024,7 +6197,6 @@
                                                                             </div>
                                                                             <div className="relative z-10 grid grid-cols-[1fr_auto] items-center gap-3">
                                                                                 <div className="min-w-0 text-right">
-                                                                                    <div className="text-xl leading-none font-black text-slate-100">{hasALeader ? teamALeader.value : '-'}</div>
                                                                                     <div className="hidden lg:flex mt-1 flex-wrap justify-end gap-x-1.5 gap-y-0.5 leading-tight">
                                                                                         {hasALeader ? aLeaders.map((leader, index) => (
                                                                                             <React.Fragment key={`leader-a-name-${label}-${leader.id}`}>
@@ -6034,26 +6206,29 @@
                                                                                         )) : null}
                                                                                     </div>
                                                                                 </div>
-                                                                                <div className="shrink-0 flex items-center justify-end -space-x-2">
-                                                                                    {hasALeader ? aLeaders.slice(0, 2).map((leader) => (
-                                                                                        <span key={`leader-a-${label}-${leader.id}`} className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center">
-                                                                                            {leader.pictureUrl ? (
-                                                                                                <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
-                                                                                            ) : (
-                                                                                                <span className="text-xs font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
-                                                                                            )}
-                                                                                        </span>
-                                                                                    )) : (
-                                                                                        <span className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center text-xs font-black text-slate-500">-</span>
-                                                                                    )}
-                                                                                    {hasALeader && aLeaders.length > 2 ? (
-                                                                                        <span className="w-6 h-6 rounded-full border border-slate-600 bg-slate-900 text-[9px] font-black text-slate-200 flex items-center justify-center">+{aLeaders.length - 2}</span>
-                                                                                    ) : null}
+                                                                                <div className="shrink-0 flex items-center justify-end gap-2">
+                                                                                    <div className="flex items-center -space-x-2">
+                                                                                        {hasALeader ? aLeaders.slice(0, 2).map((leader) => (
+                                                                                            <span key={`leader-a-${label}-${leader.id}`} className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center">
+                                                                                                {leader.pictureUrl ? (
+                                                                                                    <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
+                                                                                                ) : (
+                                                                                                    <span className="text-xs font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                                )}
+                                                                                            </span>
+                                                                                        )) : (
+                                                                                            <span className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center text-xs font-black text-slate-500">-</span>
+                                                                                        )}
+                                                                                        {hasALeader && aLeaders.length > 2 ? (
+                                                                                            <span className="w-6 h-6 rounded-full border border-slate-600 bg-slate-900 text-[9px] font-black text-slate-200 flex items-center justify-center">+{aLeaders.length - 2}</span>
+                                                                                        ) : null}
+                                                                                    </div>
+                                                                                    <span className="w-11 h-11 rounded-full border-2 border-slate-400 bg-slate-900/90 text-slate-100 text-base md:text-lg leading-none font-black flex items-center justify-center shadow-[0_0_18px_rgba(15,23,42,0.55)]">{hasALeader ? teamALeader.value : '-'}</span>
                                                                                 </div>
                                                                             </div>
                                                                         </div>
 
-                                                                        <span className="inline-flex h-full items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5">
+                                                                        <span className="inline-flex h-full flex-col items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5 gap-1">
                                                                             <span className="inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100">{label}</span>
                                                                         </span>
 
@@ -6062,24 +6237,26 @@
                                                                                 <div className="h-full leader-bg-fill leader-bg-fill-right border-b" style={{ width: bWidth, backgroundColor: `${teamBObj?.color || '#ef4444'}0c`, borderBottomColor: `${teamBObj?.color || '#ef4444'}aa` }} />
                                                                             </div>
                                                                             <div className="relative z-10 grid grid-cols-[auto_1fr] items-center gap-3">
-                                                                                <div className="shrink-0 flex items-center justify-start -space-x-2">
-                                                                                    {hasBLeader ? bLeaders.slice(0, 2).map((leader) => (
-                                                                                        <span key={`leader-b-${label}-${leader.id}`} className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center">
-                                                                                            {leader.pictureUrl ? (
-                                                                                                <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
-                                                                                            ) : (
-                                                                                                <span className="text-xs font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
-                                                                                            )}
-                                                                                        </span>
-                                                                                    )) : (
-                                                                                        <span className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center text-xs font-black text-slate-500">-</span>
-                                                                                    )}
-                                                                                    {hasBLeader && bLeaders.length > 2 ? (
-                                                                                        <span className="w-6 h-6 rounded-full border border-slate-600 bg-slate-900 text-[9px] font-black text-slate-200 flex items-center justify-center">+{bLeaders.length - 2}</span>
-                                                                                    ) : null}
+                                                                                <div className="shrink-0 flex items-center justify-start gap-2">
+                                                                                    <span className="w-11 h-11 rounded-full border-2 border-slate-400 bg-slate-900/90 text-slate-100 text-base md:text-lg leading-none font-black flex items-center justify-center shadow-[0_0_18px_rgba(15,23,42,0.55)]">{hasBLeader ? teamBLeader.value : '-'}</span>
+                                                                                    <div className="flex items-center -space-x-2">
+                                                                                        {hasBLeader ? bLeaders.slice(0, 2).map((leader) => (
+                                                                                            <span key={`leader-b-${label}-${leader.id}`} className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center">
+                                                                                                {leader.pictureUrl ? (
+                                                                                                    <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
+                                                                                                ) : (
+                                                                                                    <span className="text-xs font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                                )}
+                                                                                            </span>
+                                                                                        )) : (
+                                                                                            <span className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center text-xs font-black text-slate-500">-</span>
+                                                                                        )}
+                                                                                        {hasBLeader && bLeaders.length > 2 ? (
+                                                                                            <span className="w-6 h-6 rounded-full border border-slate-600 bg-slate-900 text-[9px] font-black text-slate-200 flex items-center justify-center">+{bLeaders.length - 2}</span>
+                                                                                        ) : null}
+                                                                                    </div>
                                                                                 </div>
                                                                                 <div className="min-w-0 text-left">
-                                                                                    <div className="text-xl leading-none font-black text-slate-100">{hasBLeader ? teamBLeader.value : '-'}</div>
                                                                                     <div className="hidden lg:flex mt-1 flex-wrap justify-start gap-x-1.5 gap-y-0.5 leading-tight">
                                                                                         {hasBLeader ? bLeaders.map((leader, index) => (
                                                                                             <React.Fragment key={`leader-b-name-${label}-${leader.id}`}>
@@ -6330,6 +6507,7 @@
                                                             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">Play-by-Play</h4>
                                                             <span className="text-[10px] text-slate-500 font-mono">Includes substitutions and scoring notes</span>
                                                         </div>
+
                                                         {Array.isArray(game.gameLog) && game.gameLog.length > 0 ? (
                                                             <div className="space-y-1.5 text-xs md:text-sm max-h-72 overflow-auto pr-1">
                                                                 {game.gameLog.map((log, idx) => {
