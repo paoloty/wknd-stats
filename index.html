@@ -174,6 +174,8 @@
             const suppressLiveSessionSyncRef = useRef(false);
             const pendingLiveEventsRef = useRef([]);
             const flushLiveEventsInFlightRef = useRef(false);
+            const pendingActiveSessionSyncRef = useRef(null);
+            const flushActiveSessionSyncInFlightRef = useRef(false);
             const processedGameLogIdsRef = useRef(new Set());
             const remoteEventIdsRef = useRef(new Set());
             const liveEventQueueReadyRef = useRef(false);
@@ -278,10 +280,21 @@
 
             const LIVE_EVENTS_QUEUE_KEY = 'wknd_pending_live_events';
             const LIVE_EVENTS_LAST_SEQ_KEY = 'wknd_last_live_seq';
+            const ACTIVE_SESSION_SYNC_KEY = 'wknd_pending_active_session_sync';
 
             const persistPendingLiveEvents = () => {
                 try {
                     localStorage.setItem(LIVE_EVENTS_QUEUE_KEY, JSON.stringify(pendingLiveEventsRef.current || []));
+                } catch (e) {}
+            };
+
+            const persistPendingActiveSessionSync = () => {
+                try {
+                    if (pendingActiveSessionSyncRef.current) {
+                        localStorage.setItem(ACTIVE_SESSION_SYNC_KEY, JSON.stringify(pendingActiveSessionSyncRef.current));
+                    } else {
+                        localStorage.removeItem(ACTIVE_SESSION_SYNC_KEY);
+                    }
                 } catch (e) {}
             };
 
@@ -378,6 +391,65 @@
                         .sort((a, b) => (Number.parseInt(a.seq, 10) || 0) - (Number.parseInt(b.seq, 10) || 0))
                         .forEach((record) => applyIncomingLiveEvent(record));
                 } catch (e) {}
+            };
+
+            const queueActiveSessionSync = (mode, session = null) => {
+                const nextRequest = {
+                    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    mode,
+                    sourceClientId: syncClientIdRef.current,
+                    ...(mode === 'put' ? { session } : {})
+                };
+                pendingActiveSessionSyncRef.current = nextRequest;
+                persistPendingActiveSessionSync();
+                setSyncDebug((prev) => ({
+                    ...prev,
+                    lastPersist: `${mode.toUpperCase()} QUEUED ${new Date().toLocaleTimeString()}`,
+                    persistError: ''
+                }));
+            };
+
+            const flushPendingActiveSessionSync = async () => {
+                if (flushActiveSessionSyncInFlightRef.current) return;
+                if (!navigator.onLine) return;
+                if (!pendingActiveSessionSyncRef.current) return;
+
+                flushActiveSessionSyncInFlightRef.current = true;
+                try {
+                    while (pendingActiveSessionSyncRef.current) {
+                        const nextRequest = pendingActiveSessionSyncRef.current;
+                        if (nextRequest.mode === 'put') {
+                            await apiRequest('/api/active-session', {
+                                method: 'PUT',
+                                body: JSON.stringify({ session: nextRequest.session, sourceClientId: nextRequest.sourceClientId })
+                            });
+                        } else {
+                            await apiRequest('/api/active-session', {
+                                method: 'DELETE',
+                                body: JSON.stringify({ sourceClientId: nextRequest.sourceClientId })
+                            });
+                        }
+
+                        if (pendingActiveSessionSyncRef.current?.id === nextRequest.id) {
+                            pendingActiveSessionSyncRef.current = null;
+                            persistPendingActiveSessionSync();
+                        }
+
+                        setSyncDebug((prev) => ({
+                            ...prev,
+                            lastPersist: `${nextRequest.mode.toUpperCase()} ${new Date().toLocaleTimeString()}`,
+                            persistError: ''
+                        }));
+                    }
+                } catch (error) {
+                    setSyncDebug((prev) => ({
+                        ...prev,
+                        lastPersist: `PENDING ${new Date().toLocaleTimeString()}`,
+                        persistError: error?.message || 'Active session sync failed'
+                    }));
+                } finally {
+                    flushActiveSessionSyncInFlightRef.current = false;
+                }
             };
 
             const flushPendingLiveEvents = async () => {
@@ -1576,6 +1648,14 @@
                 }
 
                 try {
+                    const savedSessionSync = localStorage.getItem(ACTIVE_SESSION_SYNC_KEY);
+                    const parsedSessionSync = savedSessionSync ? JSON.parse(savedSessionSync) : null;
+                    pendingActiveSessionSyncRef.current = parsedSessionSync && typeof parsedSessionSync === 'object' ? parsedSessionSync : null;
+                } catch (e) {
+                    pendingActiveSessionSyncRef.current = null;
+                }
+
+                try {
                     const savedSeq = Number.parseInt(localStorage.getItem(LIVE_EVENTS_LAST_SEQ_KEY) || '0', 10) || 0;
                     lastLiveSeqRef.current = savedSeq;
                 } catch (e) {
@@ -1602,6 +1682,7 @@
 
                     await fetchMissingLiveEvents();
                     await flushPendingLiveEvents();
+                    await flushPendingActiveSessionSync();
                 };
 
                 loadActiveSession();
@@ -1653,6 +1734,7 @@
                 socket.addEventListener('open', () => {
                     fetchMissingLiveEvents();
                     flushPendingLiveEvents();
+                    flushPendingActiveSessionSync();
                 });
 
                 socket.addEventListener('error', () => {
@@ -1668,6 +1750,7 @@
                 const handleOnline = () => {
                     fetchMissingLiveEvents();
                     flushPendingLiveEvents();
+                    flushPendingActiveSessionSync();
                 };
 
                 window.addEventListener('online', handleOnline);
@@ -1822,38 +1905,22 @@
                     setSyncDebug((prev) => ({
                         ...prev,
                         pendingQueue: (pendingLiveEventsRef.current || []).length,
-                        lastPersist: `PUT ${new Date().toLocaleTimeString()}`,
+                        lastPersist: `PUT QUEUED ${new Date().toLocaleTimeString()}`,
                         persistError: ''
                     }));
-                    apiRequest('/api/active-session', {
-                        method: 'PUT',
-                        body: JSON.stringify({ session, sourceClientId: syncClientIdRef.current })
-                    }).catch((error) => {
-                        setSyncDebug((prev) => ({
-                            ...prev,
-                            lastPersist: `PUT FAILED ${new Date().toLocaleTimeString()}`,
-                            persistError: error?.message || 'PUT /api/active-session failed'
-                        }));
-                    });
+                    queueActiveSessionSync('put', session);
+                    flushPendingActiveSessionSync();
                 } else {
                     localStorage.removeItem('active_live_session');
                     if (hadLiveSessionRef.current) {
                         hadLiveSessionRef.current = false;
                         setSyncDebug((prev) => ({
                             ...prev,
-                            lastPersist: `DELETE ${new Date().toLocaleTimeString()}`,
+                            lastPersist: `DELETE QUEUED ${new Date().toLocaleTimeString()}`,
                             persistError: ''
                         }));
-                        apiRequest('/api/active-session', {
-                            method: 'DELETE',
-                            body: JSON.stringify({ sourceClientId: syncClientIdRef.current })
-                        }).catch((error) => {
-                            setSyncDebug((prev) => ({
-                                ...prev,
-                                lastPersist: `DELETE FAILED ${new Date().toLocaleTimeString()}`,
-                                persistError: error?.message || 'DELETE /api/active-session failed'
-                            }));
-                        });
+                        queueActiveSessionSync('delete');
+                        flushPendingActiveSessionSync();
                     }
                 }
             }, [isGameLive, teamAId, teamBId, teamAScore, teamBScore, currentQuarter, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);

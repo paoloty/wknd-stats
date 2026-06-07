@@ -782,9 +782,52 @@ function mergeActiveSession(existingSession, incomingSession) {
   const hasIncomingGameLog = Object.prototype.hasOwnProperty.call(incoming, 'gameLog');
   const hasIncomingLoggedHistory = Object.prototype.hasOwnProperty.call(incoming, 'loggedHistory');
   const hasIncomingPlayedPlayers = Object.prototype.hasOwnProperty.call(incoming, 'playedPlayers');
+  const hasIncomingLiveStats = Object.prototype.hasOwnProperty.call(incoming, 'liveStats');
   // Prefer incoming rotation on equal revisions to avoid reverting lineup arrays
   // when multiple lineup events are generated within the same millisecond.
   const preferIncomingRotation = incomingLineupRevision >= existingLineupRevision;
+
+  const pickPreferredString = (existingValue, incomingValue) => {
+    if (typeof incomingValue === 'string' && incomingValue.trim()) return incomingValue;
+    if (typeof existingValue === 'string' && existingValue.trim()) return existingValue;
+    return typeof incomingValue === 'string' ? incomingValue : (typeof existingValue === 'string' ? existingValue : '');
+  };
+
+  const pickPreferredArray = (existingValue, incomingValue) => {
+    if (Array.isArray(incomingValue) && incomingValue.length > 0) return incomingValue;
+    if (Array.isArray(existingValue) && existingValue.length > 0) return existingValue;
+    if (Array.isArray(incomingValue)) return incomingValue;
+    if (Array.isArray(existingValue)) return existingValue;
+    return [];
+  };
+
+  const hasObjectValues = (value) => {
+    return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0;
+  };
+
+  const existingSnapshot = existing.liveGameSnapshot && typeof existing.liveGameSnapshot === 'object'
+    ? existing.liveGameSnapshot
+    : null;
+  const incomingSnapshot = incoming.liveGameSnapshot && typeof incoming.liveGameSnapshot === 'object'
+    ? incoming.liveGameSnapshot
+    : null;
+
+  const mergedLiveGameSnapshot = incomingSnapshot || existingSnapshot
+    ? {
+        ...(existingSnapshot || {}),
+        ...(incomingSnapshot || {}),
+        teamAId: pickPreferredString(existingSnapshot?.teamAId, incomingSnapshot?.teamAId),
+        teamBId: pickPreferredString(existingSnapshot?.teamBId, incomingSnapshot?.teamBId),
+        teamALineup: pickPreferredArray(existingSnapshot?.teamALineup, incomingSnapshot?.teamALineup),
+        teamABench: pickPreferredArray(existingSnapshot?.teamABench, incomingSnapshot?.teamABench),
+        teamBLineup: pickPreferredArray(existingSnapshot?.teamBLineup, incomingSnapshot?.teamBLineup),
+        teamBBench: pickPreferredArray(existingSnapshot?.teamBBench, incomingSnapshot?.teamBBench),
+        liveStats: hasObjectValues(incomingSnapshot?.liveStats)
+          ? incomingSnapshot.liveStats
+          : (hasObjectValues(existingSnapshot?.liveStats) ? existingSnapshot.liveStats : {}),
+        playedPlayers: pickPreferredArray(existingSnapshot?.playedPlayers, incomingSnapshot?.playedPlayers)
+      }
+    : null;
 
   const pickRotationArray = (key) => {
     const incomingArr = Array.isArray(incoming[key]) ? incoming[key] : null;
@@ -802,11 +845,17 @@ function mergeActiveSession(existingSession, incomingSession) {
   return {
     ...existing,
     ...incoming,
+    teamAId: pickPreferredString(existing.teamAId, incoming.teamAId),
+    teamBId: pickPreferredString(existing.teamBId, incoming.teamBId),
     lineupRevision: Math.max(existingLineupRevision, incomingLineupRevision),
     teamALineup: pickRotationArray('teamALineup'),
     teamABench: pickRotationArray('teamABench'),
     teamBLineup: pickRotationArray('teamBLineup'),
     teamBBench: pickRotationArray('teamBBench'),
+    liveStats: hasIncomingLiveStats
+      ? (hasObjectValues(incoming.liveStats) ? incoming.liveStats : (hasObjectValues(existing.liveStats) ? existing.liveStats : {}))
+      : (hasObjectValues(existing.liveStats) ? existing.liveStats : (incoming.liveStats || {})),
+    liveGameSnapshot: mergedLiveGameSnapshot,
     // If payload explicitly includes these fields (even empty), treat them as authoritative.
     gameLog: hasIncomingGameLog
       ? mergeEventLists([], Array.isArray(incoming.gameLog) ? incoming.gameLog : [], 'glog', 300)
@@ -1092,8 +1141,9 @@ app.put('/api/active-session', (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/active-session', (_req, res) => {
-  clearActiveSession();
+app.delete('/api/active-session', (req, res) => {
+  const { sourceClientId } = req.body || {};
+  clearActiveSession(sourceClientId || null);
   res.json({ ok: true });
 });
 
