@@ -137,6 +137,7 @@
             const remoteEventIdsRef = useRef(new Set());
             const liveEventQueueReadyRef = useRef(false);
             const lastLiveSeqRef = useRef(0);
+            const pendingFoulSelectionAutoPauseRef = useRef(false);
             const [flashPlayers, setFlashPlayers] = useState({});
             const [subFlashPlayers, setSubFlashPlayers] = useState({});
             const [subFlashLogId, setSubFlashLogId] = useState(null);
@@ -263,13 +264,58 @@
                 return false;
             };
 
+            const isFoulLikeAction = (action) => {
+                if (!action) return false;
+                if (action.stat === 'pf') return true;
+                if (action.category === 'foul') return true;
+                if (typeof action.id === 'string' && /pf|foul/i.test(action.id)) return true;
+                if (typeof action.label === 'string' && /foul/i.test(action.label)) return true;
+                return false;
+            };
+
             const openActionForTeam = (action, isTeamA) => {
                 if (!canOperateTeam(isTeamA)) {
                     ensureTeamOperationAccess(isTeamA, 'log stats for this team');
                     return;
                 }
+
+                const shouldAutoFinalizeEndedPeriod = hasMatchStarted && hasCurrentQuarterStarted && periodClockSeconds <= 0 && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
+                if (shouldAutoFinalizeEndedPeriod) {
+                    const startedNextPeriod = autoFinalizeEndedPeriodAndStartNextPeriod();
+                    if (!startedNextPeriod) {
+                        return;
+                    }
+                }
+
+                const isFoulAction = isFoulLikeAction(action);
+                const shouldAutoPauseForFoulSelection = isFoulAction && isGameLive && isPeriodClockRunning && !timeoutIsActive;
+                pendingFoulSelectionAutoPauseRef.current = false;
+                if (shouldAutoPauseForFoulSelection) {
+                    pendingFoulSelectionAutoPauseRef.current = true;
+                    setIsPlayPaused(true);
+                    setIsPeriodClockRunning(false);
+                    showToast('Game paused for foul selection. Pick a player or cancel to resume.', 'info');
+                }
+
                 setActiveAction(action);
                 setShowLoggingModal(true);
+            };
+
+            const handleCancelActionModal = () => {
+                const shouldResumeFromFoulPreselect = pendingFoulSelectionAutoPauseRef.current;
+                pendingFoulSelectionAutoPauseRef.current = false;
+
+                setShowLoggingModal(false);
+                setActiveAction(null);
+                setCorrectionMode(false);
+
+                if (shouldResumeFromFoulPreselect) {
+                    setIsPlayPaused(false);
+                    if (periodClockSeconds > 0) {
+                        setIsPeriodClockRunning(true);
+                    }
+                    showToast('Foul action canceled. Game resumed.', 'info');
+                }
             };
 
             const showHomeLivePanel = !canOperateLive || operatorFocus !== 'away';
@@ -1004,6 +1050,9 @@
                     }
                 });
 
+                // Final guard: keep scoreboard totals aligned with replayed player points.
+                recomputeScores();
+
                 return nextState;
             };
 
@@ -1587,27 +1636,53 @@
             const teamATimeoutUsed = currentQuarter > 4 ? timeoutUsage.teamA.currentOvertime : timeoutUsage.teamA.regulation;
             const teamBTimeoutUsed = currentQuarter > 4 ? timeoutUsage.teamB.currentOvertime : timeoutUsage.teamB.regulation;
             const periodClockLabel = formatSecondsAsClock(periodClockSeconds);
-            const hasMatchStarted = currentLiveGameLog.some((event) => event.kind === 'meta' && event.metaType === 'matchStart');
+            const hasMatchStarted = (
+                currentQuarter > 1 ||
+                currentLiveGameLog.some((event) =>
+                    event?.kind === 'meta' && (
+                        event.metaType === 'matchStart' ||
+                        event.metaType === 'quarterStart' ||
+                        event.metaType === 'quarterEnd'
+                    )
+                )
+            );
             const hasCurrentQuarterStarted = currentLiveGameLog.some(
                 (event) => event.kind === 'meta' && event.metaType === 'quarterStart' && getQuarterFromEvent(event) === currentQuarter
             );
             const latestPeriodMetaEvent = currentLiveGameLog.find(
                 (event) => event?.kind === 'meta' && (event.metaType === 'matchStart' || event.metaType === 'quarterStart' || event.metaType === 'quarterEnd')
             );
+            const latestClockAdjustForCurrentQuarter = currentLiveGameLog.find(
+                (event) => event?.kind === 'meta' && event.metaType === 'clockAdjust' && getQuarterFromEvent(event) === currentQuarter
+            );
+            const adjustedClockSecondsAfterQuarterEnd = latestClockAdjustForCurrentQuarter
+                ? Math.max(0, Number.parseInt(parseClockInputToSeconds(String(latestClockAdjustForCurrentQuarter.clockRemaining || '0')) || 0, 10))
+                : 0;
             const awaitingPeriodStartFromLog = latestPeriodMetaEvent
-                ? (latestPeriodMetaEvent.metaType === 'matchStart' || latestPeriodMetaEvent.metaType === 'quarterEnd')
+                ? (
+                    latestPeriodMetaEvent.metaType === 'matchStart' ||
+                    (latestPeriodMetaEvent.metaType === 'quarterEnd' && adjustedClockSecondsAfterQuarterEnd <= 1)
+                )
                 : false;
             const isAwaitingPeriodStart = awaitingPeriodStart || awaitingPeriodStartFromLog;
             const nextPeriodToStart = hasCurrentQuarterStarted ? currentQuarter + 1 : currentQuarter;
             const nextPeriodStartLabel = getPeriodLabel(nextPeriodToStart);
-            const timeoutIsActive = isTimeoutCurrentlyActive(currentLiveGameLog);
+            const timeoutIsActive = Boolean(isPlayPaused);
+            // Lock undo only while a period is finalized and waiting state is active.
+            // Do not lock it permanently for the rest of the game after one quarter ends.
+            const undoLockedByQuarterEnd = isAwaitingPeriodStart || awaitingOvertimeDecision;
+            const latestPauseMetaType = currentLiveGameLog.find(
+                (event) => event?.kind === 'meta' && ['timeout', 'officialsTimeout', 'manualPause', 'foulPause'].includes(event.metaType)
+            )?.metaType || null;
+            const allowAllActionsWhileManualPause = latestPauseMetaType === 'manualPause';
+            const canCallOfficialsWhilePaused = latestPauseMetaType === 'manualPause' || latestPauseMetaType === 'foulPause';
             const derivedPeriodActionMode = !hasMatchStarted
                 ? 'startMatch'
                 : isAwaitingPeriodStart
                     ? 'startPeriod'
                 : currentQuarter >= 4 && awaitingOvertimeDecision
                     ? (isTieGame ? 'startOvertime' : 'endGame')
-                : ((timeoutIsActive || isPlayPaused) && periodClockSeconds > 0)
+                : ((timeoutIsActive || isPlayPaused || (!isPeriodClockRunning && periodClockSeconds > 0)) && periodClockSeconds > 0)
                     ? 'resume'
                     : 'endPeriod';
             const periodActionMode = pendingPeriodActionMode || derivedPeriodActionMode;
@@ -1626,13 +1701,16 @@
             const periodActionIsResume = periodActionLabel.startsWith('Resume');
             const periodActionIsEnd = periodActionLabel.startsWith('End');
             const periodActionIsPositive = periodActionIsStart || periodActionIsResume;
-            const canTriggerStatLogging = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart;
+            const canTriggerStatLogging = hasMatchStarted && (!timeoutIsActive || allowAllActionsWhileManualPause) && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
+            const alwaysAllowedActionIds = new Set(['pf_technical', 'pts_1', 'ft_miss']);
+            const canTriggerAlwaysAction = (action) => Boolean(action && isGameLive && alwaysAllowedActionIds.has(action.id));
+            const canUseActionTrigger = (action) => canTriggerStatLogging || canTriggerAlwaysAction(action);
             const teamACanTimeout = teamATimeoutUsed < timeoutLimit;
             const teamBCanTimeout = teamBTimeoutUsed < timeoutLimit;
             const teamATimeoutEnabled = hasMatchStarted && !timeoutIsActive && teamACanTimeout;
             const teamBTimeoutEnabled = hasMatchStarted && !timeoutIsActive && teamBCanTimeout;
             const canPauseGame = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart && isPeriodClockRunning;
-            const canOfficialsTimeout = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart && periodClockSeconds > 0;
+            const canOfficialsTimeout = hasMatchStarted && (!isAwaitingPeriodStart || hasCurrentQuarterStarted) && (!timeoutIsActive || canCallOfficialsWhilePaused);
             const teamAFoulsForDisplay = currentQuarter <= 4
                 ? Number((liveQuarterStats.find((row) => row.quarter === currentQuarter)?.teamA?.pf) || 0)
                 : liveQuarterStats
@@ -1670,37 +1748,14 @@
                 setIsPeriodClockRunning(false);
 
                 const periodLabel = getPeriodLabel(currentQuarter);
-                const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                setGameLog((prev) => [{
-                    id: quarterLogId,
-                    time: getWallClockTime(),
-                    text: `End ${periodLabel}`,
-                    kind: 'meta',
-                    metaType: 'quarterEnd',
-                    quarter: currentQuarter,
-                    clockRemaining: '00:00'
-                }, ...prev.slice(0, 300)]);
-
-                if (currentQuarter >= 4) {
-                    setAwaitingOvertimeDecision(true);
-                    if (teamAScore === teamBScore) {
-                        showToast(`${periodLabel} expired at 00:00. Start overtime to continue.`, 'info');
-                    } else {
-                        showToast(`${periodLabel} expired at 00:00. Press End Game to finalize.`, 'info');
-                    }
-                    return;
-                }
-
-                const nextQuarter = currentQuarter + 1;
-                setAwaitingPeriodStart(true);
-                setAwaitingOvertimeDecision(false);
-                showToast(`${periodLabel} expired at 00:00. Press Start ${getPeriodLabel(nextQuarter)}.`, 'info');
+                showToast(`${periodLabel} reached 00:00. Press End ${periodLabel} to finalize period stats.`, 'info');
             };
 
             useEffect(() => {
                 if (!isGameLive) return;
                 if (suppressPeriodAutoStopRef.current) return;
 
+                const shouldForceZeroClock = awaitingOvertimeDecision || (isAwaitingPeriodStart && hasCurrentQuarterStarted);
                 const hasInactivePeriodState = !hasMatchStarted || isAwaitingPeriodStart || awaitingOvertimeDecision;
                 if (!hasInactivePeriodState) return;
 
@@ -1711,10 +1766,10 @@
                 if (isPeriodClockRunning) {
                     setIsPeriodClockRunning(false);
                 }
-                if (periodClockSeconds !== 0) {
+                if (shouldForceZeroClock && periodClockSeconds !== 0) {
                     setPeriodClockSeconds(0);
                 }
-            }, [isGameLive, hasMatchStarted, isAwaitingPeriodStart, awaitingOvertimeDecision, isPeriodClockRunning, periodClockSeconds, isPlayPaused]);
+            }, [isGameLive, hasMatchStarted, hasCurrentQuarterStarted, isAwaitingPeriodStart, awaitingOvertimeDecision, isPeriodClockRunning, periodClockSeconds, isPlayPaused]);
 
             useEffect(() => {
                 if (!isGameLive) return;
@@ -2768,16 +2823,16 @@
                 if (!canOperateLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
                 if (!activeAction) return;
-                if (!hasMatchStarted) {
+                if (!hasMatchStarted && !canTriggerAlwaysAction(activeAction)) {
                     showToast('Press Start Match before logging stats.', 'info');
                     return;
                 }
-                if (isAwaitingPeriodStart) {
+                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted && !canTriggerAlwaysAction(activeAction)) {
                     showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
                     return;
                 }
-                if (timeoutIsActive) {
-                    showToast('Play is paused for timeout. Press Resume Play first.', 'info');
+                if (timeoutIsActive && !allowAllActionsWhileManualPause && !canTriggerAlwaysAction(activeAction)) {
+                    showToast('Only Technical Foul, Free Throw, and Free Throw Missed are allowed while paused/stopped.', 'info');
                     return;
                 }
 
@@ -2834,7 +2889,8 @@
                 }
 
                 const logWithTag = `${logText}${scoreSuffix}`;
-                const shouldAutoPauseForFoul = statField === 'pf' && !correctionMode && changeAmount > 0 && !timeoutIsActive;
+                const isSelectedFoulAction = isFoulLikeAction(activeAction);
+                const shouldAutoPauseForFoul = isSelectedFoulAction && !correctionMode && changeAmount > 0 && !timeoutIsActive;
 
                 const logEntryId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 const historyEntry = { id: logEntryId, playerId, statField, changeAmount, attachedTrackingStat, trackingDelta: 1 * multiplier, previousTeamAScore: teamAScore, previousTeamBScore: teamBScore, logText: logWithTag, kind: 'stat' };
@@ -2910,6 +2966,7 @@
                 }
                 triggerPlayerFlash(playerId);
                 flashPlayerElements(playerId);
+                pendingFoulSelectionAutoPauseRef.current = false;
                 setActiveAction(null);
                 setCorrectionMode(false);
                 setShowLoggingModal(false);
@@ -2917,6 +2974,17 @@
 
             const restoreClockFromLatestLog = (logs = [], fallbackQuarter = currentQuarter) => {
                 const sourceLogs = Array.isArray(logs) ? logs : [];
+                const latestQuarterEvent = sourceLogs.find((event) => {
+                    const parsedQuarter = Number.parseInt(event?.quarter, 10);
+                    return Number.isFinite(parsedQuarter) && parsedQuarter > 0;
+                });
+                const resolvedQuarter = latestQuarterEvent
+                    ? (Number.parseInt(latestQuarterEvent.quarter, 10) || fallbackQuarter || 1)
+                    : (fallbackQuarter || 1);
+
+                // Keep period label synchronized with the remaining event timeline.
+                setCurrentQuarter(resolvedQuarter);
+
                 const latestClockEvent = sourceLogs.find((event) => {
                     const parsed = parseClockInputToSeconds(event?.clockRemaining);
                     return parsed !== null;
@@ -2930,16 +2998,28 @@
                     }
                 }
 
-                if (isAwaitingPeriodStart || awaitingOvertimeDecision || !hasMatchStarted) {
+                const hasStartedInLogs = sourceLogs.some((event) => event?.kind === 'meta' && event?.metaType === 'matchStart');
+                const latestPeriodMeta = sourceLogs.find(
+                    (event) => event?.kind === 'meta' && (event.metaType === 'matchStart' || event.metaType === 'quarterStart' || event.metaType === 'quarterEnd')
+                );
+                const isAwaitingFromLogs = latestPeriodMeta
+                    ? (latestPeriodMeta.metaType === 'matchStart' || latestPeriodMeta.metaType === 'quarterEnd')
+                    : !hasStartedInLogs;
+
+                if (isAwaitingFromLogs) {
                     setPeriodClockSeconds(0);
                     return;
                 }
 
-                setPeriodClockSeconds(getPeriodDurationSeconds(fallbackQuarter));
+                setPeriodClockSeconds(getPeriodDurationSeconds(resolvedQuarter));
             };
 
             const handleUndo = () => {
                 if (loggedHistory.length === 0) return;
+                if (undoLockedByQuarterEnd) {
+                    showToast('Undo is disabled after ending a quarter.', 'info');
+                    return;
+                }
                 setIsPeriodClockRunning(false);
                 const [lastAction, ...remainingHistory] = loggedHistory;
                 const remainingGameLog = gameLog.filter(log => log.id !== lastAction.id);
@@ -2965,6 +3045,10 @@
             };
 
             const handleDeleteLogEntry = (logId) => {
+                if (undoLockedByQuarterEnd) {
+                    showToast('Undo is disabled after ending a quarter.', 'info');
+                    return;
+                }
                 const entry = gameLog.find(log => log.id === logId);
                 if (!entry) return;
 
@@ -3046,13 +3130,97 @@
                 restoreClockFromLatestLog(remainingGameLog, replayed.currentQuarter || currentQuarter);
             };
 
+            const autoFinalizeEndedPeriodAndStartNextPeriod = () => {
+                const periodLabel = getPeriodLabel(currentQuarter);
+                const quarterEndLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const quarterEndEvent = {
+                    id: quarterEndLogId,
+                    time: getWallClockTime(),
+                    text: `End ${periodLabel}`,
+                    kind: 'meta',
+                    metaType: 'quarterEnd',
+                    quarter: currentQuarter,
+                    clockRemaining: '00:00'
+                };
+
+                setPeriodClockSeconds(0);
+                setIsPeriodClockRunning(false);
+
+                if (currentQuarter < 4) {
+                    const nextQuarter = currentQuarter + 1;
+                    const nextLabel = getPeriodLabel(nextQuarter);
+                    const quarterStartEvent = {
+                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: `Start ${nextLabel}`,
+                        kind: 'meta',
+                        metaType: 'quarterStart',
+                        quarter: nextQuarter,
+                        clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
+                    };
+
+                    setCurrentQuarter(nextQuarter);
+                    setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
+                    suppressPeriodAutoStopRef.current = true;
+                    setIsPlayPaused(false);
+                    setIsPeriodClockRunning(true);
+                    setAwaitingPeriodStart(false);
+                    setAwaitingOvertimeDecision(false);
+                    setGameLog((prev) => [quarterStartEvent, quarterEndEvent, ...prev].slice(0, 300));
+                    showToast(`${periodLabel} finalized. ${nextLabel} started automatically.`, 'info');
+                    return true;
+                }
+
+                if (teamAScore === teamBScore) {
+                    const nextQuarter = currentQuarter + 1;
+                    const nextLabel = getPeriodLabel(nextQuarter);
+                    const quarterStartEvent = {
+                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: `Start ${nextLabel}`,
+                        kind: 'meta',
+                        metaType: 'quarterStart',
+                        quarter: nextQuarter,
+                        clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
+                    };
+
+                    setCurrentQuarter(nextQuarter);
+                    setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
+                    suppressPeriodAutoStopRef.current = true;
+                    setIsPlayPaused(false);
+                    setIsPeriodClockRunning(true);
+                    setAwaitingPeriodStart(false);
+                    setAwaitingOvertimeDecision(false);
+                    setGameLog((prev) => [quarterStartEvent, quarterEndEvent, ...prev].slice(0, 300));
+                    showToast(`${periodLabel} finalized. ${nextLabel} started automatically.`, 'info');
+                    return true;
+                }
+
+                setAwaitingOvertimeDecision(true);
+                setAwaitingPeriodStart(false);
+                setIsPlayPaused(false);
+                setGameLog((prev) => [quarterEndEvent, ...prev].slice(0, 300));
+                showToast(`${periodLabel} finalized. Game is not tied, press End Game.`, 'info');
+                return false;
+            };
+
             const handleAdvanceQuarter = () => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
 
                 if (currentQuarter >= 4) {
+                    const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                     setPeriodClockSeconds(0);
                     setIsPeriodClockRunning(false);
+                    setGameLog(prev => [{
+                        id: quarterLogId,
+                        time: getWallClockTime(),
+                        text: `End ${getPeriodLabel(currentQuarter)}`,
+                        kind: 'meta',
+                        metaType: 'quarterEnd',
+                        quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                    }, ...prev.slice(0, 300)]);
                     setAwaitingOvertimeDecision(true);
                     if (teamAScore === teamBScore) {
                         showToast(`${getPeriodLabel(currentQuarter)} complete. Scores are tied, start overtime to continue.`, 'info');
@@ -3112,6 +3280,10 @@
                 setShowSyncClockEditor(false);
                 setIsPlayPaused(true);
                 setIsPeriodClockRunning(false);
+                if (nextSeconds > 1 && isAwaitingPeriodStart) {
+                    setAwaitingPeriodStart(false);
+                    setAwaitingOvertimeDecision(false);
+                }
 
                 const adjustLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 const adjustEvent = {
@@ -3124,23 +3296,13 @@
                     clockRemaining: nextLabel
                 };
 
-                if (!timeoutIsActive) {
-                    const pauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                    const pauseEvent = {
-                        id: pauseLogId,
-                        time: getWallClockTime(),
-                        text: 'Pause Game (Clock Sync)',
-                        kind: 'meta',
-                        metaType: 'manualPause',
-                        quarter: currentQuarter,
-                        clockRemaining: nextLabel
-                    };
-                    setGameLog((prev) => [adjustEvent, pauseEvent, ...prev].slice(0, 300));
-                } else {
-                    setGameLog((prev) => [adjustEvent, ...prev.slice(0, 300)]);
-                }
+                setGameLog((prev) => [adjustEvent, ...prev.slice(0, 300)]);
 
-                showToast(`Clock updated to ${nextLabel}. Game paused.`, 'success');
+                if (nextSeconds > 1 && isAwaitingPeriodStart) {
+                    showToast(`Clock updated to ${nextLabel}. You can now press Resume ${getPeriodLabel(currentQuarter)}.`, 'success');
+                } else {
+                    showToast(`Clock updated to ${nextLabel}. Game paused.`, 'success');
+                }
             };
 
             const handleStartNextQuarter = () => {
@@ -3712,16 +3874,6 @@
                 if (periodActionMode === 'resume') {
                     setPendingPeriodActionMode('resume');
                     setIsPlayPaused(false);
-                    const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                    setGameLog((prev) => [{
-                        id: resumeLogId,
-                        time: getWallClockTime(),
-                        text: 'Resume Play',
-                        kind: 'meta',
-                        metaType: 'playResume',
-                        quarter: currentQuarter,
-                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
-                    }, ...prev.slice(0, 300)]);
                     if (periodClockSeconds > 0) {
                         suppressPeriodAutoStopRef.current = true;
                         setIsPeriodClockRunning(true);
@@ -3799,16 +3951,6 @@
                     return;
                 }
 
-                const pauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                setGameLog((prev) => [{
-                    id: pauseLogId,
-                    time: getWallClockTime(),
-                    text: 'Pause Game',
-                    kind: 'meta',
-                    metaType: 'manualPause',
-                    quarter: currentQuarter,
-                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
-                }, ...prev.slice(0, 300)]);
                 setIsPlayPaused(true);
                 setIsPeriodClockRunning(false);
                 showToast('Game paused.', 'info');
@@ -3821,11 +3963,11 @@
                     showToast('Press Start Match before calling officials timeout.', 'info');
                     return;
                 }
-                if (isAwaitingPeriodStart) {
+                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted) {
                     showToast(`Press Start ${nextPeriodStartLabel} before calling officials timeout.`, 'info');
                     return;
                 }
-                if (timeoutIsActive) {
+                if (timeoutIsActive && !canCallOfficialsWhilePaused) {
                     showToast('Clock already paused. Press Resume Play to continue.', 'info');
                     return;
                 }
@@ -4000,6 +4142,73 @@
                         lineupRevisionRef.current = 0;
                         setConfirmDialog(null);
                         showToast("Current game stats cleared! Ready to restart.", "info");
+                    }
+                });
+            };
+
+            const handleDiscardLiveMatch = () => {
+                setConfirmDialog({
+                    title: "Cancel Match?",
+                    text: "This deletes all active progress for this session. No logs will be saved to disk.",
+                    onConfirm: async () => {
+                        let deletedFromDatabase = false;
+
+                        // Try deleting the active session from the server immediately.
+                        if (navigator.onLine) {
+                            try {
+                                await apiRequest('/api/active-session', {
+                                    method: 'DELETE',
+                                    body: JSON.stringify({ sourceClientId: syncClientIdRef.current })
+                                });
+                                deletedFromDatabase = true;
+                                pendingActiveSessionSyncRef.current = null;
+                                persistPendingActiveSessionSync();
+                            } catch (error) {
+                                deletedFromDatabase = false;
+                            }
+                        }
+
+                        // Offline or failed delete: queue a delete so database cleanup happens on reconnect.
+                        if (!deletedFromDatabase) {
+                            queueActiveSessionSync('delete');
+                            flushPendingActiveSessionSync();
+                        }
+
+                        localStorage.removeItem('active_live_session');
+
+                        // Reset pending live event queue so the next match starts clean.
+                        pendingLiveEventsRef.current = [];
+                        persistPendingLiveEvents();
+                        lastLiveSeqRef.current = 0;
+                        try {
+                            localStorage.setItem(LIVE_EVENTS_LAST_SEQ_KEY, '0');
+                        } catch (e) {}
+                        processedGameLogIdsRef.current = new Set();
+                        remoteEventIdsRef.current = new Set();
+                        liveEventQueueReadyRef.current = false;
+                        lastRemoteGameLogIdsRef.current = new Set();
+                        lastObservedLogIdRef.current = null;
+
+                        setSyncDebug((prev) => ({
+                            ...prev,
+                            pendingQueue: 0
+                        }));
+
+                        hadLiveSessionRef.current = false;
+                        setIsGameLive(false);
+                        setIsPlayPaused(false);
+                        setActiveAction(null);
+                        setAwaitingOvertimeDecision(false);
+                        setDnpPlayers([]);
+                        setLineupRevision(0);
+                        lineupRevisionRef.current = 0;
+                        setConfirmDialog(null);
+
+                        if (deletedFromDatabase) {
+                            showToast("Match discarded and active game deleted from database.", "success");
+                        } else {
+                            showToast("Match discarded locally. Database cleanup is queued and will sync when online.", "info");
+                        }
                     }
                 });
             };
@@ -5150,9 +5359,9 @@
                                                                 </button>
                                                                 <button
                                                                     type="button"
-                                                                    disabled={!technicalFoulAction || !canTriggerStatLogging}
+                                                                    disabled={!technicalFoulAction || !canUseActionTrigger(technicalFoulAction)}
                                                                     onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, operatorFocus === 'away' ? false : true)}
-                                                                    title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
+                                                                    title={!canUseActionTrigger(technicalFoulAction) ? 'Unavailable right now' : undefined}
                                                                     className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/45 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                 >
                                                                     <span className="inline-flex items-center justify-center gap-1">
@@ -5227,7 +5436,7 @@
                                             {!canTriggerStatLogging && (
                                                 <div className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
                                                     {hasMatchStarted
-                                                        ? 'Stat triggers are locked while play is paused. Press Resume Play.'
+                                                        ? 'Most stat triggers are locked while paused/stopped. Technical Foul, Free Throw, and Free Throw Missed stay enabled.'
                                                         : 'Stat triggers are locked until you press Start Match.'}
                                                 </div>
                                             )}
@@ -5239,9 +5448,9 @@
                                                         {canOperateLive && primaryActions.map(act => (
                                                         <button 
                                                             key={act.id} 
-                                                            disabled={!canTriggerStatLogging}
+                                                            disabled={!canUseActionTrigger(act)}
                                                             onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                            title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
+                                                            title={!canUseActionTrigger(act) ? 'Unavailable right now' : undefined}
                                                             className={`py-3.5 md:py-6 px-1.5 md:px-4 rounded-lg md:rounded-2xl text-center text-[9px] md:text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                         >
                                                             {act.label}
@@ -5259,9 +5468,9 @@
                                                         {canOperateLive && secondaryActions.map(act => (
                                                             <button 
                                                                 key={act.id} 
-                                                                disabled={!canTriggerStatLogging}
+                                                                disabled={!canUseActionTrigger(act)}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                                title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
+                                                                title={!canUseActionTrigger(act) ? 'Unavailable right now' : undefined}
                                                                 className={`py-3.5 md:py-4 px-2 md:px-4 rounded-lg md:rounded-xl text-center text-[10px] md:text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
@@ -5277,9 +5486,9 @@
                                                         {canOperateLive && tertiaryActions.map(act => (
                                                             <button 
                                                                 key={act.id} 
-                                                                disabled={!canTriggerStatLogging}
+                                                                disabled={!canUseActionTrigger(act)}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                                title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
+                                                                title={!canUseActionTrigger(act) ? 'Unavailable right now' : undefined}
                                                                 className={`py-[11px] md:py-2.5 px-1.5 md:px-2 rounded-lg text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
@@ -5368,7 +5577,7 @@
                                                 </div>
                                                 <div className="p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]">
                                                     {gameLog.map((log, idx) => {
-                                                        const canRemove = canOperateLive && idx === 0 && !!log.id;
+                                                        const canRemove = canOperateLive && !undoLockedByQuarterEnd && idx === 0 && !!log.id;
                                                         const isSubEvent = log?.kind === 'sub' || (typeof log.text === 'string' && log.text.includes('SUB:'));
                                                         const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
@@ -5488,7 +5697,7 @@
                                                 </div>
                                                 <div className="p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]">
                                                     {gameLog.map((log, idx) => {
-                                                        const canRemove = canOperateLive && idx === 0 && !!log.id;
+                                                        const canRemove = canOperateLive && !undoLockedByQuarterEnd && idx === 0 && !!log.id;
                                                         const isSubEvent = log?.kind === 'sub' || (typeof log.text === 'string' && log.text.includes('SUB:'));
                                                         const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
@@ -5841,7 +6050,7 @@
                                                         Restart Match
                                                     </button>
                                                     <button
-                                                        onClick={() => setConfirmDialog({ title: "Cancel Match?", text: "This deletes all active progress for this session. No logs will be saved to disk.", onConfirm: () => { setIsGameLive(false); setIsPlayPaused(false); setActiveAction(null); setAwaitingOvertimeDecision(false); setDnpPlayers([]); setLineupRevision(0); lineupRevisionRef.current = 0; setConfirmDialog(null); } })}
+                                                        onClick={handleDiscardLiveMatch}
                                                         className="bg-red-600/15 hover:bg-red-600/25 border border-red-500/40 text-red-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer"
                                                     >
                                                         <Icons.Trash />
@@ -7825,7 +8034,7 @@
                                         </div>
                                     </div>}
                                 </div>
-                                <button onClick={() => { setShowLoggingModal(false); setActiveAction(null); setCorrectionMode(false); }} className={`w-full py-2 bg-slate-950 text-slate-400 text-xs rounded-xl font-bold cursor-pointer ${isCompactRecordActionModal ? 'mt-3' : 'mt-4'}`}>Cancel Action</button>
+                                <button onClick={handleCancelActionModal} className={`w-full py-2 bg-slate-950 text-slate-400 text-xs rounded-xl font-bold cursor-pointer ${isCompactRecordActionModal ? 'mt-3' : 'mt-4'}`}>Cancel Action</button>
                             </div>
                         </div>
                     )}
