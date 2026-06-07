@@ -189,6 +189,7 @@
             const prevLiveStatsRef = useRef({});
             const prevLiveScoresRef = useRef({ teamA: null, teamB: null });
             const [mobileNavOpen, setMobileNavOpen] = useState(false);
+            const [showAccountMenu, setShowAccountMenu] = useState(false);
 
             const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
             const [subTargetPlayer, setSubTargetPlayer] = useState(null); 
@@ -237,9 +238,9 @@
             const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
             const OPERATOR_FOCUS_KEY = 'wknd_live_operator_focus';
             const operatorFocusOptions = [
-                { id: 'home', label: 'HOME' },
-                { id: 'away', label: 'AWAY' },
-                { id: 'both', label: 'BOTH' }
+                { id: 'home' },
+                { id: 'both', label: 'BOTH' },
+                { id: 'away' }
             ];
 
             useEffect(() => {
@@ -280,6 +281,7 @@
 
             const handleAuthLogout = () => {
                 setAuthRole('viewer');
+                setShowAccountMenu(false);
                 localStorage.removeItem('wknd_access_role');
                 setAuthPassword('');
                 setShowAuthModal(false);
@@ -717,6 +719,7 @@
             };
 
             const computeTimeoutUsage = (logs = [], currentQuarterValue = 1) => {
+                const activeQuarter = Number.parseInt(currentQuarterValue, 10) || 1;
                 const usage = {
                     teamA: { regulation: 0, currentOvertime: 0 },
                     teamB: { regulation: 0, currentOvertime: 0 }
@@ -727,11 +730,11 @@
                     const eventQuarter = getQuarterFromEvent(event);
                     if (event.isTeamA === true) {
                         if (eventQuarter <= 4) usage.teamA.regulation += 1;
-                        if (eventQuarter > 4 && eventQuarter === currentQuarterValue) usage.teamA.currentOvertime += 1;
+                        if (eventQuarter > 4 && eventQuarter === activeQuarter) usage.teamA.currentOvertime += 1;
                     }
                     if (event.isTeamA === false) {
                         if (eventQuarter <= 4) usage.teamB.regulation += 1;
-                        if (eventQuarter > 4 && eventQuarter === currentQuarterValue) usage.teamB.currentOvertime += 1;
+                        if (eventQuarter > 4 && eventQuarter === activeQuarter) usage.teamB.currentOvertime += 1;
                     }
                 });
 
@@ -1352,6 +1355,26 @@
 
             const liveHomeTeam = teams.find(t => t.id === teamAId);
             const liveAwayTeam = teams.find(t => t.id === teamBId);
+            const homeTeamLabel = liveHomeTeam?.name || 'HOME';
+            const awayTeamLabel = liveAwayTeam?.name || 'AWAY';
+            const getFocusOptionLabel = (optionId) => {
+                if (optionId === 'home') return homeTeamLabel;
+                if (optionId === 'away') return awayTeamLabel;
+                return 'BOTH';
+            };
+            const getFocusOptionActiveStyle = (optionId) => {
+                const optionColor = optionId === 'home'
+                    ? (liveHomeTeam?.color || '#06b6d4')
+                    : optionId === 'away'
+                        ? (liveAwayTeam?.color || '#ef4444')
+                        : '#f59e0b';
+                return {
+                    backgroundColor: `${optionColor}40`,
+                    borderColor: optionColor,
+                    color: '#ffffff',
+                    boxShadow: `0 0 0 1px ${optionColor}55`
+                };
+            };
             const isTieGame = teamAScore === teamBScore;
             const canStartOvertime = isTieGame;
             const homepageGameSummaries = [
@@ -1521,6 +1544,13 @@
             const hasCurrentQuarterStarted = currentLiveGameLog.some(
                 (event) => event.kind === 'meta' && event.metaType === 'quarterStart' && getQuarterFromEvent(event) === currentQuarter
             );
+            const latestPeriodMetaEvent = currentLiveGameLog.find(
+                (event) => event?.kind === 'meta' && (event.metaType === 'matchStart' || event.metaType === 'quarterStart' || event.metaType === 'quarterEnd')
+            );
+            const awaitingPeriodStartFromLog = latestPeriodMetaEvent
+                ? (latestPeriodMetaEvent.metaType === 'matchStart' || latestPeriodMetaEvent.metaType === 'quarterEnd')
+                : false;
+            const isAwaitingPeriodStart = awaitingPeriodStart || awaitingPeriodStartFromLog;
             const nextPeriodToStart = hasCurrentQuarterStarted ? currentQuarter + 1 : currentQuarter;
             const nextPeriodStartLabel = getPeriodLabel(nextPeriodToStart);
             const timeoutIsActive = isTimeoutCurrentlyActive(currentLiveGameLog);
@@ -1528,13 +1558,13 @@
                 ? 'Start Match'
                 : timeoutIsActive
                     ? `Resume ${getPeriodLabel(currentQuarter)}`
-                : awaitingPeriodStart
+                : isAwaitingPeriodStart
                     ? `Start ${nextPeriodStartLabel}`
                 : currentQuarter >= 4 && awaitingOvertimeDecision
                     ? (isTieGame ? `Start ${getPeriodLabel(currentQuarter + 1)}` : 'End Game')
                     : `End ${getPeriodLabel(currentQuarter)}`;
             const periodActionIsStart = periodActionLabel.startsWith('Start');
-            const canTriggerStatLogging = hasMatchStarted && !timeoutIsActive && !awaitingPeriodStart;
+            const canTriggerStatLogging = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart;
             const teamACanTimeout = teamATimeoutUsed < timeoutLimit;
             const teamBCanTimeout = teamBTimeoutUsed < timeoutLimit;
             const teamATimeoutEnabled = hasMatchStarted && !timeoutIsActive && teamACanTimeout;
@@ -2400,7 +2430,7 @@
                     showToast('Press Start Match before logging stats.', 'info');
                     return;
                 }
-                if (awaitingPeriodStart) {
+                if (isAwaitingPeriodStart) {
                     showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
                     return;
                 }
@@ -2639,7 +2669,7 @@
             const handleStartNextQuarter = () => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
-                if (!awaitingPeriodStart) return;
+                if (!isAwaitingPeriodStart) return;
 
                 const nextQuarter = nextPeriodToStart;
                 const nextLabel = getPeriodLabel(nextQuarter);
@@ -3184,7 +3214,7 @@
                     return;
                 }
 
-                if (awaitingPeriodStart) {
+                if (isAwaitingPeriodStart) {
                     handleStartNextQuarter();
                     return;
                 }
@@ -3200,7 +3230,7 @@
                     showToast('Press Start Match before calling timeout.', 'info');
                     return;
                 }
-                if (awaitingPeriodStart) {
+                if (isAwaitingPeriodStart) {
                     showToast(`Press Start ${nextPeriodStartLabel} before calling timeout.`, 'info');
                     return;
                 }
@@ -4068,7 +4098,7 @@
                             hasActionArmed && teamAccessAllowed
                                 ? 'armed-target hover:bg-slate-900 border-emerald-500/50' 
                                 : 'border-slate-800 hover:border-slate-700/60'
-                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${!teamAccessAllowed ? 'opacity-55 saturate-50' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
+                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${isLoggedIn && !teamAccessAllowed ? 'opacity-55 saturate-50' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
                     >
                         <div className="flex items-center gap-2.5 min-w-0">
                             <span className="w-12 md:w-14 text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0">{player.number}</span>
@@ -4205,6 +4235,25 @@
                                         );
                                     })}
 
+                                    {canOperateLive && (
+                                        <div className="border-t border-slate-800/70 px-3 py-2.5 space-y-2">
+                                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Current Account: <span className="text-orange-300">{authRole.toUpperCase()}</span></div>
+                                            <div className="grid grid-cols-3 gap-1.5">
+                                                {operatorFocusOptions.map((option) => (
+                                                    <button
+                                                        key={`focus-mobile-${option.id}`}
+                                                        type="button"
+                                                        onClick={() => setOperatorFocus(option.id)}
+                                                        className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
+                                                        style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
+                                                    >
+                                                        {getFocusOptionLabel(option.id)}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -4233,18 +4282,49 @@
                             <button onClick={() => setActiveTab('standings')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'standings' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Trophy /> Standings</button>
                             <button onClick={() => setActiveTab('history')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'history' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.History /> Game Log</button>
                             <button onClick={() => setActiveTab('leaders')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'leaders' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Trophy /> Stats</button>
-                            <button
-                                onClick={() => {
-                                    if (authRole === 'viewer') {
-                                        setShowAuthModal(true);
-                                    } else {
-                                        handleAuthLogout();
-                                    }
-                                }}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${authRole === 'viewer' ? 'text-orange-300 border border-orange-500/40 bg-orange-500/15 hover:bg-orange-500/25' : 'text-slate-300 border border-slate-700 hover:bg-slate-800'}`}
-                            >
-                                <Icons.ShieldAlert /> {authRole === 'viewer' ? 'Login' : 'Logout'}
-                            </button>
+                            <div className="relative">
+                                <button
+                                    onClick={() => {
+                                        if (authRole === 'viewer') {
+                                            setShowAuthModal(true);
+                                            return;
+                                        }
+                                        setShowAccountMenu((prev) => !prev);
+                                    }}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${authRole === 'viewer' ? 'text-orange-300 border border-orange-500/40 bg-orange-500/15 hover:bg-orange-500/25' : 'text-slate-300 border border-slate-700 hover:bg-slate-800'}`}
+                                >
+                                    <Icons.ShieldAlert /> {authRole === 'viewer' ? 'Login' : authRole.toUpperCase()}
+                                </button>
+                                {authRole !== 'viewer' && showAccountMenu && (
+                                    <div className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl p-3 z-50">
+                                        <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Current Account</div>
+                                        <div className="text-xs font-bold text-orange-300 mt-0.5">{authRole.toUpperCase()}</div>
+                                        <div className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Operator Focus</div>
+                                        <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                                            {operatorFocusOptions.map((option) => (
+                                                <button
+                                                    key={`focus-account-${option.id}`}
+                                                    type="button"
+                                                    onClick={() => setOperatorFocus(option.id)}
+                                                    className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
+                                                    style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
+                                                >
+                                                    {getFocusOptionLabel(option.id)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                handleAuthLogout();
+                                            }}
+                                            className="w-full mt-3 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-700 text-slate-200 hover:bg-slate-900 cursor-pointer"
+                                        >
+                                            Logout
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </nav>
 
                     </header>
@@ -4259,21 +4339,6 @@
                                         {canOperateLive && (
                                             <div className="max-w-xl mx-auto bg-slate-900/65 rounded-2xl border border-slate-800 p-6 shadow-2xl">
                                                 <form onSubmit={handleStartMatch} className="space-y-4">
-                                                    <div>
-                                                        <div className="block text-slate-400 text-xs font-bold mb-2 uppercase">Operator Focus</div>
-                                                        <div className="grid grid-cols-3 gap-2">
-                                                            {operatorFocusOptions.map((option) => (
-                                                                <button
-                                                                    key={`focus-prelive-${option.id}`}
-                                                                    type="button"
-                                                                    onClick={() => setOperatorFocus(option.id)}
-                                                                    className={`rounded-xl border px-3 py-2 text-[11px] font-black tracking-wide cursor-pointer transition-all ${operatorFocus === option.id ? 'border-orange-400 bg-orange-500/20 text-orange-100 shadow-lg' : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'}`}
-                                                                >
-                                                                    {option.label}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    </div>
                                                     <div className="grid grid-cols-2 gap-4">
                                                         <div>
                                                             <label className="block text-slate-400 text-xs font-bold mb-1 uppercase">Home (A)</label>
@@ -4306,9 +4371,17 @@
                                 ) : (
                                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                                         {/* COMPACT MOBILE SCOREBAR */}
-                                        <div className="col-span-12 bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-xl">
+                                        <div className="col-span-12 sticky top-2 z-30 bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-xl">
                                             <div className="grid grid-cols-7 items-center bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-lg">
                                                 <div className="col-span-3 relative text-center pb-4">
+                                                    <div className="absolute top-0 left-0 flex items-center gap-1 pointer-events-none">
+                                                        {Array.from({ length: timeoutLimit }).map((_, idx) => (
+                                                            <span
+                                                                key={`timeout-a-${idx}`}
+                                                                className={`w-2 h-2 rounded-full ${idx < teamATimeoutUsed ? 'bg-amber-300' : 'bg-slate-800'}`}
+                                                            />
+                                                        ))}
+                                                    </div>
                                                     <span className="text-[10px] text-slate-400 font-bold block truncate">{teams.find(t => t.id === teamAId)?.name}</span>
                                                     <div className={`mt-1 text-4xl md:text-5xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamA ? 'score-burst text-amber-200 drop-shadow-[0_0_12px_rgba(251,191,36,0.75)]' : 'text-white'}`}>{teamAScore}</div>
                                                     <div className="absolute left-0 right-0 bottom-0 border-t border-slate-800/90 pt-1.5 px-0.5">
@@ -4324,9 +4397,17 @@
                                                 </div>
                                                 <div className="col-span-1 text-center">
                                                     <div className="text-slate-600 font-black font-mono text-xs">VS</div>
-                                                    <div className="mt-1 text-[9px] font-black tracking-wider text-orange-300 uppercase">{getPeriodLabel(currentQuarter)}</div>
+                                                    <div className="mt-1 text-[13px] md:text-[15px] font-black tracking-wide text-orange-300 uppercase leading-none">{getPeriodLabel(currentQuarter)}</div>
                                                 </div>
                                                 <div className="col-span-3 relative text-center pb-4">
+                                                    <div className="absolute top-0 right-0 flex items-center gap-1 pointer-events-none">
+                                                        {Array.from({ length: timeoutLimit }).map((_, idx) => (
+                                                            <span
+                                                                key={`timeout-b-${idx}`}
+                                                                className={`w-2 h-2 rounded-full ${idx < teamBTimeoutUsed ? 'bg-amber-300' : 'bg-slate-800'}`}
+                                                            />
+                                                        ))}
+                                                    </div>
                                                     <span className="text-[10px] text-slate-400 font-bold block truncate">{teams.find(t => t.id === teamBId)?.name}</span>
                                                     <div className={`mt-1 text-4xl md:text-5xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamB ? 'score-burst text-amber-200 drop-shadow-[0_0_12px_rgba(251,191,36,0.75)]' : 'text-white'}`}>{teamBScore}</div>
                                                     <div className="absolute left-0 right-0 bottom-0 border-t border-slate-800/90 pt-1.5 px-0.5">
@@ -4344,32 +4425,12 @@
                                         </div>
 
                                         {canOperateLive && (
-                                            <div className="col-span-12 sticky top-2 z-30 rounded-xl border border-orange-400/40 bg-gradient-to-r from-slate-900/95 via-slate-900/95 to-slate-950/95 p-3 md:p-4 shadow-[0_12px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm">
-                                                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                                    <div className="text-[10px] md:text-[11px] font-black uppercase tracking-wider text-orange-300">Critical Controls</div>
-                                                    <div className="flex flex-wrap items-center justify-end gap-2">
-                                                        <div className="inline-flex items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-950/60 p-1">
-                                                            {operatorFocusOptions.map((option) => (
-                                                                <button
-                                                                    key={`focus-live-${option.id}`}
-                                                                    type="button"
-                                                                    onClick={() => setOperatorFocus(option.id)}
-                                                                    className={`rounded-md px-2.5 py-1 text-[10px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
-                                                                >
-                                                                    {option.label}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                        <div className="text-[10px] font-bold text-slate-300">
-                                                            {hasMatchStarted ? `Timeout Window: ${timeoutScopeLabel}` : 'Press Start Match before first stat log'}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                            <div className="col-span-12">
+                                                <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                                                     <button
                                                         onClick={() => handleLogTimeout(true)}
                                                             disabled={!teamATimeoutEnabled || !canOperateTeam(true)}
-                                                        className="w-full font-black py-3 px-3 rounded-xl text-[11px] md:text-xs tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
+                                                        className="w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
                                                         style={{
                                                             backgroundColor: `${liveHomeTeam?.color || '#06b6d4'}${teamATimeoutEnabled ? '66' : '22'}`,
                                                             borderColor: liveHomeTeam?.color || '#06b6d4',
@@ -4380,7 +4441,7 @@
                                                     </button>
                                                     <button
                                                         onClick={handlePeriodAction}
-                                                        className={`w-full font-black py-3 px-3 rounded-xl text-[11px] md:text-xs tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
+                                                        className={`w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
                                                             periodActionIsStart
                                                                 ? 'bg-emerald-600/25 hover:bg-emerald-600/35 border-emerald-400/70 text-emerald-100 animate-pulse'
                                                                 : 'bg-red-600 hover:bg-red-500 border-red-400 text-white'
@@ -4391,7 +4452,7 @@
                                                     <button
                                                         onClick={() => handleLogTimeout(false)}
                                                         disabled={!teamBTimeoutEnabled || !canOperateTeam(false)}
-                                                        className="w-full font-black py-3 px-3 rounded-xl text-[11px] md:text-xs tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
+                                                        className="w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
                                                         style={{
                                                             backgroundColor: `${liveAwayTeam?.color || '#06b6d4'}${teamBTimeoutEnabled ? '66' : '22'}`,
                                                             borderColor: liveAwayTeam?.color || '#06b6d4',
@@ -4419,7 +4480,7 @@
 
                                             {/* TIER 1: GIANT PRIMARY KEYS (Shooting metrics) */}
                                             <div>
-                                                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🏀 Tier 1: Primary Shooting Keys & Attempts</span>
+                                                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🏀 Primary Shooting Keys & Attempts</span>
                                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                                         {canOperateLive && primaryActions.map(act => (
                                                         <button 
@@ -4439,7 +4500,7 @@
                                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                                                 {/* TIER 2: LARGE SECONDARY KEYS (Rebounds & Assists) */}
                                                 <div className="lg:col-span-5">
-                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🛡️ Tier 2: Transition Keys (Very Common)</span>
+                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🛡️ Transition Keys (Very Common)</span>
                                                     <div className="grid grid-cols-2 gap-3">
                                                         {canOperateLive && secondaryActions.map(act => (
                                                             <button 
@@ -4457,7 +4518,7 @@
 
                                                 {/* TIER 3: COMPACT TERTIARY KEYS ("FT Miss" is neatly located here) */}
                                                 <div className="lg:col-span-12">
-                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">⚙️ Tier 3: Auxiliary Game Events</span>
+                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">⚙️ Auxiliary Game Events</span>
                                                     <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                                                         {canOperateLive && tertiaryActions.map(act => (
                                                             <button 
@@ -4477,7 +4538,7 @@
                                             {canOperateLive && foulActions.length > 0 && (
                                                 <div>
                                                     <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">⚠️ Foul Actions</span>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                    <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                                                         {foulActions.map((act) => (
                                                             <button
                                                                 key={act.id}
@@ -4504,7 +4565,7 @@
                                         <div className={`col-span-12 ${canOperateLive ? `lg:col-span-9 grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'}` : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]'} gap-4`}>
                                             {showHomeLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'home' || !showAwayLivePanel ? 'block' : 'hidden md:block'}`}>
                                                 <div className="flex items-center justify-between gap-2 mb-1">
-                                                    <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - HOME</div>
+                                                    <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - {homeTeamLabel}</div>
                                                     {canOperateLive && (
                                                         <div className="flex items-center gap-1">
                                                             {homeCanAddOnCourt && (
@@ -4614,7 +4675,7 @@
 
                                             {showAwayLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'away' || !showHomeLivePanel ? 'block' : 'hidden md:block'}`}>
                                                 <div className="flex items-center justify-between gap-2 mb-1">
-                                                    <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - AWAY</div>
+                                                    <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - {awayTeamLabel}</div>
                                                     {canOperateLive && (
                                                         <div className="flex items-center gap-1">
                                                             {awayCanAddOnCourt && (
@@ -6812,7 +6873,7 @@
                                 <div className={`text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? 'mb-2 text-[9px]' : 'mb-3 text-[10px]'}`}>Focus: <span className="text-orange-300">{operatorFocus}</span></div>
                                 <div className={`grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'} ${isCompactRecordActionModal ? 'gap-2.5' : 'gap-4'}`}>
                                     {showHomeLivePanel && <div className={`bg-slate-950/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
-                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>Home On Court</div>
+                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{homeTeamLabel} On Court</div>
                                         <div className="space-y-1">
                                             {teamALineup.map(id => {
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
@@ -6823,7 +6884,7 @@
                                         </div>
                                     </div>}
                                     {showAwayLivePanel && <div className={`bg-slate-955/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
-                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>Away On Court</div>
+                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{awayTeamLabel} On Court</div>
                                         <div className="space-y-1">
                                             {teamBLineup.map(id => {
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
