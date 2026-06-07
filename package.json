@@ -6,11 +6,16 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "tunnel:login": "npx cloudflared tunnel login",
+    "tunnel:create": "npx cloudflared tunnel create wknd-stats-site",
+    "tunnel:route": "npx cloudflared tunnel route dns wknd-stats-site wkndbasketball.com",
+    "tunnel:run": "npx cloudflared tunnel run wknd-stats-site",
     "expose": "npx cloudflared tunnel --url http://localhost:3000",
     "expose:local": "npx localtunnel --port 3000"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "ws": "^8.21.0"
   }

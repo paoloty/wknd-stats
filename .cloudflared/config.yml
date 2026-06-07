@@ -1,0 +1,7 @@
+tunnel: 30ebbbea-168e-4f24-9fdd-ba8576c0510c
+credentials-file: C:\Users\paolo\.cloudflared\30ebbbea-168e-4f24-9fdd-ba8576c0510c.json
+
+ingress:
+  - hostname: wkndbasketball.com
+    service: http://localhost:3000
+  - service: http_status:404
