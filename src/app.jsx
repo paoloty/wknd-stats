@@ -41,8 +41,13 @@
             UserPlus: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>,
             FolderPlus: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>,
             ArrowRightLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m16 3 4 4-4 4M20 7H4M8 21l-4-4 4-4M4 17h16"/></svg>,
+            Play: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="8 5 19 12 8 19 8 5"/></svg>,
+            Pause: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>,
+            Stop: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>,
+            Timer: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2h4"/><path d="M12 14v-4"/><path d="M12 12l3-2"/><circle cx="12" cy="14" r="8"/></svg>,
             Zap: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
-            Undo: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+            Undo: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>,
+            Save: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
         };
 
         // Data is loaded from SQLite-backed API endpoints.
@@ -67,6 +72,13 @@
             const [teamAScore, setTeamAScore] = useState(0);
             const [teamBScore, setTeamBScore] = useState(0);
             const [currentQuarter, setCurrentQuarter] = useState(1);
+            const [periodClockSeconds, setPeriodClockSeconds] = useState(12 * 60);
+            const [isPeriodClockRunning, setIsPeriodClockRunning] = useState(false);
+            const [livePlayerSeconds, setLivePlayerSeconds] = useState({});
+            const [manualClockInput, setManualClockInput] = useState('12:00');
+            const [isEditingClockInput, setIsEditingClockInput] = useState(false);
+            const [showExtraGameControls, setShowExtraGameControls] = useState(false);
+            const [showSyncClockEditor, setShowSyncClockEditor] = useState(false);
             
             const [teamALineup, setTeamALineup] = useState([]);
             const [teamABench, setTeamABench] = useState([]);
@@ -87,8 +99,10 @@
             const [activeMobileConsoleTab, setActiveMobileConsoleTab] = useState('home');
             const [showHomeBenchAdder, setShowHomeBenchAdder] = useState(false);
             const [showAwayBenchAdder, setShowAwayBenchAdder] = useState(false);
-            const [showQuarterScoring, setShowQuarterScoring] = useState(true);
             const [showLiveRunningBoxscore, setShowLiveRunningBoxscore] = useState(true);
+            const [liveBoxscoreTab, setLiveBoxscoreTab] = useState('home');
+            const [pendingPeriodActionMode, setPendingPeriodActionMode] = useState(null);
+            const [isPlayPaused, setIsPlayPaused] = useState(false);
             const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
             const [historyDetailTab, setHistoryDetailTab] = useState('potg');
             const [historyVideoInput, setHistoryVideoInput] = useState('');
@@ -153,6 +167,7 @@
             });
             const teamsRef = useRef(teams);
             const isGameLiveRef = useRef(isGameLive);
+            const suppressPeriodAutoStopRef = useRef(false);
             const teamALineupRef = useRef(teamALineup);
             const teamABenchRef = useRef(teamABench);
             const teamBLineupRef = useRef(teamBLineup);
@@ -179,6 +194,8 @@
             const canEditPlayers = authRole === 'operator' || authRole === 'admin';
             const isLoggedIn = authRole !== 'viewer';
             const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
+            const REGULATION_PERIOD_SECONDS = 12 * 60;
+            const OVERTIME_PERIOD_SECONDS = 5 * 60;
             const OPERATOR_FOCUS_KEY = 'wknd_live_operator_focus';
             const operatorFocusOptions = [
                 { id: 'home' },
@@ -600,6 +617,44 @@
                 return q <= 4 ? `Q${q}` : `OT${q - 4}`;
             };
 
+            const getPeriodDurationSeconds = (quarter) => {
+                const q = Number.parseInt(quarter, 10) || 1;
+                return q > 4 ? OVERTIME_PERIOD_SECONDS : REGULATION_PERIOD_SECONDS;
+            };
+
+            const formatSecondsAsClock = (secondsValue) => {
+                const total = Math.max(0, Number.parseInt(secondsValue, 10) || 0);
+                const minutes = Math.floor(total / 60);
+                const seconds = total % 60;
+                return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            };
+
+            const formatSecondsAsMinutes = (secondsValue) => {
+                const total = Math.max(0, Number.parseInt(secondsValue, 10) || 0);
+                const minutes = Math.floor(total / 60);
+                const seconds = total % 60;
+                return `${minutes}:${String(seconds).padStart(2, '0')}`;
+            };
+
+            const parseClockInputToSeconds = (rawValue) => {
+                const value = String(rawValue || '').trim();
+                if (!value) return null;
+
+                if (value.includes(':')) {
+                    const [minRaw, secRaw] = value.split(':');
+                    const minutes = Number.parseInt(minRaw, 10);
+                    const seconds = Number.parseInt(secRaw, 10);
+                    if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || minutes < 0 || seconds < 0 || seconds > 59) {
+                        return null;
+                    }
+                    return (minutes * 60) + seconds;
+                }
+
+                const absoluteSeconds = Number.parseInt(value, 10);
+                if (!Number.isFinite(absoluteSeconds) || absoluteSeconds < 0) return null;
+                return absoluteSeconds;
+            };
+
             const navTabs = [
                 { id: 'live', label: 'Live', icon: Icons.Activity },
                 { id: 'teams', label: 'Rosters', icon: Icons.Users },
@@ -687,8 +742,8 @@
             const isTimeoutCurrentlyActive = (logs = []) => {
                 for (const event of logs || []) {
                     if (!event || event.kind !== 'meta') continue;
-                    if (event.metaType === 'timeout') return true;
-                    if (event.metaType === 'timeoutResume') return false;
+                    if (['timeout', 'officialsTimeout', 'manualPause', 'foulPause'].includes(event.metaType)) return true;
+                    if (event.metaType === 'timeoutResume' || event.metaType === 'playResume') return false;
                 }
                 return false;
             };
@@ -1255,6 +1310,9 @@
                 setTeamBLineup(teamBRotation.lineup);
                 setTeamBBench(teamBRotation.bench);
                 setLiveStats(replayed?.liveStats || session.liveStats || {});
+                setPeriodClockSeconds(Math.max(0, Number.parseInt(session.periodClockSeconds, 10) || getPeriodDurationSeconds(replayed?.currentQuarter || session.currentQuarter || 1)));
+                setIsPeriodClockRunning(Boolean(session.isPeriodClockRunning));
+                setLivePlayerSeconds(session.livePlayerSeconds || {});
                 setLiveGameSnapshot(replaySnapshot || null);
                 setGameLog(effectiveGameLog);
                 setLoggedHistory(effectiveLoggedHistory);
@@ -1279,11 +1337,14 @@
                 setTeamAScore(0);
                 setTeamBScore(0);
                 setCurrentQuarter(1);
+                setPeriodClockSeconds(getPeriodDurationSeconds(1));
+                setIsPeriodClockRunning(false);
                 setTeamALineup([]);
                 setTeamABench([]);
                 setTeamBLineup([]);
                 setTeamBBench([]);
                 setLiveStats({});
+                setLivePlayerSeconds({});
                 setLiveGameSnapshot(null);
                 setGameLog([]);
                 setLoggedHistory([]);
@@ -1332,9 +1393,10 @@
 
             // Fixed button layout based on typical in-game stat flow, not live usage.
             const primaryActions = getActionsByOrder(['pts_2', 'pts_3', 'fg2m_miss', 'fg3m_miss']);
-            const secondaryActions = getActionsByOrder(['reb', 'ast']);
+            const secondaryActions = getActionsByOrder(['reb', 'ast', 'pf', 'pf_offensive']);
             const tertiaryActions = getActionsByOrder(['pts_1', 'ft_miss', 'to', 'stl', 'blk']);
-            const foulActions = getActionsByOrder(['pf', 'pf_offensive', 'pf_technical']);
+            const foulActions = getActionsByOrder(['pf_technical']);
+            const technicalFoulAction = foulActions.find((act) => act.id === 'pf_technical') || null;
 
             const liveHomeTeam = teams.find(t => t.id === teamAId);
             const liveAwayTeam = teams.find(t => t.id === teamBId);
@@ -1524,6 +1586,7 @@
             const timeoutLimit = currentQuarter > 4 ? 1 : 5;
             const teamATimeoutUsed = currentQuarter > 4 ? timeoutUsage.teamA.currentOvertime : timeoutUsage.teamA.regulation;
             const teamBTimeoutUsed = currentQuarter > 4 ? timeoutUsage.teamB.currentOvertime : timeoutUsage.teamB.regulation;
+            const periodClockLabel = formatSecondsAsClock(periodClockSeconds);
             const hasMatchStarted = currentLiveGameLog.some((event) => event.kind === 'meta' && event.metaType === 'matchStart');
             const hasCurrentQuarterStarted = currentLiveGameLog.some(
                 (event) => event.kind === 'meta' && event.metaType === 'quarterStart' && getQuarterFromEvent(event) === currentQuarter
@@ -1538,21 +1601,38 @@
             const nextPeriodToStart = hasCurrentQuarterStarted ? currentQuarter + 1 : currentQuarter;
             const nextPeriodStartLabel = getPeriodLabel(nextPeriodToStart);
             const timeoutIsActive = isTimeoutCurrentlyActive(currentLiveGameLog);
-            const periodActionLabel = !hasMatchStarted
-                ? 'Start Match'
-                : timeoutIsActive
-                    ? `Resume ${getPeriodLabel(currentQuarter)}`
+            const derivedPeriodActionMode = !hasMatchStarted
+                ? 'startMatch'
                 : isAwaitingPeriodStart
-                    ? `Start ${nextPeriodStartLabel}`
+                    ? 'startPeriod'
                 : currentQuarter >= 4 && awaitingOvertimeDecision
-                    ? (isTieGame ? `Start ${getPeriodLabel(currentQuarter + 1)}` : 'End Game')
-                    : `End ${getPeriodLabel(currentQuarter)}`;
+                    ? (isTieGame ? 'startOvertime' : 'endGame')
+                : ((timeoutIsActive || isPlayPaused) && periodClockSeconds > 0)
+                    ? 'resume'
+                    : 'endPeriod';
+            const periodActionMode = pendingPeriodActionMode || derivedPeriodActionMode;
+            const periodActionLabel = periodActionMode === 'startMatch'
+                ? 'Start Match'
+                : periodActionMode === 'startPeriod'
+                    ? `Start ${nextPeriodStartLabel}`
+                : periodActionMode === 'startOvertime'
+                    ? `Start ${getPeriodLabel(currentQuarter + 1)}`
+                : periodActionMode === 'resume'
+                    ? `Resume ${getPeriodLabel(currentQuarter)}`
+                    : periodActionMode === 'endGame'
+                        ? 'End Game'
+                        : `End ${getPeriodLabel(currentQuarter)}`;
             const periodActionIsStart = periodActionLabel.startsWith('Start');
+            const periodActionIsResume = periodActionLabel.startsWith('Resume');
+            const periodActionIsEnd = periodActionLabel.startsWith('End');
+            const periodActionIsPositive = periodActionIsStart || periodActionIsResume;
             const canTriggerStatLogging = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart;
             const teamACanTimeout = teamATimeoutUsed < timeoutLimit;
             const teamBCanTimeout = teamBTimeoutUsed < timeoutLimit;
             const teamATimeoutEnabled = hasMatchStarted && !timeoutIsActive && teamACanTimeout;
             const teamBTimeoutEnabled = hasMatchStarted && !timeoutIsActive && teamBCanTimeout;
+            const canPauseGame = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart && isPeriodClockRunning;
+            const canOfficialsTimeout = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart && periodClockSeconds > 0;
             const teamAFoulsForDisplay = currentQuarter <= 4
                 ? Number((liveQuarterStats.find((row) => row.quarter === currentQuarter)?.teamA?.pf) || 0)
                 : liveQuarterStats
@@ -1563,6 +1643,20 @@
                 : liveQuarterStats
                     .filter((row) => row.quarter >= 4 && row.quarter <= currentQuarter)
                     .reduce((sum, row) => sum + Number(row.teamB?.pf || 0), 0);
+            const homeFoulTroublePlayers = (teams.find((t) => t.id === teamAId)?.players || [])
+                .map((player) => ({
+                    ...player,
+                    fouls: Number(liveStats[player.id]?.pf || 0)
+                }))
+                .filter((player) => player.fouls >= 4)
+                .sort((a, b) => b.fouls - a.fouls || String(a.number || '').localeCompare(String(b.number || '')));
+            const awayFoulTroublePlayers = (teams.find((t) => t.id === teamBId)?.players || [])
+                .map((player) => ({
+                    ...player,
+                    fouls: Number(liveStats[player.id]?.pf || 0)
+                }))
+                .filter((player) => player.fouls >= 4)
+                .sort((a, b) => b.fouls - a.fouls || String(a.number || '').localeCompare(String(b.number || '')));
             const foulBarMax = 5;
             const foulPeriodLabel = currentQuarter <= 4 ? getPeriodLabel(currentQuarter) : `${getPeriodLabel(4)}+`;
             const timeoutScopeLabel = currentQuarter > 4 ? getPeriodLabel(currentQuarter) : 'Reg';
@@ -1570,6 +1664,108 @@
             const awayCanClearOnCourt = isGameLive && teamBLineup.length > 0;
             const homeCanAddOnCourt = isGameLive && teamALineup.length < 5 && hasAvailableBenchPlayer(true);
             const awayCanAddOnCourt = isGameLive && teamBLineup.length < 5 && hasAvailableBenchPlayer(false);
+
+            const handlePeriodClockExpired = () => {
+                setPeriodClockSeconds(0);
+                setIsPeriodClockRunning(false);
+
+                const periodLabel = getPeriodLabel(currentQuarter);
+                const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                setGameLog((prev) => [{
+                    id: quarterLogId,
+                    time: getWallClockTime(),
+                    text: `End ${periodLabel}`,
+                    kind: 'meta',
+                    metaType: 'quarterEnd',
+                    quarter: currentQuarter,
+                    clockRemaining: '00:00'
+                }, ...prev.slice(0, 300)]);
+
+                if (currentQuarter >= 4) {
+                    setAwaitingOvertimeDecision(true);
+                    if (teamAScore === teamBScore) {
+                        showToast(`${periodLabel} expired at 00:00. Start overtime to continue.`, 'info');
+                    } else {
+                        showToast(`${periodLabel} expired at 00:00. Press End Game to finalize.`, 'info');
+                    }
+                    return;
+                }
+
+                const nextQuarter = currentQuarter + 1;
+                setAwaitingPeriodStart(true);
+                setAwaitingOvertimeDecision(false);
+                showToast(`${periodLabel} expired at 00:00. Press Start ${getPeriodLabel(nextQuarter)}.`, 'info');
+            };
+
+            useEffect(() => {
+                if (!isGameLive) return;
+                if (suppressPeriodAutoStopRef.current) return;
+
+                const hasInactivePeriodState = !hasMatchStarted || isAwaitingPeriodStart || awaitingOvertimeDecision;
+                if (!hasInactivePeriodState) return;
+
+                if (isPlayPaused) {
+                    setIsPlayPaused(false);
+                }
+
+                if (isPeriodClockRunning) {
+                    setIsPeriodClockRunning(false);
+                }
+                if (periodClockSeconds !== 0) {
+                    setPeriodClockSeconds(0);
+                }
+            }, [isGameLive, hasMatchStarted, isAwaitingPeriodStart, awaitingOvertimeDecision, isPeriodClockRunning, periodClockSeconds, isPlayPaused]);
+
+            useEffect(() => {
+                if (!isGameLive) return;
+                if (suppressPeriodAutoStopRef.current) return;
+                if (!timeoutIsActive) return;
+                if (!isPeriodClockRunning) return;
+                setIsPeriodClockRunning(false);
+            }, [isGameLive, timeoutIsActive, isPeriodClockRunning]);
+
+            useEffect(() => {
+                if (!isGameLive || !isPeriodClockRunning) return;
+
+                if (suppressPeriodAutoStopRef.current) {
+                    suppressPeriodAutoStopRef.current = false;
+                }
+                if (pendingPeriodActionMode) {
+                    setPendingPeriodActionMode(null);
+                }
+
+                const timerId = window.setInterval(() => {
+                    setPeriodClockSeconds((prev) => {
+                        if (prev <= 1) {
+                            handlePeriodClockExpired();
+                            return 0;
+                        }
+                        return prev - 1;
+                    });
+
+                    setLivePlayerSeconds((prev) => {
+                        const next = { ...prev };
+                        [...teamALineup, ...teamBLineup].forEach((playerId) => {
+                            if (!playerId) return;
+                            next[playerId] = (next[playerId] || 0) + 1;
+                        });
+                        return next;
+                    });
+                }, 1000);
+
+                return () => window.clearInterval(timerId);
+            }, [isGameLive, isPeriodClockRunning, currentQuarter, teamAScore, teamBScore, teamALineup, teamBLineup, pendingPeriodActionMode]);
+
+            useEffect(() => {
+                if (isGameLive) return;
+                if (!pendingPeriodActionMode) return;
+                setPendingPeriodActionMode(null);
+            }, [isGameLive, pendingPeriodActionMode]);
+
+            useEffect(() => {
+                if (isEditingClockInput) return;
+                setManualClockInput(formatSecondsAsClock(periodClockSeconds));
+            }, [periodClockSeconds, isEditingClockInput]);
 
             useEffect(() => {
                 if (!selectedHistoryGameId) {
@@ -1985,7 +2181,7 @@
 
                 if (isGameLive) {
                     const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
-                    const session = { teamAId, teamBId, teamAScore, teamBScore, currentQuarter, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart };
+                    const session = { teamAId, teamBId, teamAScore, teamBScore, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart };
                     localStorage.setItem('active_live_session', JSON.stringify(session));
                     hadLiveSessionRef.current = true;
                     setSyncDebug((prev) => ({
@@ -2009,7 +2205,7 @@
                         flushPendingActiveSessionSync();
                     }
                 }
-            }, [isGameLive, teamAId, teamBId, teamAScore, teamBScore, currentQuarter, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
+            }, [isGameLive, teamAId, teamBId, teamAScore, teamBScore, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
 
             const showToast = (message, type = 'success') => {
                 setToast({ message, type });
@@ -2552,6 +2748,10 @@
                 setTeamAScore(0);
                 setTeamBScore(0);
                 setCurrentQuarter(1);
+                setPeriodClockSeconds(0);
+                setIsPlayPaused(false);
+                setIsPeriodClockRunning(false);
+                setLivePlayerSeconds({});
                 setAwaitingOvertimeDecision(false);
                 setAwaitingPeriodStart(false);
                 setActiveAction(null);
@@ -2634,6 +2834,7 @@
                 }
 
                 const logWithTag = `${logText}${scoreSuffix}`;
+                const shouldAutoPauseForFoul = statField === 'pf' && !correctionMode && changeAmount > 0 && !timeoutIsActive;
 
                 const logEntryId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 const historyEntry = { id: logEntryId, playerId, statField, changeAmount, attachedTrackingStat, trackingDelta: 1 * multiplier, previousTeamAScore: teamAScore, previousTeamBScore: teamBScore, logText: logWithTag, kind: 'stat' };
@@ -2672,12 +2873,13 @@
                     return updated;
                 });
 
-                setGameLog(prev => [{
+                const statLogEvent = {
                     id: logEntryId,
                     time: getWallClockTime(),
                     text: logWithTag,
                     kind: 'stat',
                     quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
                     isTeamA,
                     actionId: activeAction.id,
                     countsTeamFoul,
@@ -2686,7 +2888,26 @@
                     changeAmount,
                     attachedTrackingStat,
                     trackingDelta: 1 * multiplier
-                }, ...prev.slice(0, 300)]);
+                };
+
+                if (shouldAutoPauseForFoul) {
+                    const foulPauseEvent = {
+                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: `Official stoppage: Foul on ${playerObj?.name || 'player'}`,
+                        kind: 'meta',
+                        metaType: 'foulPause',
+                        quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                        isTeamA
+                    };
+                    setGameLog((prev) => [foulPauseEvent, statLogEvent, ...prev].slice(0, 300));
+                    setIsPlayPaused(true);
+                    setIsPeriodClockRunning(false);
+                    showToast('Clock stopped for foul stoppage. Press Resume to continue.', 'info');
+                } else {
+                    setGameLog((prev) => [statLogEvent, ...prev.slice(0, 300)]);
+                }
                 triggerPlayerFlash(playerId);
                 flashPlayerElements(playerId);
                 setActiveAction(null);
@@ -2694,8 +2915,32 @@
                 setShowLoggingModal(false);
             };
 
+            const restoreClockFromLatestLog = (logs = [], fallbackQuarter = currentQuarter) => {
+                const sourceLogs = Array.isArray(logs) ? logs : [];
+                const latestClockEvent = sourceLogs.find((event) => {
+                    const parsed = parseClockInputToSeconds(event?.clockRemaining);
+                    return parsed !== null;
+                });
+
+                if (latestClockEvent) {
+                    const parsed = parseClockInputToSeconds(latestClockEvent.clockRemaining);
+                    if (parsed !== null) {
+                        setPeriodClockSeconds(parsed);
+                        return;
+                    }
+                }
+
+                if (isAwaitingPeriodStart || awaitingOvertimeDecision || !hasMatchStarted) {
+                    setPeriodClockSeconds(0);
+                    return;
+                }
+
+                setPeriodClockSeconds(getPeriodDurationSeconds(fallbackQuarter));
+            };
+
             const handleUndo = () => {
                 if (loggedHistory.length === 0) return;
+                setIsPeriodClockRunning(false);
                 const [lastAction, ...remainingHistory] = loggedHistory;
                 const remainingGameLog = gameLog.filter(log => log.id !== lastAction.id);
                 const replayed = buildLiveStateFromEvents(liveGameSnapshot, remainingGameLog);
@@ -2712,6 +2957,7 @@
                 setTeamBBench(replayed.teamBBench);
                 setPlayedPlayers(replayed.playedPlayers);
                 setGameLog(remainingGameLog);
+                restoreClockFromLatestLog(remainingGameLog, replayed.currentQuarter || currentQuarter);
                 if (lastAction.playerId) {
                     triggerPlayerFlash(lastAction.playerId);
                     flashPlayerElements(lastAction.playerId);
@@ -2721,6 +2967,8 @@
             const handleDeleteLogEntry = (logId) => {
                 const entry = gameLog.find(log => log.id === logId);
                 if (!entry) return;
+
+                setIsPeriodClockRunning(false);
 
                 const remainingGameLog = gameLog.filter(log => log.id !== logId);
                 const remainingHistory = loggedHistory.filter(item => item.id !== logId);
@@ -2768,6 +3016,7 @@
 
                     setGameLog(remainingGameLog);
                     setLoggedHistory(remainingHistory);
+                    restoreClockFromLatestLog(remainingGameLog, currentQuarter);
                     triggerPlayerFlash(statSource.playerId);
                     flashPlayerElements(statSource.playerId);
                     return;
@@ -2778,6 +3027,7 @@
                 if (!replayed) {
                     setGameLog(remainingGameLog);
                     setLoggedHistory(remainingHistory);
+                    restoreClockFromLatestLog(remainingGameLog, currentQuarter);
                     showToast('Removed log entry. Full state replay unavailable for this legacy session.', 'info');
                     return;
                 }
@@ -2793,6 +3043,7 @@
                 setTeamBLineup(replayed.teamBLineup);
                 setTeamBBench(replayed.teamBBench);
                 setPlayedPlayers(replayed.playedPlayers);
+                restoreClockFromLatestLog(remainingGameLog, replayed.currentQuarter || currentQuarter);
             };
 
             const handleAdvanceQuarter = () => {
@@ -2800,6 +3051,8 @@
                 if (!isGameLive) return;
 
                 if (currentQuarter >= 4) {
+                    setPeriodClockSeconds(0);
+                    setIsPeriodClockRunning(false);
                     setAwaitingOvertimeDecision(true);
                     if (teamAScore === teamBScore) {
                         showToast(`${getPeriodLabel(currentQuarter)} complete. Scores are tied, start overtime to continue.`, 'info');
@@ -2811,17 +3064,83 @@
 
                 const nextQuarter = currentQuarter + 1;
                 const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                setPeriodClockSeconds(0);
                 setAwaitingPeriodStart(true);
                 setAwaitingOvertimeDecision(false);
+                setIsPeriodClockRunning(false);
                 setGameLog(prev => [{
                     id: quarterLogId,
                     time: getWallClockTime(),
                     text: `End ${getPeriodLabel(currentQuarter)}`,
                     kind: 'meta',
                     metaType: 'quarterEnd',
-                    quarter: currentQuarter
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
                 }, ...prev.slice(0, 300)]);
                 showToast(`${getPeriodLabel(currentQuarter)} ended. Press Start ${getPeriodLabel(nextQuarter)} to continue.`, 'info');
+            };
+
+            const handleApplyManualClock = () => {
+                if (!canOperateLive) return;
+                if (!isGameLive) return;
+
+                const parsed = parseClockInputToSeconds(manualClockInput);
+                if (parsed === null) {
+                    showToast('Invalid clock format. Use MM:SS or total seconds.', 'error');
+                    return;
+                }
+
+                const maxSeconds = getPeriodDurationSeconds(currentQuarter);
+                const nextSeconds = Math.max(0, Math.min(parsed, maxSeconds));
+                const nextLabel = formatSecondsAsClock(nextSeconds);
+                const elapsedDeltaSeconds = periodClockSeconds - nextSeconds;
+
+                if (elapsedDeltaSeconds !== 0) {
+                    setLivePlayerSeconds((prev) => {
+                        const next = { ...prev };
+                        const activePlayerIds = [...new Set([...teamALineup, ...teamBLineup].filter(Boolean))];
+                        activePlayerIds.forEach((playerId) => {
+                            next[playerId] = Math.max(0, (next[playerId] || 0) + elapsedDeltaSeconds);
+                        });
+                        return next;
+                    });
+                }
+
+                setPeriodClockSeconds(nextSeconds);
+                setManualClockInput(nextLabel);
+                setIsEditingClockInput(false);
+                setShowSyncClockEditor(false);
+                setIsPlayPaused(true);
+                setIsPeriodClockRunning(false);
+
+                const adjustLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const adjustEvent = {
+                    id: adjustLogId,
+                    time: getWallClockTime(),
+                    text: `Clock adjusted to ${nextLabel}`,
+                    kind: 'meta',
+                    metaType: 'clockAdjust',
+                    quarter: currentQuarter,
+                    clockRemaining: nextLabel
+                };
+
+                if (!timeoutIsActive) {
+                    const pauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                    const pauseEvent = {
+                        id: pauseLogId,
+                        time: getWallClockTime(),
+                        text: 'Pause Game (Clock Sync)',
+                        kind: 'meta',
+                        metaType: 'manualPause',
+                        quarter: currentQuarter,
+                        clockRemaining: nextLabel
+                    };
+                    setGameLog((prev) => [adjustEvent, pauseEvent, ...prev].slice(0, 300));
+                } else {
+                    setGameLog((prev) => [adjustEvent, ...prev.slice(0, 300)]);
+                }
+
+                showToast(`Clock updated to ${nextLabel}. Game paused.`, 'success');
             };
 
             const handleStartNextQuarter = () => {
@@ -2833,6 +3152,10 @@
                 const nextLabel = getPeriodLabel(nextQuarter);
                 const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 setCurrentQuarter(nextQuarter);
+                setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
+                suppressPeriodAutoStopRef.current = true;
+                setIsPlayPaused(false);
+                setIsPeriodClockRunning(true);
                 setAwaitingPeriodStart(false);
                 setAwaitingOvertimeDecision(false);
                 setGameLog(prev => [{
@@ -2841,7 +3164,8 @@
                     text: `Start ${nextLabel}`,
                     kind: 'meta',
                     metaType: 'quarterStart',
-                    quarter: nextQuarter
+                    quarter: nextQuarter,
+                    clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
                 }, ...prev.slice(0, 300)]);
                 showToast(`${nextLabel} started.`, 'success');
             };
@@ -2859,6 +3183,10 @@
                 const nextLabel = getPeriodLabel(nextQuarter);
                 const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 setCurrentQuarter(nextQuarter);
+                setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
+                suppressPeriodAutoStopRef.current = true;
+                setIsPlayPaused(false);
+                setIsPeriodClockRunning(true);
                 setAwaitingPeriodStart(false);
                 setAwaitingOvertimeDecision(false);
                 setGameLog(prev => [{
@@ -2867,7 +3195,8 @@
                     text: `Start ${nextLabel}`,
                     kind: 'meta',
                     metaType: 'quarterStart',
-                    quarter: nextQuarter
+                    quarter: nextQuarter,
+                    clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
                 }, ...prev.slice(0, 300)]);
                 showToast(`Overtime started: ${nextLabel}.`, 'success');
             };
@@ -2950,6 +3279,7 @@
                     text: `SUB: ${outPlayer ? `${outPlayer.name} (#${outPlayer.number})` : outId} -> ${inPlayer ? `${inPlayer.name} (#${inPlayer.number})` : inId}`,
                     kind: 'sub',
                     quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
                     outId,
                     inId,
                     isTeamA
@@ -2988,6 +3318,7 @@
                     kind: 'meta',
                     metaType: 'onCourtClear',
                     quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
                     isTeamA
                 };
                 const clearRevision = getLineupRevisionFromEventId(clearLogId);
@@ -3108,6 +3439,7 @@
                     kind: 'meta',
                     metaType: 'onCourtAdd',
                     quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
                     isTeamA,
                     playerId
                 };
@@ -3199,6 +3531,7 @@
                         kind: 'meta',
                         metaType: 'onCourtAdd',
                         quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds),
                         isTeamA,
                         playerId
                     };
@@ -3250,7 +3583,10 @@
 
                         if (!didParticipate) return player;
 
-                        participantStats[player.id] = { ...statsLive };
+                        participantStats[player.id] = {
+                            ...statsLive,
+                            min: formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)
+                        };
 
                         return {
                             ...player,
@@ -3298,6 +3634,9 @@
                 setTeamAScore(0);
                 setTeamBScore(0);
                 setCurrentQuarter(1);
+                setIsPlayPaused(false);
+                setPeriodClockSeconds(getPeriodDurationSeconds(1));
+                setIsPeriodClockRunning(false);
                 setAwaitingOvertimeDecision(false);
                 setAwaitingPeriodStart(false);
                 setTeamALineup([]);
@@ -3305,6 +3644,7 @@
                 setTeamBLineup([]);
                 setTeamBBench([]);
                 setLiveStats({});
+                setLivePlayerSeconds({});
                 setLiveGameSnapshot(null);
                 setGameLog([]);
                 setLoggedHistory([]);
@@ -3333,15 +3673,17 @@
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
 
-                if (!hasMatchStarted) {
+                if (periodActionMode === 'startMatch') {
                     const startLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                    setIsPlayPaused(false);
                     setGameLog((prev) => [{
                         id: startLogId,
                         time: getWallClockTime(),
                         text: 'Start Match',
                         kind: 'meta',
                         metaType: 'matchStart',
-                        quarter: 1
+                        quarter: 1,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
                     }, ...prev.slice(0, 300)]);
                     setAwaitingPeriodStart(true);
                     setAwaitingOvertimeDecision(false);
@@ -3349,22 +3691,17 @@
                     return;
                 }
 
-                if (timeoutIsActive) {
-                    const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                    setGameLog((prev) => [{
-                        id: resumeLogId,
-                        time: getWallClockTime(),
-                        text: 'Resume Play',
-                        kind: 'meta',
-                        metaType: 'timeoutResume',
-                        quarter: currentQuarter
-                    }, ...prev.slice(0, 300)]);
-                    showToast('Play resumed.', 'success');
+                if (periodActionMode === 'startPeriod') {
+                    setPendingPeriodActionMode('startPeriod');
+                    setIsPlayPaused(false);
+                    handleStartNextQuarter();
                     return;
                 }
 
-                if (currentQuarter >= 4 && awaitingOvertimeDecision) {
-                    if (isTieGame) {
+                if (periodActionMode === 'startOvertime' || periodActionMode === 'endGame') {
+                    if (periodActionMode === 'startOvertime') {
+                        setPendingPeriodActionMode('startOvertime');
+                        setIsPlayPaused(false);
                         handleStartOvertime();
                     } else {
                         openEndGameConfirm();
@@ -3372,8 +3709,24 @@
                     return;
                 }
 
-                if (isAwaitingPeriodStart) {
-                    handleStartNextQuarter();
+                if (periodActionMode === 'resume') {
+                    setPendingPeriodActionMode('resume');
+                    setIsPlayPaused(false);
+                    const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                    setGameLog((prev) => [{
+                        id: resumeLogId,
+                        time: getWallClockTime(),
+                        text: 'Resume Play',
+                        kind: 'meta',
+                        metaType: 'playResume',
+                        quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                    }, ...prev.slice(0, 300)]);
+                    if (periodClockSeconds > 0) {
+                        suppressPeriodAutoStopRef.current = true;
+                        setIsPeriodClockRunning(true);
+                    }
+                    showToast('Play resumed.', 'success');
                     return;
                 }
 
@@ -3421,10 +3774,75 @@
                     kind: 'meta',
                     metaType: 'timeout',
                     quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
                     isTeamA
                 }, ...prev.slice(0, 300)]);
+                setIsPlayPaused(true);
+                setIsPeriodClockRunning(false);
 
                 showToast(`Timeout called: ${teamName}`, 'info');
+            };
+
+            const handlePauseGame = () => {
+                if (!canOperateLive) return;
+                if (!isGameLive) return;
+                if (!hasMatchStarted) {
+                    showToast('Press Start Match before pausing game.', 'info');
+                    return;
+                }
+                if (isAwaitingPeriodStart) {
+                    showToast(`Press Start ${nextPeriodStartLabel} before pausing game.`, 'info');
+                    return;
+                }
+                if (timeoutIsActive) {
+                    showToast('Game is already paused. Press Resume Play to continue.', 'info');
+                    return;
+                }
+
+                const pauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                setGameLog((prev) => [{
+                    id: pauseLogId,
+                    time: getWallClockTime(),
+                    text: 'Pause Game',
+                    kind: 'meta',
+                    metaType: 'manualPause',
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                }, ...prev.slice(0, 300)]);
+                setIsPlayPaused(true);
+                setIsPeriodClockRunning(false);
+                showToast('Game paused.', 'info');
+            };
+
+            const handleOfficialsTimeout = () => {
+                if (!canOperateLive) return;
+                if (!isGameLive) return;
+                if (!hasMatchStarted) {
+                    showToast('Press Start Match before calling officials timeout.', 'info');
+                    return;
+                }
+                if (isAwaitingPeriodStart) {
+                    showToast(`Press Start ${nextPeriodStartLabel} before calling officials timeout.`, 'info');
+                    return;
+                }
+                if (timeoutIsActive) {
+                    showToast('Clock already paused. Press Resume Play to continue.', 'info');
+                    return;
+                }
+
+                const officialsLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                setGameLog((prev) => [{
+                    id: officialsLogId,
+                    time: getWallClockTime(),
+                    text: 'Officials Timeout',
+                    kind: 'meta',
+                    metaType: 'officialsTimeout',
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                }, ...prev.slice(0, 300)]);
+                setIsPlayPaused(true);
+                setIsPeriodClockRunning(false);
+                showToast('Officials timeout called.', 'info');
             };
 
             const handleSaveHistoricEdit = async (e) => {
@@ -3567,26 +3985,17 @@
                         setFoulAlert(null);
 
                         setLiveStats(initializedStats);
+                        setLivePlayerSeconds({});
                         setTeamAScore(0);
                         setTeamBScore(0);
                         setCurrentQuarter(1);
+                        setIsPlayPaused(false);
                         setAwaitingOvertimeDecision(false);
                         setAwaitingPeriodStart(false);
                         setActiveAction(null);
                         setCorrectionMode(false);
                         setLoggedHistory([]);
-                        const resetLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                        const resetEvent = {
-                            id: resetLogId,
-                            time: getWallClockTime(),
-                            text: 'Game reset to fresh start',
-                            kind: 'meta',
-                            metaType: 'hardReset',
-                            quarter: 1
-                        };
-                        processedGameLogIdsRef.current.add(resetEvent.id);
-                        enqueueLiveEvent(resetEvent);
-                        setGameLog([resetEvent]);
+                        setGameLog([]);
                         setLineupRevision(0);
                         lineupRevisionRef.current = 0;
                         setConfirmDialog(null);
@@ -4231,6 +4640,8 @@
                         return b.value - a.value;
                     })
                     .slice(0, 3);
+                const topTwoStats = topThreeStats.slice(0, 2);
+                const mobileOneLineStats = [...topTwoStats, { label: 'PF', value: stats.pf || 0 }];
                 const oneLineStats = [...topThreeStats, { label: 'PF', value: stats.pf || 0 }];
                 const pfValue = stats.pf || 0;
 
@@ -4252,24 +4663,42 @@
                             if (!canOperateLive) return;
                             triggerSubModal(player.id, isTeamA);
                         }}
-                        className={`bg-slate-955/90 border p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-stretch justify-between gap-2 transition-all duration-300 ${
+                        className={`bg-slate-955/90 border p-3 rounded-xl flex flex-row items-stretch justify-between gap-2 transition-all duration-300 ${
                             hasActionArmed && teamAccessAllowed
                                 ? 'armed-target hover:bg-slate-900 border-emerald-500/50' 
                                 : 'border-slate-800 hover:border-slate-700/60'
                         } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${isLoggedIn && !teamAccessAllowed ? 'opacity-55 saturate-50' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
                     >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="w-12 md:w-14 text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0">{player.number}</span>
-                            <div className="min-w-0">
-                                <span className="font-extrabold text-xs text-white block whitespace-normal leading-tight md:hidden">{player.name}</span>
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className="w-12 md:w-14 min-h-[52px] text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0 inline-flex items-center justify-center">{player.number}</span>
+                            <div className="min-w-0 flex-1">
+                                <span className="font-extrabold text-[11px] text-white block truncate leading-tight md:hidden">{player.name}</span>
                                 <span className="font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight">{onCourtLastName}</span>
-                                <div className="flex gap-2 mt-1 items-center">
+                                <div className="hidden md:flex gap-2 mt-1 items-center">
                                     {isLoggedIn && !hasActionArmed && <span className="text-[9px] text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">Sub</span>}
                                     {isLoggedIn && !teamAccessAllowed && <span className="text-[9px] text-slate-400 font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 uppercase">Locked</span>}
                                 </div>
                             </div>
                         </div>
-                        <div className="flex items-stretch gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap overflow-x-auto max-w-full self-stretch">
+                        <div className="flex items-stretch gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap overflow-x-auto max-w-full self-auto">
+                            <div className="flex md:hidden items-stretch gap-1.5 w-full justify-end">
+                                {mobileOneLineStats.map((item) => {
+                                    const isPfStat = item.label === 'PF';
+                                    const valueClass = isPfStat
+                                        ? (pfValue >= 5 ? 'text-red-300' : pfValue >= 4 ? 'text-orange-300' : pfValue >= 3 ? 'text-amber-300' : 'text-white')
+                                        : 'text-white';
+                                    const labelClass = isPfStat
+                                        ? (pfValue >= 5 ? 'text-red-400' : pfValue >= 4 ? 'text-orange-400' : pfValue >= 3 ? 'text-amber-400' : 'text-slate-400')
+                                        : 'text-slate-400';
+                                    return (
+                                        <div key={`mobile-line-${item.label}`} className="rounded-md border border-slate-800 bg-slate-900 px-2 py-1.5 text-center min-w-[44px] min-h-[52px] h-full flex flex-col justify-between">
+                                            <div className={`text-[9px] uppercase tracking-wider font-bold leading-none ${labelClass}`}>{item.label}</div>
+                                            <div className={`mt-1 font-mono font-black text-lg leading-none ${valueClass}`}>{item.value}</div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <div className="hidden md:flex items-stretch gap-2">
                             {oneLineStats.map((item) => {
                                 const isPfStat = item.label === 'PF';
                                 const valueClass = isPfStat
@@ -4285,6 +4714,7 @@
                                     </div>
                                 );
                             })}
+                            </div>
                         </div>
                     </div>
                 );
@@ -4544,6 +4974,7 @@
                                                     <div className="col-span-1 text-center">
                                                         <div className="text-slate-600 font-black font-mono text-[10px]">VS</div>
                                                         <div className="mt-0.5 text-[12px] font-black tracking-wide text-orange-300 uppercase leading-none">{getPeriodLabel(currentQuarter)}</div>
+                                                        <div className="mt-1 text-[11px] font-mono font-black text-emerald-300">{periodClockLabel}</div>
                                                     </div>
                                                     <div className="col-span-3 text-center">
                                                         <div className="flex items-center justify-end gap-1 mb-0.5">
@@ -4599,6 +5030,7 @@
                                                 <div className="col-span-1 text-center">
                                                     <div className="text-slate-600 font-black font-mono text-xs">VS</div>
                                                     <div className="mt-1 text-[13px] md:text-[15px] font-black tracking-wide text-orange-300 uppercase leading-none">{getPeriodLabel(currentQuarter)}</div>
+                                                    <div className="mt-1 text-base md:text-lg font-mono font-black text-emerald-300">{periodClockLabel}</div>
                                                 </div>
                                                 <div className="col-span-3 relative text-center pb-4">
                                                     <div className="absolute top-0 right-0 flex items-center gap-1 pointer-events-none">
@@ -4638,17 +5070,23 @@
                                                             color: teamATimeoutEnabled ? '#ffffff' : (liveHomeTeam?.color || '#67e8f9')
                                                         }}
                                                     >
-                                                        {`${(liveHomeTeam?.name || 'Home').toUpperCase()} TIMEOUT (${teamATimeoutUsed}/${timeoutLimit})`}
+                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                            <Icons.Timer />
+                                                            {`${(liveHomeTeam?.name || 'Home').toUpperCase()} TIMEOUT (${teamATimeoutUsed}/${timeoutLimit})`}
+                                                        </span>
                                                     </button>
                                                     <button
                                                         onClick={handlePeriodAction}
                                                         className={`w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
-                                                            periodActionIsStart
+                                                            periodActionIsPositive
                                                                 ? 'bg-emerald-600/25 hover:bg-emerald-600/35 border-emerald-400/70 text-emerald-100 animate-pulse'
                                                                 : 'bg-red-600 hover:bg-red-500 border-red-400 text-white'
                                                         }`}
                                                     >
-                                                        {periodActionLabel}
+                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                            {(periodActionIsStart || periodActionIsResume) ? <Icons.Play /> : (periodActionIsEnd ? <Icons.Stop /> : <Icons.Pause />)}
+                                                            {periodActionLabel}
+                                                        </span>
                                                     </button>
                                                     <button
                                                         onClick={() => handleLogTimeout(false)}
@@ -4660,8 +5098,123 @@
                                                             color: teamBTimeoutEnabled ? '#ffffff' : (liveAwayTeam?.color || '#67e8f9')
                                                         }}
                                                     >
-                                                        {`${(liveAwayTeam?.name || 'Away').toUpperCase()} TIMEOUT (${teamBTimeoutUsed}/${timeoutLimit})`}
+                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                            <Icons.Timer />
+                                                            {`${(liveAwayTeam?.name || 'Away').toUpperCase()} TIMEOUT (${teamBTimeoutUsed}/${timeoutLimit})`}
+                                                        </span>
                                                     </button>
+                                                </div>
+                                                <div className="mt-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShowExtraGameControls((prev) => {
+                                                                const next = !prev;
+                                                                if (!next) {
+                                                                    setShowSyncClockEditor(false);
+                                                                    setIsEditingClockInput(false);
+                                                                }
+                                                                return next;
+                                                            });
+                                                        }}
+                                                        className="w-full font-bold py-2 px-3 rounded-lg text-[10px] md:text-xs border border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800/90 cursor-pointer"
+                                                    >
+                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                            <Icons.Zap />
+                                                            {showExtraGameControls ? 'Hide Extra Game Controls' : 'Show Extra Game Controls'}
+                                                        </span>
+                                                    </button>
+
+                                                    {showExtraGameControls && (
+                                                        <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2">
+                                                            <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
+                                                                <button
+                                                                    onClick={handlePauseGame}
+                                                                    disabled={!canPauseGame}
+                                                                    className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-amber-500/50 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                >
+                                                                    <span className="inline-flex items-center justify-center gap-1">
+                                                                        <Icons.Pause />
+                                                                        Pause Game
+                                                                    </span>
+                                                                </button>
+                                                                <button
+                                                                    onClick={handleOfficialsTimeout}
+                                                                    disabled={!canOfficialsTimeout}
+                                                                    className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-sky-500/50 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                >
+                                                                    <span className="inline-flex items-center justify-center gap-1">
+                                                                        <Icons.Timer />
+                                                                        Officials Timeout
+                                                                    </span>
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={!technicalFoulAction || !canTriggerStatLogging}
+                                                                    onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, operatorFocus === 'away' ? false : true)}
+                                                                    title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
+                                                                    className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/45 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                >
+                                                                    <span className="inline-flex items-center justify-center gap-1">
+                                                                        <Icons.ShieldAlert />
+                                                                        Technical Foul
+                                                                    </span>
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (!showSyncClockEditor) {
+                                                                            setShowSyncClockEditor(true);
+                                                                        }
+                                                                    }}
+                                                                    disabled={showSyncClockEditor}
+                                                                    className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${showSyncClockEditor
+                                                                        ? 'border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed opacity-70'
+                                                                        : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer'}`}
+                                                                >
+                                                                    <span className="inline-flex items-center justify-center gap-1">
+                                                                        <Icons.History />
+                                                                        Sync Clock
+                                                                    </span>
+                                                                </button>
+                                                                {showSyncClockEditor && (
+                                                                    <div className="col-span-4 md:col-span-1 w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-1.5 flex items-center gap-1">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={manualClockInput}
+                                                                            onFocus={() => setIsEditingClockInput(true)}
+                                                                            onBlur={() => setIsEditingClockInput(false)}
+                                                                            onChange={(e) => setManualClockInput(e.target.value)}
+                                                                            placeholder="MM:SS"
+                                                                            className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none"
+                                                                        />
+                                                                        <button
+                                                                            type="button"
+                                                                            onMouseDown={(e) => e.preventDefault()}
+                                                                            onClick={handleApplyManualClock}
+                                                                            className="shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                                                                            aria-label="Save synced clock"
+                                                                            title="Save"
+                                                                        >
+                                                                            <Icons.Save />
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setShowSyncClockEditor(false);
+                                                                                setIsEditingClockInput(false);
+                                                                            }}
+                                                                            className="shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 cursor-pointer"
+                                                                            aria-label="Close sync clock editor"
+                                                                            title="Close"
+                                                                        >
+                                                                            <Icons.X />
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         )}
@@ -4674,7 +5227,7 @@
                                             {!canTriggerStatLogging && (
                                                 <div className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
                                                     {hasMatchStarted
-                                                        ? 'Stat triggers are locked during timeout. Press Resume Play.'
+                                                        ? 'Stat triggers are locked while play is paused. Press Resume Play.'
                                                         : 'Stat triggers are locked until you press Start Match.'}
                                                 </div>
                                             )}
@@ -4700,9 +5253,9 @@
                                             {/* TIER 2 & TIER 3 COMBINED CONTAINER */}
                                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                                                 {/* TIER 2: LARGE SECONDARY KEYS (Rebounds & Assists) */}
-                                                <div className="lg:col-span-5">
+                                                <div className="lg:col-span-12">
                                                     <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🛡️ Transition Keys (Very Common)</span>
-                                                    <div className="grid grid-cols-2 gap-1.5 md:gap-3">
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-3">
                                                         {canOperateLive && secondaryActions.map(act => (
                                                             <button 
                                                                 key={act.id} 
@@ -4735,25 +5288,6 @@
                                                     </div>
                                                 </div>
                                             </div>
-
-                                            {canOperateLive && foulActions.length > 0 && (
-                                                <div>
-                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">⚠️ Foul Actions</span>
-                                                    <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                                                        {foulActions.map((act) => (
-                                                            <button
-                                                                key={act.id}
-                                                                disabled={!canTriggerStatLogging}
-                                                                onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                                title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
-                                                                className={`py-[11px] md:py-2.5 px-1.5 md:px-3 rounded-lg text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
-                                                            >
-                                                                {act.label}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
                                         </div>}
 
                                         {/* Mobile Tab Toggles */}
@@ -4851,7 +5385,14 @@
                                                                 className={`py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''}`}
                                                             >
                                                                 <div className="flex items-center justify-between gap-2">
-                                                                    <span className="text-amber-500">[{(log.time || '').split(' ')[0] || '--:--:--'}]</span>
+                                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                                        <span className="text-amber-500">[{(log.time || '').split(' ')[0] || '--:--:--'}]</span>
+                                                                        {log?.quarter ? (
+                                                                            <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-400">
+                                                                                {getPeriodLabel(log.quarter)} {log.clockRemaining || '--:--'}
+                                                                            </span>
+                                                                        ) : null}
+                                                                    </div>
                                                                     {canRemove && (
                                                                         <button
                                                                             type="button"
@@ -4941,7 +5482,7 @@
 
                                         {/* Sidebar Action Logger */}
                                         <div className={`${canOperateLive ? 'col-span-12 lg:col-span-3' : 'col-span-12 lg:hidden'} flex flex-col gap-4 h-full min-h-0`}>
-                                            <div className={`bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col ${canOperateLive ? 'max-h-[360px] lg:max-h-[296px]' : 'max-h-[420px] md:max-h-[520px] lg:max-h-[504px]'}`}>
+                                            <div className={`bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col ${canOperateLive ? 'max-h-[420px] md:max-h-[520px] lg:max-h-[504px]' : 'max-h-[420px] md:max-h-[520px] lg:max-h-[504px]'}`}>
                                                 <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80">
                                                     <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">PLAY-BY-PLAY</h4>
                                                 </div>
@@ -4964,7 +5505,14 @@
                                                                 className={`py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''}`}
                                                             >
                                                                 <div className="flex items-center justify-between gap-2">
-                                                                    <span className="text-amber-500">[{(log.time || '').split(' ')[0] || '--:--:--'}]</span>
+                                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                                        <span className="text-amber-500">[{(log.time || '').split(' ')[0] || '--:--:--'}]</span>
+                                                                        {log?.quarter ? (
+                                                                            <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-400">
+                                                                                {getPeriodLabel(log.quarter)} {log.clockRemaining || '--:--'}
+                                                                            </span>
+                                                                        ) : null}
+                                                                    </div>
                                                                     {canRemove && (
                                                                         <button
                                                                             type="button"
@@ -4987,59 +5535,7 @@
                                                 </div>
                                             </div>
                                             
-                                            {canOperateLive && <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl md:rounded-2xl space-y-3">
-                                                <div className="space-y-1.5">
-                                                    {canOperateLive && <button onClick={handleResetMatch} className="w-full bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-400 font-bold py-2 px-3 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer">Clear & Restart Game</button>}
-                                                    {canOperateLive && <button onClick={() => setConfirmDialog({ title: "Cancel Match?", text: "This deletes all active progress for this session. No logs will be saved to disk.", onConfirm: () => { setIsGameLive(false); setActiveAction(null); setAwaitingOvertimeDecision(false); setDnpPlayers([]); setLineupRevision(0); lineupRevisionRef.current = 0; setConfirmDialog(null); } })} className="w-full bg-slate-955/60 hover:text-red-300 hover:border-red-900 border border-slate-855 text-slate-500 text-xs py-1.5 rounded-xl transition-all cursor-pointer">Discard Match</button>}
-                                                </div>
-                                            </div>}
                                         </div>
-
-                                        {/* COLLAPSIBLE QUARTER SCORING */}
-                                        <div className="col-span-12 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl mt-4">
-                                            <div
-                                                onClick={() => setShowQuarterScoring(!showQuarterScoring)}
-                                                className="p-4 bg-slate-950 flex items-center justify-between cursor-pointer select-none border-b border-slate-800"
-                                            >
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-xs bg-orange-500/20 text-orange-300 font-bold px-2 py-0.5 rounded border border-orange-500/30">{getPeriodLabel(currentQuarter)}</span>
-                                                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">Scoring by Quarter</h3>
-                                                </div>
-                                                <span className="text-xs font-extrabold text-orange-400 hover:text-orange-300">
-                                                    {showQuarterScoring ? "Hide ▲" : "Show ▼"}
-                                                </span>
-                                            </div>
-
-                                            {showQuarterScoring && (
-                                                <div className="p-4 bg-slate-955/30 overflow-x-auto">
-                                                    <table className="w-full min-w-[520px] text-[11px] font-mono border border-slate-800 rounded-lg overflow-hidden">
-                                                        <thead>
-                                                            <tr className="bg-slate-950/80 text-slate-400 border-b border-slate-800">
-                                                                <th className="py-2 px-3 text-left">Team</th>
-                                                                {liveQuarterStats.map((row) => (
-                                                                    <th key={`live-quarter-head-${row.quarter}`} className="py-2 px-3 text-center">{getPeriodLabel(row.quarter)}</th>
-                                                                ))}
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                                                            <tr>
-                                                                <td className="py-2 px-3 font-bold" style={{ color: teams.find(t => t.id === teamAId)?.color || '#10b981' }}>{teams.find(t => t.id === teamAId)?.name || 'Team A'}</td>
-                                                                {liveQuarterStats.map((row) => (
-                                                                    <td key={`live-quarter-a-${row.quarter}`} className="py-2 px-3 text-center font-black">{row.teamA.pts}</td>
-                                                                ))}
-                                                            </tr>
-                                                            <tr>
-                                                                <td className="py-2 px-3 font-bold" style={{ color: teams.find(t => t.id === teamBId)?.color || '#ef4444' }}>{teams.find(t => t.id === teamBId)?.name || 'Team B'}</td>
-                                                                {liveQuarterStats.map((row) => (
-                                                                    <td key={`live-quarter-b-${row.quarter}`} className="py-2 px-3 text-center font-black">{row.teamB.pts}</td>
-                                                                ))}
-                                                            </tr>
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            )}
-                                        </div>
-
                                         {/* COLLAPSIBLE RUNNING GAME BOXSCORE (FOR BOTH TEAMS' ENTIRE ROSTER) */}
                                         <div className="col-span-12 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl mt-4">
                                             <div 
@@ -5058,8 +5554,39 @@
                                             </div>
 
                                             {showLiveRunningBoxscore && (
-                                                <div className="p-4 grid grid-cols-1 xl:grid-cols-2 gap-6 bg-slate-955/30">
-                                                    {/* Home Team Live Boxscore */}
+                                                <div className="p-4 space-y-4 bg-slate-955/30">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLiveBoxscoreTab('home')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'home' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                        >
+                                                            {`${teams.find(t => t.id === teamAId)?.name || 'Home'} Box Score`}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLiveBoxscoreTab('away')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'away' ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                        >
+                                                            {`${teams.find(t => t.id === teamBId)?.name || 'Away'} Box Score`}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLiveBoxscoreTab('scoring')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'scoring' ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                        >
+                                                            Quarter Scoring
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLiveBoxscoreTab('fouls')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'fouls' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                        >
+                                                            Foul Trouble
+                                                        </button>
+                                                    </div>
+
+                                                    {liveBoxscoreTab === 'home' ? (
                                                     <div className="space-y-2">
                                                         <div className="flex items-center justify-between">
                                                             <div className="flex items-center gap-2">
@@ -5073,6 +5600,7 @@
                                                                 <thead>
                                                                     <tr className="bg-slate-950/80 text-slate-400 font-mono text-[9px] border-b border-slate-800">
                                                                         <th className="py-2 px-3">Player</th>
+                                                                        <th className="py-2 px-2 text-center text-emerald-300">MIN</th>
                                                                         <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                         <th className="py-2 px-2 text-center">FG</th>
                                                                         <th className="py-2 px-2 text-center">3PT</th>
@@ -5104,6 +5632,7 @@
                                                                                     {player.name}
                                                                                     {onCourt && <span className="ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded">On Court</span>}
                                                                                 </td>
+                                                                                <td className="py-1.5 px-2 text-center text-emerald-300 font-bold">{formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-orange-400 font-bold">{pstats.pts}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{totalMade}/{totalAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.fg3m || 0}/{fg3Att}</td>
@@ -5137,8 +5666,7 @@
                                                             </table>
                                                         </div>
                                                     </div>
-
-                                                    {/* Away Team Live Boxscore */}
+                                                    ) : liveBoxscoreTab === 'away' ? (
                                                     <div className="space-y-2">
                                                         <div className="flex items-center justify-between">
                                                             <div className="flex items-center gap-2">
@@ -5152,6 +5680,7 @@
                                                                 <thead>
                                                                     <tr className="bg-slate-950/80 text-slate-400 font-mono text-[9px] border-b border-slate-800">
                                                                         <th className="py-2 px-3">Player</th>
+                                                                        <th className="py-2 px-2 text-center text-emerald-300">MIN</th>
                                                                         <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                         <th className="py-2 px-2 text-center">FG</th>
                                                                         <th className="py-2 px-2 text-center">3PT</th>
@@ -5183,6 +5712,7 @@
                                                                                     {player.name}
                                                                                     {onCourt && <span className="ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded">On Court</span>}
                                                                                 </td>
+                                                                                <td className="py-1.5 px-2 text-center text-emerald-300 font-bold">{formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-orange-400 font-bold">{pstats.pts}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{totalMade}/{totalAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.fg3m || 0}/{fg3Att}</td>
@@ -5216,9 +5746,111 @@
                                                             </table>
                                                         </div>
                                                     </div>
+                                                    ) : liveBoxscoreTab === 'scoring' ? (
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <h4 className="text-xs font-black uppercase text-slate-200">Scoring By Quarter</h4>
+                                                            <span className="text-[10px] font-mono text-slate-500">Live quarter breakdown</span>
+                                                        </div>
+                                                        <div className="overflow-x-auto rounded-xl border border-slate-850/80 bg-slate-950/40">
+                                                            <table className="w-full min-w-[520px] text-[11px] font-mono border-collapse">
+                                                                <thead>
+                                                                    <tr className="bg-slate-950/80 text-slate-400 border-b border-slate-800">
+                                                                        <th className="py-2 px-3 text-left">Team</th>
+                                                                        {liveQuarterStats.map((row) => (
+                                                                            <th key={`live-boxscore-quarter-head-${row.quarter}`} className="py-2 px-3 text-center">{getPeriodLabel(row.quarter)}</th>
+                                                                        ))}
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                                                                    <tr>
+                                                                        <td className="py-2 px-3 font-bold" style={{ color: teams.find(t => t.id === teamAId)?.color || '#10b981' }}>{teams.find(t => t.id === teamAId)?.name || 'Team A'}</td>
+                                                                        {liveQuarterStats.map((row) => (
+                                                                            <td key={`live-boxscore-quarter-a-${row.quarter}`} className="py-2 px-3 text-center font-black">{row.teamA.pts}</td>
+                                                                        ))}
+                                                                    </tr>
+                                                                    <tr>
+                                                                        <td className="py-2 px-3 font-bold" style={{ color: teams.find(t => t.id === teamBId)?.color || '#3b82f6' }}>{teams.find(t => t.id === teamBId)?.name || 'Team B'}</td>
+                                                                        {liveQuarterStats.map((row) => (
+                                                                            <td key={`live-boxscore-quarter-b-${row.quarter}`} className="py-2 px-3 text-center font-black">{row.teamB.pts}</td>
+                                                                        ))}
+                                                                    </tr>
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                    ) : (
+                                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                                        <div className="rounded-xl border border-slate-850/80 bg-slate-950/40 p-3 space-y-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: teams.find(t => t.id === teamAId)?.color || '#10b981' }} />
+                                                                <h4 className="text-xs font-black uppercase text-slate-200">{teams.find(t => t.id === teamAId)?.name || 'Home'} Foul Trouble</h4>
+                                                            </div>
+                                                            {homeFoulTroublePlayers.length === 0 ? (
+                                                                <p className="text-[11px] text-slate-500 italic">No home players currently in foul trouble.</p>
+                                                            ) : (
+                                                                <div className="space-y-2">
+                                                                    {homeFoulTroublePlayers.map((player) => (
+                                                                        <div key={`home-foul-trouble-${player.id}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+                                                                            <div className="min-w-0">
+                                                                                <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
+                                                                                <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : 'text-amber-300'}`}>{player.fouls >= 5 ? 'Disqualified' : 'One foul from disqualification'}</div>
+                                                                            </div>
+                                                                            <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-amber-500/50 bg-amber-500/15 text-amber-300'}`}>{player.fouls} PF</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="rounded-xl border border-slate-850/80 bg-slate-950/40 p-3 space-y-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: teams.find(t => t.id === teamBId)?.color || '#3b82f6' }} />
+                                                                <h4 className="text-xs font-black uppercase text-slate-200">{teams.find(t => t.id === teamBId)?.name || 'Away'} Foul Trouble</h4>
+                                                            </div>
+                                                            {awayFoulTroublePlayers.length === 0 ? (
+                                                                <p className="text-[11px] text-slate-500 italic">No away players currently in foul trouble.</p>
+                                                            ) : (
+                                                                <div className="space-y-2">
+                                                                    {awayFoulTroublePlayers.map((player) => (
+                                                                        <div key={`away-foul-trouble-${player.id}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+                                                                            <div className="min-w-0">
+                                                                                <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
+                                                                                <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : 'text-amber-300'}`}>{player.fouls >= 5 ? 'Disqualified' : 'One foul from disqualification'}</div>
+                                                                            </div>
+                                                                            <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-amber-500/50 bg-amber-500/15 text-amber-300'}`}>{player.fouls} PF</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
+
+                                        {canOperateLive && (
+                                            <div className="col-span-12 mt-2">
+                                                <div className="flex justify-end">
+                                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                                    <button
+                                                        onClick={handleResetMatch}
+                                                        className="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                                                    >
+                                                        <Icons.History />
+                                                        Restart Match
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setConfirmDialog({ title: "Cancel Match?", text: "This deletes all active progress for this session. No logs will be saved to disk.", onConfirm: () => { setIsGameLive(false); setIsPlayPaused(false); setActiveAction(null); setAwaitingOvertimeDecision(false); setDnpPlayers([]); setLineupRevision(0); lineupRevisionRef.current = 0; setConfirmDialog(null); } })}
+                                                        className="bg-red-600/15 hover:bg-red-600/25 border border-red-500/40 text-red-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                                                    >
+                                                        <Icons.Trash />
+                                                        Discard Live Match
+                                                    </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -5680,7 +6312,8 @@
                                             </div>
                                         );
                                     })}
-                                </div>
+                                        </div>
+
                                 </>
                                 )}
                             </div>
@@ -6532,6 +7165,9 @@
 
                                                                                 <div className="text-center">
                                                                                     <span className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-950/95 px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-widest text-slate-400">
+                                                                                        {getPeriodLabel(log.quarter || 1)} {log.clockRemaining || '--:--'}
+                                                                                    </span>
+                                                                                    <span className="mt-1 inline-flex items-center justify-center rounded-full border border-slate-800 bg-slate-900/90 px-2 py-0.5 text-[9px] font-mono uppercase tracking-widest text-slate-500">
                                                                                         {timeLabel}
                                                                                     </span>
                                                                                 </div>
@@ -7045,17 +7681,17 @@
                                                     className="w-full p-1.5 bg-slate-955 border border-slate-800/55 rounded-xl text-slate-200 text-left cursor-pointer hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55"
                                                 >
                                                     <div className="flex items-center gap-2">
+                                                        <span className="w-10 h-10 rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100 text-base">{p.number}</span>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="text-[12px] font-black text-white truncate leading-tight">{p.name}</div>
+                                                            <div className={`text-[9px] font-bold mt-0.5 leading-none ${isFouledOut ? 'text-red-400' : 'text-emerald-400'}`}>{isFouledOut ? '5 PF - Not Eligible' : 'Tap to Sub In'}</div>
+                                                        </div>
                                                         <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400">
                                                             {p.pictureUrl ? (
                                                                 <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" />
                                                             ) : (
                                                                 <span>{initials}</span>
                                                             )}
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div>
-                                                            <div className="text-[12px] font-black text-white truncate leading-tight mt-0.5">{p.name}</div>
-                                                            <div className={`text-[9px] font-bold mt-0.5 leading-none ${isFouledOut ? 'text-red-400' : 'text-emerald-400'}`}>{isFouledOut ? '5 PF - Not Eligible' : 'Tap to Sub In'}</div>
                                                         </div>
                                                     </div>
                                                 </button>
@@ -7114,17 +7750,17 @@
                                                     className={`w-full p-1.5 rounded-xl border transition-colors text-left disabled:opacity-35 disabled:cursor-not-allowed ${isSelected ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-100' : 'bg-slate-955 border-slate-800/55 text-slate-200 hover:border-emerald-500/45'} ${isSlotLocked ? 'saturate-0' : ''} disabled:hover:border-slate-800/55`}
                                                 >
                                                     <div className="flex items-center gap-2">
+                                                        <span className="w-10 h-10 rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100 text-base">{p.number}</span>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="text-[12px] font-black text-white truncate leading-tight">{p.name}</div>
+                                                            <div className={isFouledOut ? 'text-[9px] text-red-400 font-bold mt-0.5' : isSlotLocked ? 'text-[9px] text-slate-500 font-bold mt-0.5' : isSelected ? 'text-[9px] text-emerald-300 font-bold mt-0.5' : 'text-[9px] text-slate-400 font-bold mt-0.5'}>{isFouledOut ? '5 PF' : isSlotLocked ? 'Full' : isSelected ? 'Selected' : 'Select'}</div>
+                                                        </div>
                                                         <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400">
                                                             {p.pictureUrl ? (
                                                                 <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" />
                                                             ) : (
                                                                 <span>{initials}</span>
                                                             )}
-                                                        </div>
-                                                        <div className="min-w-0 flex-1">
-                                                            <div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div>
-                                                            <div className="text-[12px] font-black text-white truncate leading-tight mt-0.5">{p.name}</div>
-                                                            <div className={isFouledOut ? 'text-[9px] text-red-400 font-bold mt-0.5' : isSlotLocked ? 'text-[9px] text-slate-500 font-bold mt-0.5' : isSelected ? 'text-[9px] text-emerald-300 font-bold mt-0.5' : 'text-[9px] text-slate-400 font-bold mt-0.5'}>{isFouledOut ? '5 PF' : isSlotLocked ? 'Full' : isSelected ? 'Selected' : 'Select'}</div>
                                                         </div>
                                                     </div>
                                                 </button>
@@ -7173,7 +7809,7 @@
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(true)} onClick={() => handlePlayerClick(id, true)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div><div className="min-w-0 flex-1"><div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight mt-0.5`}>{p.name}</div></div></div></button> : null;
+                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(true)} onClick={() => handlePlayerClick(id, true)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
                                             })}
                                         </div>
                                     </div>}
@@ -7184,7 +7820,7 @@
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(false)} onClick={() => handlePlayerClick(id, false)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div><div className="min-w-0 flex-1"><div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight mt-0.5`}>{p.name}</div></div></div></button> : null;
+                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(false)} onClick={() => handlePlayerClick(id, false)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
                                             })}
                                         </div>
                                     </div>}
