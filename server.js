@@ -47,6 +47,13 @@ function ensureGamesLogColumn() {
   }
 }
 
+function ensureGamesYouTubeColumn() {
+  const columns = db.prepare('PRAGMA table_info(games)').all();
+  if (!columns.some((column) => column.name === 'youtube_url')) {
+    db.exec('ALTER TABLE games ADD COLUMN youtube_url TEXT NOT NULL DEFAULT ""');
+  }
+}
+
 function ensurePlayerProfileColumns() {
   const columns = db.prepare('PRAGMA table_info(players)').all();
   const wanted = [
@@ -245,6 +252,7 @@ db.exec(`
     team_b_name TEXT NOT NULL,
     team_a_score INTEGER NOT NULL,
     team_b_score INTEGER NOT NULL,
+    youtube_url TEXT NOT NULL DEFAULT '',
     sort_order INTEGER NOT NULL DEFAULT 0
   );
 
@@ -308,6 +316,7 @@ db.exec(`
 `);
 
 ensureGamesLogColumn();
+ensureGamesYouTubeColumn();
 ensurePlayerProfileColumns();
 ensurePlayerTotalsTable();
 ensurePlayersTableWithoutLegacyStats();
@@ -357,9 +366,9 @@ const upsertPlayerTotalsStmt = db.prepare(`
 
 const insertGameStmt = db.prepare(`
   INSERT INTO games (
-    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, sort_order
+    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, youtube_url, sort_order
   ) VALUES (
-    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @sort_order
+    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @youtube_url, @sort_order
   )
 `);
 
@@ -409,7 +418,7 @@ const selectPlayersStmt = db.prepare(`
   ORDER BY p.sort_order ASC, p.id ASC
 `);
 const selectGamesStmt = db.prepare(`
-  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json
+  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, youtube_url
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
@@ -570,7 +579,8 @@ function readState() {
     teamAScore: toInt(game.team_a_score),
     teamBScore: toInt(game.team_b_score),
     playerStats: statsByGame.get(game.id) || {},
-    gameLog: parseJsonSafe(game.game_log_json, [])
+    gameLog: parseJsonSafe(game.game_log_json, []),
+    youtubeUrl: game.youtube_url || ''
   }));
 
   return {
@@ -645,6 +655,7 @@ const writeGamesTransaction = db.transaction((nextGames) => {
       team_a_score: toInt(game.teamAScore),
       team_b_score: toInt(game.teamBScore),
       game_log_json: JSON.stringify(Array.isArray(game.gameLog) ? game.gameLog : []),
+      youtube_url: typeof game.youtubeUrl === 'string' ? game.youtubeUrl : '',
       sort_order: gameIndex
     });
 

@@ -81,6 +81,7 @@
             const [showLiveRunningBoxscore, setShowLiveRunningBoxscore] = useState(true);
             const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
             const [historyDetailTab, setHistoryDetailTab] = useState('potg');
+            const [historyVideoInput, setHistoryVideoInput] = useState('');
             const [awaitingOvertimeDecision, setAwaitingOvertimeDecision] = useState(false);
             const [awaitingPeriodStart, setAwaitingPeriodStart] = useState(false);
 
@@ -684,6 +685,46 @@
                 const entries = Array.isArray(logs) ? logs : [];
                 const resetIndex = entries.findIndex((event) => event?.kind === 'meta' && event?.metaType === 'hardReset');
                 return resetIndex >= 0 ? entries.slice(0, resetIndex + 1) : entries;
+            };
+
+            const extractYouTubeVideoId = (rawUrl = '') => {
+                const value = String(rawUrl || '').trim();
+                if (!value) return '';
+
+                try {
+                    const parsed = new URL(value);
+                    const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+
+                    if (host === 'youtu.be') {
+                        const idFromPath = parsed.pathname.replace(/^\//, '').split('/')[0];
+                        return /^[A-Za-z0-9_-]{11}$/.test(idFromPath) ? idFromPath : '';
+                    }
+
+                    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+                        const fromQuery = parsed.searchParams.get('v');
+                        if (fromQuery && /^[A-Za-z0-9_-]{11}$/.test(fromQuery)) return fromQuery;
+
+                        const pathParts = parsed.pathname.split('/').filter(Boolean);
+                        if ((pathParts[0] === 'shorts' || pathParts[0] === 'embed' || pathParts[0] === 'live') && pathParts[1]) {
+                            return /^[A-Za-z0-9_-]{11}$/.test(pathParts[1]) ? pathParts[1] : '';
+                        }
+                    }
+                } catch (error) {
+                    const fallbackMatch = value.match(/(?:v=|youtu\.be\/|embed\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
+                    return fallbackMatch ? fallbackMatch[1] : '';
+                }
+
+                return '';
+            };
+
+            const normalizeYouTubeUrl = (rawUrl = '') => {
+                const videoId = extractYouTubeVideoId(rawUrl);
+                return videoId ? `https://www.youtube.com/watch?v=${videoId}` : '';
+            };
+
+            const getYouTubeEmbedUrl = (rawUrl = '') => {
+                const videoId = extractYouTubeVideoId(rawUrl);
+                return videoId ? `https://www.youtube.com/embed/${videoId}` : '';
             };
 
             function hasAvailableBenchPlayer(isTeamA) {
@@ -1517,6 +1558,14 @@
             const homeCanAddOnCourt = isGameLive && teamALineup.length < 5 && hasAvailableBenchPlayer(true);
             const awayCanAddOnCourt = isGameLive && teamBLineup.length < 5 && hasAvailableBenchPlayer(false);
 
+            useEffect(() => {
+                if (!selectedHistoryGameId) {
+                    setHistoryVideoInput('');
+                    return;
+                }
+                setHistoryVideoInput(selectedHistoryGame?.youtubeUrl || '');
+            }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.youtubeUrl : '']);
+
             /* Managing body scrolling locks */
             useEffect(() => {
                 const isAnyModalOpen = showNewTeamModal || showNewPlayerModal || showSubstitutionModal || showAddFromBenchModal || showLoggingModal || !!advancedEditingPlayer || !!confirmDialog || !!foulAlert || showAuthModal;
@@ -2025,6 +2074,31 @@
                 setGames(updatedGames);
                 setTeams(normalizeTeamsForStorage(updatedTeams));
                 await saveFullState(updatedTeams, updatedGames);
+            };
+
+            const handleSaveGameVideoLink = async (gameId) => {
+                if (!gameId) return;
+                const normalizedUrl = normalizeYouTubeUrl(historyVideoInput);
+
+                if (historyVideoInput.trim() && !normalizedUrl) {
+                    showToast('Please enter a valid YouTube link.', 'error');
+                    return;
+                }
+
+                const updatedGames = games.map((existingGame) => {
+                    if (existingGame.id !== gameId) return existingGame;
+                    const nextGame = { ...existingGame };
+                    if (normalizedUrl) {
+                        nextGame.youtubeUrl = normalizedUrl;
+                    } else {
+                        delete nextGame.youtubeUrl;
+                    }
+                    return nextGame;
+                });
+
+                setGames(updatedGames);
+                await saveFullState(teams, updatedGames);
+                showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
             };
 
             const handleExportData = () => {
@@ -4064,7 +4138,7 @@
                                 <span className="font-extrabold text-xs text-white block whitespace-normal leading-tight md:hidden">{player.name}</span>
                                 <span className="font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight">{onCourtLastName}</span>
                                 <div className="flex gap-2 mt-1 items-center">
-                                    {isLoggedIn && !hasActionArmed && <span className="text-[9px] text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">Tap to sub</span>}
+                                    {isLoggedIn && !hasActionArmed && <span className="text-[9px] text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">Sub</span>}
                                     {isLoggedIn && !teamAccessAllowed && <span className="text-[9px] text-slate-400 font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 uppercase">Locked</span>}
                                 </div>
                             </div>
@@ -5678,6 +5752,7 @@
                                         const topTeamBPerformers = getTopTeamPerformers(teamBObj, game, 3);
                                         const teamALeaders = getGameTeamLeaders(teamAObj, game);
                                         const teamBLeaders = getGameTeamLeaders(teamBObj, game);
+                                        const videoEmbedUrl = getYouTubeEmbedUrl(game.youtubeUrl || '');
                                         const tabButtons = [
                                             ...(playerOfTheGame ? [{ id: 'potg', label: 'POTG' }] : []),
                                             { id: 'scoring', label: 'Scoring' },
@@ -5685,6 +5760,7 @@
                                             { id: 'leaders', label: 'Leaders' },
                                             { id: 'home', label: game.teamAName },
                                             { id: 'away', label: game.teamBName },
+                                            { id: 'video', label: 'Video' },
                                             { id: 'pbp', label: 'Play-by-Play' }
                                         ];
 
@@ -5737,6 +5813,46 @@
                                                         </button>
                                                     ))}
                                                 </div>
+
+                                                {historyDetailTab === 'video' && (
+                                                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-3">
+                                                        {canOperateLive && (
+                                                            <div className="flex flex-col md:flex-row md:items-end gap-2">
+                                                                <div className="flex-1">
+                                                                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">YouTube Game Video</label>
+                                                                    <input
+                                                                        type="url"
+                                                                        value={historyVideoInput}
+                                                                        onChange={(e) => setHistoryVideoInput(e.target.value)}
+                                                                        placeholder="https://www.youtube.com/watch?v=..."
+                                                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                                                                    />
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleSaveGameVideoLink(game.id)}
+                                                                    className="px-3 py-2 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                                                                >
+                                                                    Save Video Link
+                                                                </button>
+                                                            </div>
+                                                        )}
+
+                                                        {videoEmbedUrl ? (
+                                                            <div className="rounded-xl overflow-hidden border border-slate-800 bg-black">
+                                                                <iframe
+                                                                    src={videoEmbedUrl}
+                                                                    title={`Game video ${game.id}`}
+                                                                    className="w-full aspect-video"
+                                                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                                                    allowFullScreen
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-[11px] text-slate-500">No video attached for this game yet.</p>
+                                                        )}
+                                                    </div>
+                                                )}
 
                                                 {/* PLAYER OF THE GAME */}
                                                 {historyDetailTab === 'potg' && playerOfTheGame && (
@@ -5881,7 +5997,6 @@
                                                                 <span className="text-slate-500">Leader</span>
                                                                 <span style={{ color: teamBObj?.color || '#ef4444' }}>{game.teamBName}</span>
                                                             </div>
-
                                                             <div className="rounded-xl border border-slate-800/70 overflow-hidden">
                                                             {[
                                                                 ['PTS', teamALeaders.find((item) => item.label === 'PTS'), teamBLeaders.find((item) => item.label === 'PTS')],
@@ -5910,7 +6025,7 @@
                                                                             <div className="relative z-10 grid grid-cols-[1fr_auto] items-center gap-3">
                                                                                 <div className="min-w-0 text-right">
                                                                                     <div className="text-xl leading-none font-black text-slate-100">{hasALeader ? teamALeader.value : '-'}</div>
-                                                                                    <div className="mt-1 flex flex-wrap justify-end gap-x-1.5 gap-y-0.5 leading-tight">
+                                                                                    <div className="hidden lg:flex mt-1 flex-wrap justify-end gap-x-1.5 gap-y-0.5 leading-tight">
                                                                                         {hasALeader ? aLeaders.map((leader, index) => (
                                                                                             <React.Fragment key={`leader-a-name-${label}-${leader.id}`}>
                                                                                                 {index > 0 ? <span className="text-[10px] font-bold text-slate-600">/</span> : null}
@@ -5965,7 +6080,7 @@
                                                                                 </div>
                                                                                 <div className="min-w-0 text-left">
                                                                                     <div className="text-xl leading-none font-black text-slate-100">{hasBLeader ? teamBLeader.value : '-'}</div>
-                                                                                    <div className="mt-1 flex flex-wrap justify-start gap-x-1.5 gap-y-0.5 leading-tight">
+                                                                                    <div className="hidden lg:flex mt-1 flex-wrap justify-start gap-x-1.5 gap-y-0.5 leading-tight">
                                                                                         {hasBLeader ? bLeaders.map((leader, index) => (
                                                                                             <React.Fragment key={`leader-b-name-${label}-${leader.id}`}>
                                                                                                 {index > 0 ? <span className="text-[10px] font-bold text-slate-600">/</span> : null}
