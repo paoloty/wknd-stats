@@ -229,18 +229,36 @@
             const [showAuthModal, setShowAuthModal] = useState(false);
             const [authFormRole, setAuthFormRole] = useState('operator');
             const [authPassword, setAuthPassword] = useState('');
+            const [operatorFocus, setOperatorFocus] = useState('both');
 
             const canOperateLive = authRole === 'operator' || authRole === 'admin';
             const canEditPlayers = authRole === 'operator' || authRole === 'admin';
             const isLoggedIn = authRole !== 'viewer';
             const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
+            const OPERATOR_FOCUS_KEY = 'wknd_live_operator_focus';
+            const operatorFocusOptions = [
+                { id: 'home', label: 'HOME' },
+                { id: 'away', label: 'AWAY' },
+                { id: 'both', label: 'BOTH' }
+            ];
 
             useEffect(() => {
                 const savedRole = localStorage.getItem('wknd_access_role');
                 if (savedRole === 'operator' || savedRole === 'admin') {
                     setAuthRole(savedRole);
                 }
+
+                const savedFocus = localStorage.getItem(OPERATOR_FOCUS_KEY);
+                if (savedFocus === 'home' || savedFocus === 'away' || savedFocus === 'both') {
+                    setOperatorFocus(savedFocus);
+                }
             }, []);
+
+            useEffect(() => {
+                try {
+                    localStorage.setItem(OPERATOR_FOCUS_KEY, operatorFocus);
+                } catch (e) {}
+            }, [operatorFocus]);
 
             const handleAuthLogin = async (e) => {
                 e.preventDefault();
@@ -269,6 +287,32 @@
                 setActiveAction(null);
                 showToast('Logged out. Viewer access only.', 'info');
             };
+
+            const canOperateTeam = (isTeamA) => {
+                if (!canOperateLive) return false;
+                if (operatorFocus === 'both') return true;
+                return operatorFocus === (isTeamA ? 'home' : 'away');
+            };
+
+            const ensureTeamOperationAccess = (isTeamA, actionLabel = 'operate on this team') => {
+                if (canOperateTeam(isTeamA)) return true;
+                const teamLabel = isTeamA ? 'HOME' : 'AWAY';
+                showToast(`Focus is set to ${operatorFocus.toUpperCase()}. Switch to ${teamLabel} or BOTH to ${actionLabel}.`, 'info');
+                return false;
+            };
+
+            const openActionForTeam = (action, isTeamA) => {
+                if (!canOperateTeam(isTeamA)) {
+                    ensureTeamOperationAccess(isTeamA, 'log stats for this team');
+                    return;
+                }
+                setActiveAction(action);
+                setShowLoggingModal(true);
+            };
+
+            const showHomeLivePanel = !canOperateLive || operatorFocus !== 'away';
+            const showAwayLivePanel = !canOperateLive || operatorFocus !== 'home';
+            const isCompactRecordActionModal = canOperateLive && operatorFocus === 'both' && showHomeLivePanel && showAwayLivePanel;
 
             const cloneStatsMap = (source = {}) => {
                 const cloned = {};
@@ -2350,6 +2394,7 @@
 
             const handlePlayerClick = (playerId, isTeamA) => {
                 if (!canOperateLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
                 if (!activeAction) return;
                 if (!hasMatchStarted) {
                     showToast('Press Start Match before logging stats.', 'info');
@@ -2641,6 +2686,7 @@
 
             const triggerSubModal = (playerId, isTeamA) => {
                 if (!canOperateLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'manage substitutions for this team')) return;
                 const playerObj = teams.flatMap(t => t.players).find(p => p.id === playerId);
                 if (!playerObj) return;
                 setSubTargetPlayer({ id: playerId, name: playerObj.name, number: playerObj.number, team: isTeamA ? 'A' : 'B' });
@@ -2649,6 +2695,7 @@
 
             const executeSubstitution = (outId, inId, isTeamA) => {
                 if (!canOperateLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'manage substitutions for this team')) return;
                 const teamObj = isTeamA ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
                 const outPlayer = teamObj?.players.find(p => p.id === outId);
                 const inPlayer = teamObj?.players.find(p => p.id === inId);
@@ -2727,6 +2774,7 @@
             const handleClearOnCourtPlayers = (isTeamA) => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'clear on-court players for this team')) return;
 
                 const teamId = isTeamA ? teamAId : teamBId;
                 const currentLineup = isTeamA ? teamALineup : teamBLineup;
@@ -2786,6 +2834,7 @@
             const handleOpenAddFromBenchModal = (isTeamA) => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'add bench players for this team')) return;
 
                 const teamId = isTeamA ? teamAId : teamBId;
                 const teamObj = teams.find((t) => t.id === teamId);
@@ -2811,6 +2860,7 @@
             const handleAddOnCourtPlayer = (playerId, isTeamA) => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'add players for this team')) return;
 
                 const teamId = isTeamA ? teamAId : teamBId;
                 const teamObj = teams.find((t) => t.id === teamId);
@@ -2891,6 +2941,7 @@
             const handleAddMultipleOnCourtPlayers = (playerIds, isTeamA) => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'add players for this team')) return;
 
                 const teamId = isTeamA ? teamAId : teamBId;
                 const teamObj = teams.find((t) => t.id === teamId);
@@ -3144,6 +3195,7 @@
             const handleLogTimeout = (isTeamA) => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'call timeout for this team')) return;
                 if (!hasMatchStarted) {
                     showToast('Press Start Match before calling timeout.', 'info');
                     return;
@@ -3995,8 +4047,9 @@
                 const pfValue = stats.pf || 0;
 
                 const isDisqualified = stats.pf >= 5;
-                const canSelect = hasActionArmed && !isDisqualified;
-                const canSubstitute = !hasActionArmed && canOperateLive && !isDisqualified;
+                const teamAccessAllowed = canOperateTeam(isTeamA);
+                const canSelect = hasActionArmed && teamAccessAllowed && !isDisqualified;
+                const canSubstitute = !hasActionArmed && canOperateLive && teamAccessAllowed && !isDisqualified;
 
                 return (
                     <div 
@@ -4012,10 +4065,10 @@
                             triggerSubModal(player.id, isTeamA);
                         }}
                         className={`bg-slate-955/90 border p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-stretch justify-between gap-2 transition-all duration-300 ${
-                            hasActionArmed 
+                            hasActionArmed && teamAccessAllowed
                                 ? 'armed-target hover:bg-slate-900 border-emerald-500/50' 
                                 : 'border-slate-800 hover:border-slate-700/60'
-                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
+                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${!teamAccessAllowed ? 'opacity-55 saturate-50' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
                     >
                         <div className="flex items-center gap-2.5 min-w-0">
                             <span className="w-12 md:w-14 text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0">{player.number}</span>
@@ -4024,6 +4077,7 @@
                                 <span className="font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight">{onCourtLastName}</span>
                                 <div className="flex gap-2 mt-1 items-center">
                                     {isLoggedIn && !hasActionArmed && <span className="text-[9px] text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">Tap to sub</span>}
+                                    {isLoggedIn && !teamAccessAllowed && <span className="text-[9px] text-slate-400 font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 uppercase">Locked</span>}
                                 </div>
                             </div>
                         </div>
@@ -4205,6 +4259,21 @@
                                         {canOperateLive && (
                                             <div className="max-w-xl mx-auto bg-slate-900/65 rounded-2xl border border-slate-800 p-6 shadow-2xl">
                                                 <form onSubmit={handleStartMatch} className="space-y-4">
+                                                    <div>
+                                                        <div className="block text-slate-400 text-xs font-bold mb-2 uppercase">Operator Focus</div>
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            {operatorFocusOptions.map((option) => (
+                                                                <button
+                                                                    key={`focus-prelive-${option.id}`}
+                                                                    type="button"
+                                                                    onClick={() => setOperatorFocus(option.id)}
+                                                                    className={`rounded-xl border px-3 py-2 text-[11px] font-black tracking-wide cursor-pointer transition-all ${operatorFocus === option.id ? 'border-orange-400 bg-orange-500/20 text-orange-100 shadow-lg' : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'}`}
+                                                                >
+                                                                    {option.label}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
                                                     <div className="grid grid-cols-2 gap-4">
                                                         <div>
                                                             <label className="block text-slate-400 text-xs font-bold mb-1 uppercase">Home (A)</label>
@@ -4278,14 +4347,28 @@
                                             <div className="col-span-12 sticky top-2 z-30 rounded-xl border border-orange-400/40 bg-gradient-to-r from-slate-900/95 via-slate-900/95 to-slate-950/95 p-3 md:p-4 shadow-[0_12px_28px_rgba(0,0,0,0.45)] backdrop-blur-sm">
                                                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                                                     <div className="text-[10px] md:text-[11px] font-black uppercase tracking-wider text-orange-300">Critical Controls</div>
-                                                    <div className="text-[10px] font-bold text-slate-300">
-                                                        {hasMatchStarted ? `Timeout Window: ${timeoutScopeLabel}` : 'Press Start Match before first stat log'}
+                                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                                        <div className="inline-flex items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-950/60 p-1">
+                                                            {operatorFocusOptions.map((option) => (
+                                                                <button
+                                                                    key={`focus-live-${option.id}`}
+                                                                    type="button"
+                                                                    onClick={() => setOperatorFocus(option.id)}
+                                                                    className={`rounded-md px-2.5 py-1 text-[10px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`}
+                                                                >
+                                                                    {option.label}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        <div className="text-[10px] font-bold text-slate-300">
+                                                            {hasMatchStarted ? `Timeout Window: ${timeoutScopeLabel}` : 'Press Start Match before first stat log'}
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                                     <button
                                                         onClick={() => handleLogTimeout(true)}
-                                                        disabled={!teamATimeoutEnabled}
+                                                            disabled={!teamATimeoutEnabled || !canOperateTeam(true)}
                                                         className="w-full font-black py-3 px-3 rounded-xl text-[11px] md:text-xs tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
                                                         style={{
                                                             backgroundColor: `${liveHomeTeam?.color || '#06b6d4'}${teamATimeoutEnabled ? '66' : '22'}`,
@@ -4307,7 +4390,7 @@
                                                     </button>
                                                     <button
                                                         onClick={() => handleLogTimeout(false)}
-                                                        disabled={!teamBTimeoutEnabled}
+                                                        disabled={!teamBTimeoutEnabled || !canOperateTeam(false)}
                                                         className="w-full font-black py-3 px-3 rounded-xl text-[11px] md:text-xs tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
                                                         style={{
                                                             backgroundColor: `${liveAwayTeam?.color || '#06b6d4'}${teamBTimeoutEnabled ? '66' : '22'}`,
@@ -4342,7 +4425,7 @@
                                                         <button 
                                                             key={act.id} 
                                                             disabled={!canTriggerStatLogging}
-                                                            onClick={() => { setActiveAction(act); setShowLoggingModal(true); }}
+                                                            onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                             title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
                                                             className={`py-5 md:py-6 px-4 rounded-2xl text-center text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                         >
@@ -4362,7 +4445,7 @@
                                                             <button 
                                                                 key={act.id} 
                                                                 disabled={!canTriggerStatLogging}
-                                                                onClick={() => { setActiveAction(act); setShowLoggingModal(true); }}
+                                                                onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
                                                                 className={`py-4 px-4 rounded-xl text-center text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
@@ -4380,7 +4463,7 @@
                                                             <button 
                                                                 key={act.id} 
                                                                 disabled={!canTriggerStatLogging}
-                                                                onClick={() => { setActiveAction(act); setShowLoggingModal(true); }}
+                                                                onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
                                                                 className={`py-2.5 px-2 rounded-lg text-center text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
@@ -4399,7 +4482,7 @@
                                                             <button
                                                                 key={act.id}
                                                                 disabled={!canTriggerStatLogging}
-                                                                onClick={() => { setActiveAction(act); setShowLoggingModal(true); }}
+                                                                onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={!canTriggerStatLogging ? 'Press Start Match first' : undefined}
                                                                 className={`py-2.5 px-3 rounded-lg text-center text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
@@ -4418,8 +4501,8 @@
                                         </div>
 
                                         {/* Main Courtside tracking zones */}
-                                        <div className={`col-span-12 ${canOperateLive ? 'lg:col-span-9 grid grid-cols-1 md:grid-cols-2' : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]'} gap-4`}>
-                                            <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'home' ? 'block' : 'hidden md:block'}`}>
+                                        <div className={`col-span-12 ${canOperateLive ? `lg:col-span-9 grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'}` : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]'} gap-4`}>
+                                            {showHomeLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'home' || !showAwayLivePanel ? 'block' : 'hidden md:block'}`}>
                                                 <div className="flex items-center justify-between gap-2 mb-1">
                                                     <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - HOME</div>
                                                     {canOperateLive && (
@@ -4428,6 +4511,7 @@
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => handleOpenAddFromBenchModal(true)}
+                                                                    disabled={!canOperateTeam(true)}
                                                                     className="px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer"
                                                                 >
                                                                     Add Player
@@ -4437,6 +4521,7 @@
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => handleClearOnCourtPlayers(true)}
+                                                                    disabled={!canOperateTeam(true)}
                                                                     className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer"
                                                                 >
                                                                     Clear
@@ -4466,7 +4551,7 @@
                                                                         <button
                                                                             key={`add-home-${benchId}`}
                                                                             type="button"
-                                                                            disabled={isFouledOut}
+                                                                            disabled={isFouledOut || !canOperateTeam(true)}
                                                                             onClick={() => handleAddOnCourtPlayer(benchId, true)}
                                                                             className="px-2 py-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                                                                             title={isFouledOut ? 'Player has 5 fouls' : 'Add to on-court'}
@@ -4479,7 +4564,7 @@
                                                         </div>
                                                     </div>
                                                 )}
-                                            </div>
+                                            </div>}
 
                                             {!canOperateLive && <div className="hidden lg:flex bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex-col max-h-[504px]">
                                                 <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80">
@@ -4527,7 +4612,7 @@
                                                 </div>
                                             </div>}
 
-                                            <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'away' ? 'block' : 'hidden md:block'}`}>
+                                            {showAwayLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'away' || !showHomeLivePanel ? 'block' : 'hidden md:block'}`}>
                                                 <div className="flex items-center justify-between gap-2 mb-1">
                                                     <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - AWAY</div>
                                                     {canOperateLive && (
@@ -4536,6 +4621,7 @@
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => handleOpenAddFromBenchModal(false)}
+                                                                    disabled={!canOperateTeam(false)}
                                                                     className="px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer"
                                                                 >
                                                                     Add Player
@@ -4545,6 +4631,7 @@
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => handleClearOnCourtPlayers(false)}
+                                                                    disabled={!canOperateTeam(false)}
                                                                     className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer"
                                                                 >
                                                                     Clear
@@ -4574,7 +4661,7 @@
                                                                         <button
                                                                             key={`add-away-${benchId}`}
                                                                             type="button"
-                                                                            disabled={isFouledOut}
+                                                                            disabled={isFouledOut || !canOperateTeam(false)}
                                                                             onClick={() => handleAddOnCourtPlayer(benchId, false)}
                                                                             className="px-2 py-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                                                                             title={isFouledOut ? 'Player has 5 fouls' : 'Add to on-court'}
@@ -4587,7 +4674,7 @@
                                                         </div>
                                                     </div>
                                                 )}
-                                            </div>
+                                            </div>}
                                         </div>
 
                                         {/* Sidebar Action Logger */}
@@ -6582,21 +6669,40 @@
                         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative font-sans">
                                 <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-1"><Icons.ArrowRightLeft /> Substitute Athlete</h3>
-                                <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                                <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
                                     {(() => {
                                         const benchIds = subTargetPlayer.team === 'A' ? teamABench : teamBBench;
                                         const teamObj = subTargetPlayer.team === 'A' ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
                                         return benchIds.map(benchId => {
                                             const p = teamObj?.players.find(x => x.id === benchId);
                                             const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
+                                            const initials = (p?.name || '?')
+                                                .split(/[\s,]+/)
+                                                .filter(Boolean)
+                                                .slice(0, 2)
+                                                .map((part) => part[0]?.toUpperCase() || '')
+                                                .join('') || '?';
                                             return p ? (
                                                 <button
                                                     key={benchId}
                                                     disabled={isFouledOut}
                                                     onClick={() => executeSubstitution(subTargetPlayer.id, benchId, subTargetPlayer.team === 'A')}
-                                                    className="w-full text-xs flex justify-between p-2.5 bg-slate-955 border border-slate-855 rounded-lg text-slate-200 cursor-pointer hover:border-emerald-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-855"
+                                                    className="w-full p-1.5 bg-slate-955 border border-slate-800/55 rounded-xl text-slate-200 text-left cursor-pointer hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55"
                                                 >
-                                                    <span>#{p.number} {p.name}</span> <span className={isFouledOut ? 'text-red-400 font-bold' : 'text-emerald-400 font-bold'}>{isFouledOut ? '5 PF' : 'Sub In'}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400">
+                                                            {p.pictureUrl ? (
+                                                                <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <span>{initials}</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div>
+                                                            <div className="text-[12px] font-black text-white truncate leading-tight mt-0.5">{p.name}</div>
+                                                            <div className={`text-[9px] font-bold mt-0.5 leading-none ${isFouledOut ? 'text-red-400' : 'text-emerald-400'}`}>{isFouledOut ? '5 PF - Not Eligible' : 'Tap to Sub In'}</div>
+                                                        </div>
+                                                    </div>
                                                 </button>
                                             ) : null;
                                         });
@@ -6611,7 +6717,7 @@
                         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative font-sans">
                                 <h3 className="text-sm font-bold text-white mb-3">Add Player To On-Court</h3>
-                                <div className="space-y-2 max-h-[240px] overflow-y-auto">
+                                <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
                                     {(() => {
                                         const isTeamA = addFromBenchTeam === 'A';
                                         const lineupIds = isTeamA ? teamALineup : teamBLineup;
@@ -6627,6 +6733,12 @@
                                             const isSelected = addFromBenchSelection.includes(benchId);
                                             const isSlotLocked = !isSelected && addFromBenchSelection.length >= availableSlots;
                                             const isDisabled = isFouledOut || isSlotLocked;
+                                            const initials = (p?.name || '?')
+                                                .split(/[\s,]+/)
+                                                .filter(Boolean)
+                                                .slice(0, 2)
+                                                .map((part) => part[0]?.toUpperCase() || '')
+                                                .join('') || '?';
                                             return p ? (
                                                 <button
                                                     key={`add-modal-${benchId}`}
@@ -6644,10 +6756,22 @@
                                                             return [...prev, benchId];
                                                         });
                                                     }}
-                                                    className={`w-full text-xs flex justify-between p-2.5 rounded-lg border transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${isSelected ? 'bg-emerald-500/20 border-emerald-400 text-emerald-100' : 'bg-slate-955 border-slate-855 text-slate-200 hover:border-emerald-500'} ${isSlotLocked ? 'saturate-0' : ''} disabled:hover:border-slate-855`}
+                                                    className={`w-full p-1.5 rounded-xl border transition-colors text-left disabled:opacity-35 disabled:cursor-not-allowed ${isSelected ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-100' : 'bg-slate-955 border-slate-800/55 text-slate-200 hover:border-emerald-500/45'} ${isSlotLocked ? 'saturate-0' : ''} disabled:hover:border-slate-800/55`}
                                                 >
-                                                    <span>#{p.number} {p.name}</span>
-                                                    <span className={isFouledOut ? 'text-red-400 font-bold' : isSlotLocked ? 'text-slate-500 font-bold' : isSelected ? 'text-emerald-300 font-bold' : 'text-slate-400 font-bold'}>{isFouledOut ? '5 PF' : isSlotLocked ? 'Full' : isSelected ? 'Selected' : 'Select'}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400">
+                                                            {p.pictureUrl ? (
+                                                                <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <span>{initials}</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div>
+                                                            <div className="text-[12px] font-black text-white truncate leading-tight mt-0.5">{p.name}</div>
+                                                            <div className={isFouledOut ? 'text-[9px] text-red-400 font-bold mt-0.5' : isSlotLocked ? 'text-[9px] text-slate-500 font-bold mt-0.5' : isSelected ? 'text-[9px] text-emerald-300 font-bold mt-0.5' : 'text-[9px] text-slate-400 font-bold mt-0.5'}>{isFouledOut ? '5 PF' : isSlotLocked ? 'Full' : isSelected ? 'Selected' : 'Select'}</div>
+                                                        </div>
+                                                    </div>
                                                 </button>
                                             ) : null;
                                         });
@@ -6681,33 +6805,36 @@
                     {/* RECONFIGURED SINGLE TAP WORKFLOW MODAL DIALOG CONTAINER */}
                     {showLoggingModal && activeAction && (
                         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-2xl shadow-2xl relative my-auto">
-                                <div className="text-center mb-3">
-                                    <h3 className="text-sm font-black text-white">Record Action: <span className="text-emerald-400 font-mono">{activeAction.label}</span></h3>
+                            <div className={`bg-slate-900 border border-slate-800 rounded-2xl w-full shadow-2xl relative my-auto ${isCompactRecordActionModal ? 'max-w-xl p-4' : 'max-w-2xl p-5'}`}>
+                                <div className={`text-center ${isCompactRecordActionModal ? 'mb-2' : 'mb-3'}`}>
+                                    <h3 className={`${isCompactRecordActionModal ? 'text-xs' : 'text-sm'} font-black text-white`}>Record Action: <span className="text-emerald-400 font-mono">{activeAction.label}</span></h3>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-855">
-                                        <div className="font-extrabold text-[10px] text-slate-400 mb-2 uppercase">Home On Court</div>
-                                        <div className="space-y-1.5">
+                                <div className={`text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? 'mb-2 text-[9px]' : 'mb-3 text-[10px]'}`}>Focus: <span className="text-orange-300">{operatorFocus}</span></div>
+                                <div className={`grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'} ${isCompactRecordActionModal ? 'gap-2.5' : 'gap-4'}`}>
+                                    {showHomeLivePanel && <div className={`bg-slate-950/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
+                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>Home On Court</div>
+                                        <div className="space-y-1">
                                             {teamALineup.map(id => {
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
-                                                return p ? <button key={id} disabled={isFouledOut} onClick={() => handlePlayerClick(id, true)} className="w-full p-2.5 bg-slate-900 border border-slate-800 text-left text-xs text-white font-bold rounded-xl hover:border-emerald-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800">#{p.number} {p.name}</button> : null;
+                                                const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
+                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(true)} onClick={() => handlePlayerClick(id, true)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div><div className="min-w-0 flex-1"><div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight mt-0.5`}>{p.name}</div></div></div></button> : null;
                                             })}
                                         </div>
-                                    </div>
-                                    <div className="bg-slate-955/60 p-3 rounded-xl border border-slate-855">
-                                        <div className="font-extrabold text-[10px] text-slate-400 mb-2 uppercase">Away On Court</div>
-                                        <div className="space-y-1.5">
+                                    </div>}
+                                    {showAwayLivePanel && <div className={`bg-slate-955/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
+                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>Away On Court</div>
+                                        <div className="space-y-1">
                                             {teamBLineup.map(id => {
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
-                                                return p ? <button key={id} disabled={isFouledOut} onClick={() => handlePlayerClick(id, false)} className="w-full p-2.5 bg-slate-900 border border-slate-800 text-left text-xs text-white font-bold rounded-xl hover:border-emerald-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800">#{p.number} {p.name}</button> : null;
+                                                const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
+                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(false)} onClick={() => handlePlayerClick(id, false)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div><div className="min-w-0 flex-1"><div className="text-[9px] font-mono font-black text-amber-200 leading-none">#{p.number}</div><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight mt-0.5`}>{p.name}</div></div></div></button> : null;
                                             })}
                                         </div>
-                                    </div>
+                                    </div>}
                                 </div>
-                                <button onClick={() => { setShowLoggingModal(false); setActiveAction(null); setCorrectionMode(false); }} className="w-full mt-4 py-2 bg-slate-950 text-slate-400 text-xs rounded-xl font-bold cursor-pointer">Cancel Action</button>
+                                <button onClick={() => { setShowLoggingModal(false); setActiveAction(null); setCorrectionMode(false); }} className={`w-full py-2 bg-slate-950 text-slate-400 text-xs rounded-xl font-bold cursor-pointer ${isCompactRecordActionModal ? 'mt-3' : 'mt-4'}`}>Cancel Action</button>
                             </div>
                         </div>
                     )}
