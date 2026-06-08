@@ -47,7 +47,11 @@
             Timer: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 2h4"/><path d="M12 14v-4"/><path d="M12 12l3-2"/><circle cx="12" cy="14" r="8"/></svg>,
             Zap: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
             Undo: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>,
-            Save: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+            Edit: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>,
+            Save: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>,
+            ChevronDown: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>,
+            Share: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
+            Image: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         };
 
         // Data is loaded from SQLite-backed API endpoints.
@@ -65,10 +69,15 @@
             const [selectedRosterPlayer, setSelectedRosterPlayer] = useState(null);
             const [standingsStatMode, setStandingsStatMode] = useState('totals');
             const [leadersStatMode, setLeadersStatMode] = useState('perGame');
+            const [standingsBarsVisible, setStandingsBarsVisible] = useState(false);
+            const [standingsBarsCycle, setStandingsBarsCycle] = useState(0);
+            const [selectedStandingsLeaderStat, setSelectedStandingsLeaderStat] = useState('pts');
 
             const [isGameLive, setIsGameLive] = useState(false);
             const [teamAId, setTeamAId] = useState("");
             const [teamBId, setTeamBId] = useState("");
+            const [liveSessionInstanceId, setLiveSessionInstanceId] = useState('');
+            const [liveSessionCreatedAt, setLiveSessionCreatedAt] = useState(0);
             const [teamAScore, setTeamAScore] = useState(0);
             const [teamBScore, setTeamBScore] = useState(0);
             const [currentQuarter, setCurrentQuarter] = useState(1);
@@ -92,6 +101,7 @@
             const [dnpPlayers, setDnpPlayers] = useState([]);
             
             const [loggedHistory, setLoggedHistory] = useState([]);
+            const [periodSnapshots, setPeriodSnapshots] = useState([]);
             const [activeAction, setActiveAction] = useState(null); 
             const [correctionMode, setCorrectionMode] = useState(false); 
             const [showLoggingModal, setShowLoggingModal] = useState(false);
@@ -104,10 +114,18 @@
             const [pendingPeriodActionMode, setPendingPeriodActionMode] = useState(null);
             const [isPlayPaused, setIsPlayPaused] = useState(false);
             const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
+            const [pendingSharedGameId, setPendingSharedGameId] = useState(null);
             const [historyDetailTab, setHistoryDetailTab] = useState('potg');
             const [historyVideoInput, setHistoryVideoInput] = useState('');
             const [historyWriteupInput, setHistoryWriteupInput] = useState('');
+            const [showShareTools, setShowShareTools] = useState(false);
             const [generatingWriteupGameId, setGeneratingWriteupGameId] = useState(null);
+            const [generatingPotgWriteupGameId, setGeneratingPotgWriteupGameId] = useState(null);
+            const playerArtStylePrompt = 'A premium sports app background template, widescreen 16:9 aspect ratio. On the right side, a high-quality cell-shaded anime cartoon style illustration of a young Asian basketball player wearing a black and white pinstripe jersey with the number 3. The left and center areas are kept completely empty and clear for UI text placement. The entire background features a dark navy blue and slate grey gradient with subtle diagonal tech stripes. Low contrast, clean aesthetic, no random text, no floating numbers, designed specifically as a graphic design template for text overlay.';
+            const [playerArtSourceDataUrl, setPlayerArtSourceDataUrl] = useState('');
+            const [playerArtOutputDataUrl, setPlayerArtOutputDataUrl] = useState('');
+            const [playerArtDirection, setPlayerArtDirection] = useState('');
+            const [isGeneratingPlayerArt, setIsGeneratingPlayerArt] = useState(false);
             const [awaitingOvertimeDecision, setAwaitingOvertimeDecision] = useState(false);
             const [awaitingPeriodStart, setAwaitingPeriodStart] = useState(false);
 
@@ -132,12 +150,17 @@
             const pendingLiveEventsRef = useRef([]);
             const flushLiveEventsInFlightRef = useRef(false);
             const pendingActiveSessionSyncRef = useRef(null);
+            const sessionSyncRetryTimerRef = useRef(null);
             const flushActiveSessionSyncInFlightRef = useRef(false);
             const processedGameLogIdsRef = useRef(new Set());
             const remoteEventIdsRef = useRef(new Set());
             const liveEventQueueReadyRef = useRef(false);
             const lastLiveSeqRef = useRef(0);
-            const pendingFoulSelectionAutoPauseRef = useRef(false);
+            const pendingSubSelectionAutoPauseRef = useRef(false);
+            const addFromBenchModalSoftPauseRef = useRef(false);
+            const actionModalSoftPauseRef = useRef(false);
+            const pendingFoulActionPauseRef = useRef(false);
+            const suppressModalAutoPauseRef = useRef(false);
             const [flashPlayers, setFlashPlayers] = useState({});
             const [subFlashPlayers, setSubFlashPlayers] = useState({});
             const [subFlashLogId, setSubFlashLogId] = useState(null);
@@ -148,6 +171,8 @@
             const prevLiveScoresRef = useRef({ teamA: null, teamB: null });
             const [mobileNavOpen, setMobileNavOpen] = useState(false);
             const [showAccountMenu, setShowAccountMenu] = useState(false);
+            const [editingLiveLogId, setEditingLiveLogId] = useState(null);
+            const [editingLiveLogActionId, setEditingLiveLogActionId] = useState('');
 
             const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
             const [subTargetPlayer, setSubTargetPlayer] = useState(null); 
@@ -169,6 +194,7 @@
             const teamsRef = useRef(teams);
             const isGameLiveRef = useRef(isGameLive);
             const suppressPeriodAutoStopRef = useRef(false);
+            const suppressTimeoutAutoStopRef = useRef(false);
             const teamALineupRef = useRef(teamALineup);
             const teamABenchRef = useRef(teamABench);
             const teamBLineupRef = useRef(teamBLineup);
@@ -176,13 +202,26 @@
             const gameLogRef = useRef(gameLog);
             const liveGameSnapshotRef = useRef(liveGameSnapshot);
             const loggedHistoryRef = useRef(loggedHistory);
+            const dnpPlayersRef = useRef(dnpPlayers);
             const lineupRevisionRef = useRef(lineupRevision);
+            const liveSessionInstanceIdRef = useRef(liveSessionInstanceId);
+            const liveSessionCreatedAtRef = useRef(liveSessionCreatedAt);
+            const sessionRevisionRef = useRef(0);
+            const discardedLiveSessionTombstoneRef = useRef({ sessionInstanceId: '', discardedAt: 0 });
             const lastRemoteGameLogIdsRef = useRef(new Set());
+            const lastLocalSessionUpdatedAtRef = useRef(0);
+            const lastLocalDnpUpdatedAtRef = useRef(0);
+            const localResumeLockUntilRef = useRef(0);
+            const wasLiveGameModalOpenRef = useRef(false);
+            const pendingModalSoftResumeRef = useRef(false);
+            const liveGameplayControlSnapshotRef = useRef(null);
+            const attemptedAutoPotgWriteupRef = useRef(new Set());
 
             // Modal Alert System for 4th and 5th personal fouls
             const [foulAlert, setFoulAlert] = useState(null);
 
             const [confirmDialog, setConfirmDialog] = useState(null);
+            const [periodEndAlert, setPeriodEndAlert] = useState(null);
             const hadLiveSessionRef = useRef(false);
 
             const [authRole, setAuthRole] = useState('viewer');
@@ -194,9 +233,49 @@
             const canOperateLive = authRole === 'operator' || authRole === 'admin';
             const canEditPlayers = authRole === 'operator' || authRole === 'admin';
             const isLoggedIn = authRole !== 'viewer';
+            const editableLiveStatActions = (statActions || []).filter((action) => {
+                if (!action || !action.id || !action.label || !action.stat) return false;
+                return Number(action.val || 0) !== 0;
+            });
+            const liveLogEditTarget = editingLiveLogId
+                ? ((gameLog || []).find((entry) => entry?.id === editingLiveLogId) || null)
+                : null;
+            const isLiveGameplayModalActive = Boolean(
+                (showLoggingModal && !!activeAction)
+                || showSubstitutionModal
+                || showAddFromBenchModal
+                || liveLogEditTarget
+            );
             const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
+            const normalizePlayerPositions = (playerLike) => {
+                const rawPositions = [];
+                const pushFromValue = (value) => {
+                    if (Array.isArray(value)) {
+                        value.forEach((item) => {
+                            if (typeof item === 'string') rawPositions.push(item);
+                        });
+                        return;
+                    }
+                    if (typeof value === 'string') {
+                        value.split(/[\s,\/|]+/).forEach((item) => {
+                            if (item) rawPositions.push(item);
+                        });
+                    }
+                };
+
+                pushFromValue(playerLike?.positions);
+                pushFromValue(playerLike?.position);
+
+                return Array.from(new Set(
+                    rawPositions
+                        .map((pos) => String(pos || '').trim().toUpperCase())
+                        .filter((pos) => PLAYER_POSITIONS.includes(pos))
+                ));
+            };
             const REGULATION_PERIOD_SECONDS = 12 * 60;
             const OVERTIME_PERIOD_SECONDS = 5 * 60;
+            const MAX_LIVE_LOG_ENTRIES = 5000;
+            const MAX_LIVE_HISTORY_ENTRIES = 5000;
             const OPERATOR_FOCUS_KEY = 'wknd_live_operator_focus';
             const operatorFocusOptions = [
                 { id: 'home' },
@@ -221,6 +300,25 @@
                     localStorage.setItem(OPERATOR_FOCUS_KEY, operatorFocus);
                 } catch (e) {}
             }, [operatorFocus]);
+
+            useEffect(() => {
+                if (!isLoggedIn) {
+                    setShowSyncClockEditor(false);
+                    setIsEditingClockInput(false);
+                }
+            }, [isLoggedIn]);
+
+            useEffect(() => {
+                try {
+                    const params = new URLSearchParams(window.location.search || '');
+                    const view = params.get('view');
+                    const sharedGameId = params.get('gameId');
+                    if (view === 'game' && sharedGameId) {
+                        setActiveTab('history');
+                        setPendingSharedGameId(sharedGameId);
+                    }
+                } catch (e) {}
+            }, []);
 
             const handleAuthLogin = async (e) => {
                 e.preventDefault();
@@ -248,6 +346,8 @@
                 setShowAuthModal(false);
                 setShowLoggingModal(false);
                 setActiveAction(null);
+                setEditingLiveLogId(null);
+                setEditingLiveLogActionId('');
                 showToast('Logged out. Viewer access only.', 'info');
             };
 
@@ -273,9 +373,21 @@
                 return false;
             };
 
+            const shouldSoftPauseForLiveGameModal = (modalType) => {
+                // Only live-game workflow modals should soft-pause play.
+                // Notification/acknowledgement modals such as confirm dialogs,
+                // foul alerts, auth prompts, and period alerts are excluded.
+                return modalType === 'substitution' || modalType === 'addFromBench' || modalType === 'action';
+            };
+
             const openActionForTeam = (action, isTeamA) => {
                 if (!canOperateTeam(isTeamA)) {
                     ensureTeamOperationAccess(isTeamA, 'log stats for this team');
+                    return;
+                }
+
+                if (stoppedClockActionIds.has(action?.id) && isPeriodClockRunning) {
+                    showToast('Free Throw and Free Throw Missed are only available when the clock is stopped.', 'info');
                     return;
                 }
 
@@ -287,14 +399,28 @@
                     }
                 }
 
-                const isFoulAction = isFoulLikeAction(action);
-                const shouldAutoPauseForFoulSelection = isFoulAction && isGameLive && isPeriodClockRunning && !timeoutIsActive;
-                pendingFoulSelectionAutoPauseRef.current = false;
-                if (shouldAutoPauseForFoulSelection) {
-                    pendingFoulSelectionAutoPauseRef.current = true;
-                    setIsPlayPaused(true);
+                const isTrueFoulAction = action?.stat === 'pf';
+                const shouldPauseClockForFoulSelection = isTrueFoulAction
+                    && isGameLive
+                    && isPeriodClockRunning
+                    && !timeoutIsActive;
+                const shouldSoftPauseForActionSelection = !isTrueFoulAction
+                    && shouldSoftPauseForLiveGameModal('action')
+                    && isGameLive
+                    && isPeriodClockRunning
+                    && !timeoutIsActive;
+                actionModalSoftPauseRef.current = false;
+                pendingFoulActionPauseRef.current = false;
+                if (shouldPauseClockForFoulSelection) {
+                    markLocalSessionUpdated();
+                    pendingFoulActionPauseRef.current = true;
                     setIsPeriodClockRunning(false);
-                    showToast('Game paused for foul selection. Pick a player or cancel to resume.', 'info');
+                    showToast('Clock stopped while foul action is being selected.', 'info');
+                } else if (shouldSoftPauseForActionSelection) {
+                    markLocalSessionUpdated();
+                    actionModalSoftPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                    showToast('Clock paused while action modal is open. Record the stat or cancel to resume.', 'info');
                 }
 
                 setActiveAction(action);
@@ -302,20 +428,9 @@
             };
 
             const handleCancelActionModal = () => {
-                const shouldResumeFromFoulPreselect = pendingFoulSelectionAutoPauseRef.current;
-                pendingFoulSelectionAutoPauseRef.current = false;
-
                 setShowLoggingModal(false);
                 setActiveAction(null);
                 setCorrectionMode(false);
-
-                if (shouldResumeFromFoulPreselect) {
-                    setIsPlayPaused(false);
-                    if (periodClockSeconds > 0) {
-                        setIsPeriodClockRunning(true);
-                    }
-                    showToast('Foul action canceled. Game resumed.', 'info');
-                }
             };
 
             const showHomeLivePanel = !canOperateLive || operatorFocus !== 'away';
@@ -333,6 +448,7 @@
             const LIVE_EVENTS_QUEUE_KEY = 'wknd_pending_live_events';
             const LIVE_EVENTS_LAST_SEQ_KEY = 'wknd_last_live_seq';
             const ACTIVE_SESSION_SYNC_KEY = 'wknd_pending_active_session_sync';
+            const DISCARDED_LIVE_SESSION_TOMBSTONE_KEY = 'wknd_discarded_live_session_tombstone';
 
             const persistPendingLiveEvents = () => {
                 try {
@@ -348,6 +464,27 @@
                         localStorage.removeItem(ACTIVE_SESSION_SYNC_KEY);
                     }
                 } catch (e) {}
+            };
+
+            const persistDiscardedSessionTombstone = () => {
+                try {
+                    const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
+                    if (tombstone.sessionInstanceId && Number(tombstone.discardedAt || 0) > 0) {
+                        localStorage.setItem(DISCARDED_LIVE_SESSION_TOMBSTONE_KEY, JSON.stringify(tombstone));
+                    } else {
+                        localStorage.removeItem(DISCARDED_LIVE_SESSION_TOMBSTONE_KEY);
+                    }
+                } catch (e) {}
+            };
+
+            const markDiscardedSessionTombstone = (sessionInstanceId, discardedAt = Date.now()) => {
+                const safeSessionId = String(sessionInstanceId || '').trim();
+                if (!safeSessionId) return;
+                discardedLiveSessionTombstoneRef.current = {
+                    sessionInstanceId: safeSessionId,
+                    discardedAt: Number(discardedAt || Date.now())
+                };
+                persistDiscardedSessionTombstone();
             };
 
             const setLastLiveSeq = (nextSeq) => {
@@ -367,6 +504,19 @@
 
                 const event = record?.event;
                 if (!event || typeof event !== 'object' || !event.id) return;
+
+                const eventSessionId = String(event.sessionInstanceId || '').trim();
+                const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
+                if (localSessionId && (!eventSessionId || eventSessionId !== localSessionId)) {
+                    return;
+                }
+                if (eventSessionId && eventSessionId === String(tombstone.sessionInstanceId || '').trim()) {
+                    const eventTimestamp = getEventTimestampFromId(event.id);
+                    if (eventTimestamp <= Number(tombstone.discardedAt || 0)) {
+                        return;
+                    }
+                }
 
                 if (seq > 0) {
                     setLastLiveSeq(seq);
@@ -392,7 +542,7 @@
                     }
                 }
 
-                if (event.kind === 'stat') {
+                if (event.kind === 'stat' && !event.isUndoCompensation) {
                     setLoggedHistory((prev) => {
                         if (prev.some((entry) => entry.id === event.id)) return prev;
                         return [{
@@ -408,13 +558,13 @@
                             kind: 'stat',
                             actionId: event.actionId,
                             countsTeamFoul: event.countsTeamFoul
-                        }, ...prev].slice(0, 300);
+                        }, ...prev].slice(0, MAX_LIVE_HISTORY_ENTRIES);
                     });
                 }
 
                 setGameLog((prev) => {
                     if (prev.some((log) => log.id === event.id)) return prev;
-                    const nextLog = [event, ...prev].slice(0, 300);
+                    const nextLog = [event, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES);
 
                     const replayed = buildLiveStateFromEvents(liveGameSnapshotRef.current, nextLog);
                     if (replayed) {
@@ -435,6 +585,11 @@
             };
 
             const fetchMissingLiveEvents = async () => {
+                const hasPendingPut = pendingActiveSessionSyncRef.current?.mode === 'put';
+                if (!isGameLiveRef.current && !hadLiveSessionRef.current && !hasPendingPut) {
+                    return;
+                }
+
                 try {
                     const payload = await apiRequest(`/api/live-events?sinceSeq=${lastLiveSeqRef.current}`);
                     const events = Array.isArray(payload?.events) ? payload.events : [];
@@ -445,12 +600,15 @@
                 } catch (e) {}
             };
 
-            const queueActiveSessionSync = (mode, session = null) => {
+            const queueActiveSessionSync = (mode, session = null, options = {}) => {
                 const nextRequest = {
                     id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                     mode,
                     sourceClientId: syncClientIdRef.current,
-                    ...(mode === 'put' ? { session } : {})
+                    ...(mode === 'put' ? { session } : {}),
+                    ...(mode === 'delete' && options?.clearLiveEvents ? { clearLiveEvents: true } : {}),
+                    ...(mode === 'delete' && options?.discardedSessionInstanceId ? { discardedSessionInstanceId: options.discardedSessionInstanceId } : {}),
+                    ...(mode === 'delete' && Number(options?.discardedSessionCreatedAt || 0) > 0 ? { discardedSessionCreatedAt: Number(options.discardedSessionCreatedAt) } : {})
                 };
                 pendingActiveSessionSyncRef.current = nextRequest;
                 persistPendingActiveSessionSync();
@@ -459,6 +617,15 @@
                     lastPersist: `${mode.toUpperCase()} QUEUED ${new Date().toLocaleTimeString()}`,
                     persistError: ''
                 }));
+            };
+
+            const markLocalSessionUpdated = () => {
+                const nextUpdatedAt = Date.now();
+                lastLocalSessionUpdatedAtRef.current = Math.max(
+                    Number(lastLocalSessionUpdatedAtRef.current || 0),
+                    nextUpdatedAt
+                );
+                return lastLocalSessionUpdatedAtRef.current;
             };
 
             const flushPendingActiveSessionSync = async () => {
@@ -478,7 +645,12 @@
                         } else {
                             await apiRequest('/api/active-session', {
                                 method: 'DELETE',
-                                body: JSON.stringify({ sourceClientId: nextRequest.sourceClientId })
+                                body: JSON.stringify({
+                                    sourceClientId: nextRequest.sourceClientId,
+                                    clearLiveEvents: Boolean(nextRequest.clearLiveEvents),
+                                    discardedSessionInstanceId: String(nextRequest.discardedSessionInstanceId || ''),
+                                    discardedSessionCreatedAt: Number(nextRequest.discardedSessionCreatedAt || 0)
+                                })
                             });
                         }
 
@@ -499,6 +671,13 @@
                         lastPersist: `PENDING ${new Date().toLocaleTimeString()}`,
                         persistError: error?.message || 'Active session sync failed'
                     }));
+                    // Schedule a retry in 10 s so a short network blip is automatically healed.
+                    if (!sessionSyncRetryTimerRef.current) {
+                        sessionSyncRetryTimerRef.current = window.setTimeout(() => {
+                            sessionSyncRetryTimerRef.current = null;
+                            flushPendingActiveSessionSync();
+                        }, 10000);
+                    }
                 } finally {
                     flushActiveSessionSyncInFlightRef.current = false;
                 }
@@ -531,7 +710,11 @@
             const enqueueLiveEvent = (event) => {
                 if (!event || typeof event !== 'object' || !event.id) return;
                 if (pendingLiveEventsRef.current.some((queued) => queued.id === event.id)) return;
-                pendingLiveEventsRef.current.push(event);
+                const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                const eventWithSession = localSessionId
+                    ? { ...event, sessionInstanceId: localSessionId }
+                    : event;
+                pendingLiveEventsRef.current.push(eventWithSession);
                 pendingLiveEventsRef.current = pendingLiveEventsRef.current.slice(-500);
                 persistPendingLiveEvents();
                 flushPendingLiveEvents();
@@ -668,6 +851,81 @@
                 return q > 4 ? OVERTIME_PERIOD_SECONDS : REGULATION_PERIOD_SECONDS;
             };
 
+            const getLogLockReason = (entry, ordinal) => {
+                const isPeriodEnd = entry?.kind === 'meta' && entry?.metaType === 'quarterEnd';
+                const isCheckpoint = Number(ordinal) > 0 && Number(ordinal) % 10 === 0;
+                if (isPeriodEnd && isCheckpoint) return 'periodEnd+checkpoint10';
+                if (isPeriodEnd) return 'periodEnd';
+                if (isCheckpoint) return 'checkpoint10';
+                return '';
+            };
+
+            const isProtectedLogEntry = (entry, finalizedPeriods = null) => {
+                if (!entry || typeof entry !== 'object') return false;
+                if (entry.lockProtected === true) return true;
+                if (entry.kind === 'meta' && entry.metaType === 'quarterEnd') return true;
+                if (finalizedPeriods instanceof Set && finalizedPeriods.size > 0) {
+                    return finalizedPeriods.has(getQuarterFromEvent(entry));
+                }
+                return false;
+            };
+
+            const isEditableStatLogEntry = (entry) => {
+                if (!entry || typeof entry !== 'object') return false;
+                if (!entry.playerId) return false;
+                if (entry.kind === 'stat') return true;
+                return Boolean(entry.actionId || entry.statField);
+            };
+
+            const buildTeamAcronym = (teamName) => {
+                const safe = String(teamName || '').trim();
+                if (!safe) return 'TEAM';
+
+                const words = safe
+                    .replace(/[^A-Za-z0-9\s]/g, ' ')
+                    .split(/\s+/)
+                    .filter(Boolean);
+
+                if (words.length === 0) return safe.slice(0, 3).toUpperCase();
+                if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+                return words.slice(0, 3).map((part) => part[0]).join('').toUpperCase();
+            };
+
+            const formatScoreTag = (scoreA, scoreB) => {
+                const teamAName = teams.find((t) => t.id === teamAId)?.name || 'HOME';
+                const teamBName = teams.find((t) => t.id === teamBId)?.name || 'AWAY';
+                const acronymA = buildTeamAcronym(teamAName);
+                const acronymB = buildTeamAcronym(teamBName);
+                return `[${acronymA} ${Number(scoreA || 0)} - ${acronymB} ${Number(scoreB || 0)}]`;
+            };
+
+            const parseScoreTagFromLogText = (textValue) => {
+                const text = String(textValue || '');
+                const acronymMatch = text.match(/\[([A-Za-z0-9]{2,6})\s+(\d+)\s*-\s*([A-Za-z0-9]{2,6})\s+(\d+)\]/);
+                if (acronymMatch) {
+                    return {
+                        teamAcronym: String(acronymMatch[1] || '').toUpperCase(),
+                        teamAScore: Number(acronymMatch[2] || 0),
+                        teamBAcronym: String(acronymMatch[3] || '').toUpperCase(),
+                        teamBScore: Number(acronymMatch[4] || 0)
+                    };
+                }
+
+                const legacyMatch = text.match(/\[(\d+)\s*-\s*(\d+)\]/);
+                if (legacyMatch) {
+                    const teamAName = teams.find((t) => t.id === teamAId)?.name || 'HOME';
+                    const teamBName = teams.find((t) => t.id === teamBId)?.name || 'AWAY';
+                    return {
+                        teamAcronym: buildTeamAcronym(teamAName),
+                        teamAScore: Number(legacyMatch[1] || 0),
+                        teamBAcronym: buildTeamAcronym(teamBName),
+                        teamBScore: Number(legacyMatch[2] || 0)
+                    };
+                }
+
+                return null;
+            };
+
             const formatSecondsAsClock = (secondsValue) => {
                 const total = Math.max(0, Number.parseInt(secondsValue, 10) || 0);
                 const minutes = Math.floor(total / 60);
@@ -716,10 +974,54 @@
 
             const createEmptyQuarterStats = () => ({ pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0 });
 
+            const cloneQuarterStats = (stats = {}) => ({
+                pts: Number(stats?.pts || 0),
+                reb: Number(stats?.reb || 0),
+                ast: Number(stats?.ast || 0),
+                stl: Number(stats?.stl || 0),
+                blk: Number(stats?.blk || 0),
+                to: Number(stats?.to || 0),
+                pf: Number(stats?.pf || 0)
+            });
+
             const computeQuarterTeamStatsFromLog = (logs = []) => {
+                const entries = Array.isArray(logs) ? logs : [];
+
+                // Pre-pass: build an inferred quarter for every event using quarterEnd
+                // boundaries. This handles older saved logs where stat events were stored
+                // without a `quarter` field (they all defaulted to 1 via getQuarterFromEvent).
+                // Events are stored newest-first, so we reverse to walk oldest-first.
+                const reversed = [...entries].reverse();
+                const inferredQuarterByIndex = new Map(); // reversed index → quarter
+                let currentInferredQuarter = 1;
+                reversed.forEach((event, idx) => {
+                    // A quarterEnd marks the boundary: everything after this (in forward time)
+                    // belongs to the next quarter.
+                    if (event?.kind === 'meta' && event?.metaType === 'quarterEnd') {
+                        inferredQuarterByIndex.set(idx, currentInferredQuarter);
+                        currentInferredQuarter += 1;
+                    } else {
+                        inferredQuarterByIndex.set(idx, currentInferredQuarter);
+                    }
+                });
+
+                // Helper: get quarter for an event, preferring the explicit field but
+                // falling back to the boundary-inferred value.
+                const getEffectiveQuarter = (event, reversedIdx) => {
+                    const explicit = Number.parseInt(event?.quarter, 10);
+                    if (Number.isFinite(explicit) && explicit >= 1) return explicit;
+                    return inferredQuarterByIndex.get(reversedIdx) || 1;
+                };
+
+                // Build a reversedIdx lookup keyed by event id for the undo fix.
+                const reversedIdxById = new Map();
+                reversed.forEach((event, idx) => {
+                    if (event?.id) reversedIdxById.set(event.id, idx);
+                });
+
                 const maxQuarter = Math.max(
                     4,
-                    ...(logs || []).map((event) => getQuarterFromEvent(event))
+                    ...reversed.map((event, idx) => getEffectiveQuarter(event, idx))
                 );
                 const quarters = Array.from({ length: maxQuarter }, (_, idx) => idx + 1).map((quarter) => ({
                     quarter,
@@ -727,7 +1029,16 @@
                     teamB: createEmptyQuarterStats()
                 }));
 
-                (logs || []).forEach((event) => {
+                // Build a lookup of eventId → effective quarter so undo events can be
+                // applied to the original event's quarter instead of the undo quarter.
+                const eventQuarterById = new Map();
+                reversed.forEach((event, idx) => {
+                    if (event?.id && !event.isUndoCompensation) {
+                        eventQuarterById.set(event.id, getEffectiveQuarter(event, idx));
+                    }
+                });
+
+                reversed.forEach((event, idx) => {
                     if (!event || event.kind !== 'stat') return;
                     if (!['pts', 'reb', 'ast', 'stl', 'blk', 'to', 'pf'].includes(event.statField)) return;
                     if (
@@ -739,7 +1050,13 @@
                     const delta = Number(event.changeAmount) || 0;
                     if (delta === 0) return;
 
-                    const quarterIdx = getQuarterFromEvent(event) - 1;
+                    // For undo events, attribute the reversal to the original event's quarter.
+                    const effectiveQuarter = (event.isUndoCompensation && event.undoOfId && eventQuarterById.has(event.undoOfId))
+                        ? eventQuarterById.get(event.undoOfId)
+                        : getEffectiveQuarter(event, idx);
+
+                    const quarterIdx = effectiveQuarter - 1;
+                    if (quarterIdx < 0 || quarterIdx >= quarters.length) return;
                     const teamBucket = event.isTeamA === true
                         ? quarters[quarterIdx].teamA
                         : event.isTeamA === false
@@ -789,15 +1106,48 @@
                 for (const event of logs || []) {
                     if (!event || event.kind !== 'meta') continue;
                     if (['timeout', 'officialsTimeout', 'manualPause', 'foulPause'].includes(event.metaType)) return true;
-                    if (event.metaType === 'timeoutResume' || event.metaType === 'playResume') return false;
+                    if (['timeoutResume', 'playResume', 'quarterStart', 'matchStart', 'hardReset'].includes(event.metaType)) return false;
                 }
                 return false;
+            };
+
+            const getLatestActivePauseMetaType = (logs = []) => {
+                for (const event of logs || []) {
+                    if (!event || event.kind !== 'meta') continue;
+                    if (['timeoutResume', 'playResume', 'quarterStart', 'matchStart', 'hardReset'].includes(event.metaType)) return null;
+                    if (['timeout', 'officialsTimeout', 'manualPause', 'foulPause'].includes(event.metaType)) return event.metaType;
+                }
+                return null;
             };
 
             const getCurrentGameLogSegment = (logs = []) => {
                 const entries = Array.isArray(logs) ? logs : [];
                 const resetIndex = entries.findIndex((event) => event?.kind === 'meta' && event?.metaType === 'hardReset');
                 return resetIndex >= 0 ? entries.slice(0, resetIndex + 1) : entries;
+            };
+
+            const armLocalResumeStabilityWindow = () => {
+                localResumeLockUntilRef.current = Date.now() + 2500;
+            };
+
+            const appendPlayResumeMetaIfNeeded = (labelOverride) => {
+                const currentSegment = getCurrentGameLogSegment(gameLog);
+                const hasActivePause = isTimeoutCurrentlyActive(currentSegment) || Boolean(isPlayPaused);
+                if (!hasActivePause) return false;
+
+                armLocalResumeStabilityWindow();
+                const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const resumeLabel = labelOverride || `Play resumed (${getPeriodLabel(currentQuarter)})`;
+                setGameLog((prev) => [{
+                    id: resumeLogId,
+                    time: getWallClockTime(),
+                    text: resumeLabel,
+                    kind: 'meta',
+                    metaType: 'playResume',
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+                return true;
             };
 
             const extractYouTubeVideoId = (rawUrl = '') => {
@@ -848,8 +1198,9 @@
                 if (!teamObj) return false;
 
                 const rosterIds = (teamObj.players || []).map((p) => p.id);
-                const fallbackCandidates = rosterIds.filter((id) => !targetLineup.includes(id));
-                const addCandidates = targetBench.length > 0 ? targetBench : fallbackCandidates;
+                const fallbackCandidates = rosterIds.filter((id) => !targetLineup.includes(id) && !dnpPlayers.includes(id));
+                const addCandidates = (targetBench.length > 0 ? targetBench : fallbackCandidates)
+                    .filter((id) => !dnpPlayers.includes(id));
                 return addCandidates.length > 0;
             }
 
@@ -909,41 +1260,21 @@
 
             const buildLiveStateFromEvents = (snapshot, events) => {
                 if (!snapshot) return null;
-
-                const buildBaseStateFromSnapshot = () => ({
-                    teamAScore: snapshot.teamAScore || 0,
-                    teamBScore: snapshot.teamBScore || 0,
-                    currentQuarter: snapshot.currentQuarter || 1,
-                    teamALineup: [...(snapshot.teamALineup || [])],
-                    teamABench: [...(snapshot.teamABench || [])],
-                    teamBLineup: [...(snapshot.teamBLineup || [])],
-                    teamBBench: [...(snapshot.teamBBench || [])],
-                    liveStats: cloneStatsMap(snapshot.liveStats || {}),
-                    playedPlayers: [...(snapshot.playedPlayers || [])]
-                });
-
-                const nextState = {
-                    ...buildBaseStateFromSnapshot()
-                };
-
-                const initialA = sanitizeTeamRotation(snapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: false });
-                nextState.teamALineup = initialA.lineup;
-                nextState.teamABench = initialA.bench;
-                const initialB = sanitizeTeamRotation(snapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: false });
-                nextState.teamBLineup = initialB.lineup;
-                nextState.teamBBench = initialB.bench;
-
-                const teamPool = (teamsRef.current && teamsRef.current.length > 0) ? teamsRef.current : teams;
-                const teamAObj = teamPool.find(t => t.id === snapshot.teamAId);
-                const teamBObj = teamPool.find(t => t.id === snapshot.teamBId);
-
-                const recomputeScores = () => {
-                    let totalA = 0;
-                    let totalB = 0;
-                    if (teamAObj) teamAObj.players.forEach(p => { totalA += nextState.liveStats[p.id]?.pts || 0; });
-                    if (teamBObj) teamBObj.players.forEach(p => { totalB += nextState.liveStats[p.id]?.pts || 0; });
-                    nextState.teamAScore = totalA;
-                    nextState.teamBScore = totalB;
+                const cloneReplaySnapshot = (sourceSnapshot) => {
+                    if (!sourceSnapshot) return null;
+                    return {
+                        teamAId: sourceSnapshot.teamAId || snapshot.teamAId || '',
+                        teamBId: sourceSnapshot.teamBId || snapshot.teamBId || '',
+                        teamAScore: sourceSnapshot.teamAScore || 0,
+                        teamBScore: sourceSnapshot.teamBScore || 0,
+                        currentQuarter: sourceSnapshot.currentQuarter || 1,
+                        teamALineup: [...(sourceSnapshot.teamALineup || [])],
+                        teamABench: [...(sourceSnapshot.teamABench || [])],
+                        teamBLineup: [...(sourceSnapshot.teamBLineup || [])],
+                        teamBBench: [...(sourceSnapshot.teamBBench || [])],
+                        liveStats: cloneStatsMap(sourceSnapshot.liveStats || {}),
+                        playedPlayers: [...(sourceSnapshot.playedPlayers || [])]
+                    };
                 };
 
                 const orderedEvents = [...(events || [])].sort((a, b) => {
@@ -955,7 +1286,57 @@
                     return String(a?.id || '').localeCompare(String(b?.id || ''));
                 });
 
-                orderedEvents.forEach((event) => {
+                let replaySnapshot = cloneReplaySnapshot(snapshot);
+                let replayStartIndex = 0;
+                orderedEvents.forEach((event, index) => {
+                    if (event?.kind === 'meta' && event?.metaType === 'periodCheckpoint' && event?.checkpointSnapshot) {
+                        const checkpointSnapshot = cloneReplaySnapshot(event.checkpointSnapshot);
+                        if (checkpointSnapshot) {
+                            replaySnapshot = checkpointSnapshot;
+                            replayStartIndex = index + 1;
+                        }
+                    }
+                });
+
+                if (!replaySnapshot) return null;
+
+                const buildBaseStateFromSnapshot = () => ({
+                    teamAScore: replaySnapshot.teamAScore || 0,
+                    teamBScore: replaySnapshot.teamBScore || 0,
+                    currentQuarter: replaySnapshot.currentQuarter || 1,
+                    teamALineup: [...(replaySnapshot.teamALineup || [])],
+                    teamABench: [...(replaySnapshot.teamABench || [])],
+                    teamBLineup: [...(replaySnapshot.teamBLineup || [])],
+                    teamBBench: [...(replaySnapshot.teamBBench || [])],
+                    liveStats: cloneStatsMap(replaySnapshot.liveStats || {}),
+                    playedPlayers: [...(replaySnapshot.playedPlayers || [])]
+                });
+
+                const nextState = {
+                    ...buildBaseStateFromSnapshot()
+                };
+
+                const initialA = sanitizeTeamRotation(replaySnapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: false });
+                nextState.teamALineup = initialA.lineup;
+                nextState.teamABench = initialA.bench;
+                const initialB = sanitizeTeamRotation(replaySnapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: false });
+                nextState.teamBLineup = initialB.lineup;
+                nextState.teamBBench = initialB.bench;
+
+                const teamPool = (teamsRef.current && teamsRef.current.length > 0) ? teamsRef.current : teams;
+                const teamAObj = teamPool.find(t => t.id === replaySnapshot.teamAId);
+                const teamBObj = teamPool.find(t => t.id === replaySnapshot.teamBId);
+
+                const recomputeScores = () => {
+                    let totalA = 0;
+                    let totalB = 0;
+                    if (teamAObj) teamAObj.players.forEach(p => { totalA += nextState.liveStats[p.id]?.pts || 0; });
+                    if (teamBObj) teamBObj.players.forEach(p => { totalB += nextState.liveStats[p.id]?.pts || 0; });
+                    nextState.teamAScore = totalA;
+                    nextState.teamBScore = totalB;
+                };
+
+                orderedEvents.slice(replayStartIndex).forEach((event) => {
                     if (event.kind === 'meta' && event.metaType === 'hardReset') {
                         const base = buildBaseStateFromSnapshot();
                         nextState.teamAScore = base.teamAScore;
@@ -968,12 +1349,16 @@
                         nextState.liveStats = base.liveStats;
                         nextState.playedPlayers = base.playedPlayers;
 
-                        const sanitizedA = sanitizeTeamRotation(snapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: false });
+                        const sanitizedA = sanitizeTeamRotation(replaySnapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: false });
                         nextState.teamALineup = sanitizedA.lineup;
                         nextState.teamABench = sanitizedA.bench;
-                        const sanitizedB = sanitizeTeamRotation(snapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: false });
+                        const sanitizedB = sanitizeTeamRotation(replaySnapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: false });
                         nextState.teamBLineup = sanitizedB.lineup;
                         nextState.teamBBench = sanitizedB.bench;
+                        return;
+                    }
+
+                    if (event.kind === 'meta' && event.metaType === 'periodCheckpoint') {
                         return;
                     }
 
@@ -999,13 +1384,13 @@
                         if (event.isTeamA) {
                             nextState.teamALineup = nextState.teamALineup.map(id => id === event.outId ? event.inId : id);
                             nextState.teamABench = nextState.teamABench.map(id => id === event.inId ? event.outId : id);
-                            const sanitized = sanitizeTeamRotation(snapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: true });
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: true });
                             nextState.teamALineup = sanitized.lineup;
                             nextState.teamABench = sanitized.bench;
                         } else {
                             nextState.teamBLineup = nextState.teamBLineup.map(id => id === event.outId ? event.inId : id);
                             nextState.teamBBench = nextState.teamBBench.map(id => id === event.inId ? event.outId : id);
-                            const sanitized = sanitizeTeamRotation(snapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: true });
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: true });
                             nextState.teamBLineup = sanitized.lineup;
                             nextState.teamBBench = sanitized.bench;
                         }
@@ -1020,11 +1405,11 @@
 
                     if (event.kind === 'meta' && event.metaType === 'onCourtClear') {
                         if (event.isTeamA) {
-                            const sanitized = sanitizeTeamRotation(snapshot.teamAId, [], [...nextState.teamABench, ...nextState.teamALineup], { fillToFive: false });
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, [], [...nextState.teamABench, ...nextState.teamALineup], { fillToFive: false });
                             nextState.teamALineup = sanitized.lineup;
                             nextState.teamABench = sanitized.bench;
                         } else if (event.isTeamA === false) {
-                            const sanitized = sanitizeTeamRotation(snapshot.teamBId, [], [...nextState.teamBBench, ...nextState.teamBLineup], { fillToFive: false });
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, [], [...nextState.teamBBench, ...nextState.teamBLineup], { fillToFive: false });
                             nextState.teamBLineup = sanitized.lineup;
                             nextState.teamBBench = sanitized.bench;
                         }
@@ -1034,13 +1419,13 @@
                         if (event.isTeamA) {
                             const nextLineup = [...nextState.teamALineup, event.playerId];
                             const nextBench = nextState.teamABench.filter((id) => id !== event.playerId);
-                            const sanitized = sanitizeTeamRotation(snapshot.teamAId, nextLineup, nextBench, { fillToFive: false });
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, nextLineup, nextBench, { fillToFive: false });
                             nextState.teamALineup = sanitized.lineup;
                             nextState.teamABench = sanitized.bench;
                         } else if (event.isTeamA === false) {
                             const nextLineup = [...nextState.teamBLineup, event.playerId];
                             const nextBench = nextState.teamBBench.filter((id) => id !== event.playerId);
-                            const sanitized = sanitizeTeamRotation(snapshot.teamBId, nextLineup, nextBench, { fillToFive: false });
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, nextLineup, nextBench, { fillToFive: false });
                             nextState.teamBLineup = sanitized.lineup;
                             nextState.teamBBench = sanitized.bench;
                         }
@@ -1154,7 +1539,9 @@
                 return Number.isFinite(parsed) ? parsed : 0;
             };
 
-            const mergeUniqueEventsById = (primary = [], secondary = [], maxItems = 300) => {
+            const generateLiveSessionInstanceId = () => `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+            const mergeUniqueEventsById = (primary = [], secondary = [], maxItems = MAX_LIVE_LOG_ENTRIES) => {
                 const mergedById = new Map();
                 [...(primary || []), ...(secondary || [])].forEach((event) => {
                     if (!event || typeof event !== 'object') return;
@@ -1172,6 +1559,29 @@
                         return String(b.id).localeCompare(String(a.id));
                     })
                     .slice(0, maxItems);
+            };
+
+            const getLatestLogEvent = (events = [], matcher = () => false) => {
+                let latest = null;
+                let latestTimestamp = -1;
+                let latestIndex = -1;
+
+                (events || []).forEach((event, index) => {
+                    if (!matcher(event)) return;
+
+                    const eventTimestamp = getEventTimestampFromId(event?.id);
+                    if (
+                        !latest ||
+                        eventTimestamp > latestTimestamp ||
+                        (eventTimestamp === latestTimestamp && index > latestIndex)
+                    ) {
+                        latest = event;
+                        latestTimestamp = eventTimestamp;
+                        latestIndex = index;
+                    }
+                });
+
+                return latest;
             };
 
             const inferLiveTeamIdsFromSession = (session = {}, normalizedGameLog = []) => {
@@ -1279,8 +1689,49 @@
             const applyRemoteLiveSession = (session) => {
                 if (!session) return;
 
-                suppressLiveSessionSyncRef.current = true;
+                const remoteSessionInstanceId = String(session.sessionInstanceId || '').trim();
+                const localSessionInstanceId = String(liveSessionInstanceIdRef.current || '').trim();
+                const remoteSessionCreatedAt = Number.parseInt(session.sessionCreatedAt, 10) || 0;
+                const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
+                const discardedSessionId = String(tombstone.sessionInstanceId || '').trim();
+                const discardedAt = Number(tombstone.discardedAt || 0);
+                if (isGameLiveRef.current && localSessionInstanceId) {
+                    if (!remoteSessionInstanceId || remoteSessionInstanceId !== localSessionInstanceId) {
+                        return;
+                    }
+                }
+                if (remoteSessionInstanceId && discardedSessionId && remoteSessionInstanceId === discardedSessionId) {
+                    if (remoteSessionCreatedAt === 0 || remoteSessionCreatedAt <= discardedAt) {
+                        return;
+                    }
+                }
+                if (!remoteSessionInstanceId && discardedAt > 0) {
+                    const remoteSessionUpdatedAt = Number.parseInt(session.sessionUpdatedAt, 10) || 0;
+                    if (remoteSessionUpdatedAt > 0 && remoteSessionUpdatedAt <= discardedAt) {
+                        return;
+                    }
+                }
+
                 const normalized = normalizeLiveSessionEvents(session.gameLog || [], session.loggedHistory || []);
+                const remoteSessionUpdatedAt = Number.parseInt(session.sessionUpdatedAt, 10) || 0;
+                const remoteDnpUpdatedAt = Number.parseInt(session.dnpUpdatedAt, 10) || 0;
+                const localSessionUpdatedAt = Number(lastLocalSessionUpdatedAtRef.current || 0);
+                const localDnpUpdatedAt = Number(lastLocalDnpUpdatedAtRef.current || 0);
+                const remoteLogIds = new Set((normalized.gameLog || []).map((event) => event?.id).filter(Boolean));
+                const hasLocalOnlyLogEvents = isGameLiveRef.current
+                    && (gameLogRef.current || []).some((event) => event?.id && !remoteLogIds.has(event.id));
+                if (
+                    isGameLiveRef.current &&
+                    localSessionUpdatedAt > 0 &&
+                    (
+                        (remoteSessionUpdatedAt > 0 && remoteSessionUpdatedAt < localSessionUpdatedAt)
+                        || (hasLocalOnlyLogEvents && (remoteSessionUpdatedAt === 0 || remoteSessionUpdatedAt <= localSessionUpdatedAt))
+                    )
+                ) {
+                    return;
+                }
+
+                suppressLiveSessionSyncRef.current = true;
                 const resolvedTeamIds = inferLiveTeamIdsFromSession(session, normalized.gameLog || []);
                 const remoteTeamAId = resolvedTeamIds.teamAId || '';
                 const remoteTeamBId = resolvedTeamIds.teamBId || '';
@@ -1311,13 +1762,24 @@
                 }
 
                 const effectiveGameLog = keepLocalRotation
-                    ? mergeUniqueEventsById(gameLogRef.current || [], normalized.gameLog || [], 300)
+                    ? mergeUniqueEventsById(gameLogRef.current || [], normalized.gameLog || [], MAX_LIVE_LOG_ENTRIES)
                     : normalized.gameLog;
                 const effectiveLoggedHistory = keepLocalRotation
-                    ? mergeUniqueEventsById(loggedHistoryRef.current || [], normalized.loggedHistory || [], 300)
+                    ? mergeUniqueEventsById(loggedHistoryRef.current || [], normalized.loggedHistory || [], MAX_LIVE_HISTORY_ENTRIES)
                     : normalized.loggedHistory;
                 lastRemoteGameLogIdsRef.current = new Set((normalized.gameLog || []).map((event) => event?.id).filter(Boolean));
                 const replayed = buildLiveStateFromEvents(replaySnapshot || liveGameSnapshotRef.current || null, effectiveGameLog) || null;
+                const pauseActiveFromLog = isTimeoutCurrentlyActive(effectiveGameLog);
+                const hasActiveLocalResumeLock = Date.now() < Number(localResumeLockUntilRef.current || 0);
+                const remoteClockSeconds = Math.max(0, Number.parseInt(session.periodClockSeconds, 10) || getPeriodDurationSeconds(replayed?.currentQuarter || session.currentQuarter || 1));
+                const remoteAwaitingPeriodStart = Boolean(session.awaitingPeriodStart);
+                const remoteAwaitingOvertimeDecision = Boolean(session.awaitingOvertimeDecision);
+                const shouldForceRunningDuringResumeLock = hasActiveLocalResumeLock
+                    && !pauseActiveFromLog
+                    && !remoteAwaitingPeriodStart
+                    && !remoteAwaitingOvertimeDecision
+                    && remoteClockSeconds > 0;
+                const shouldForceLocalResumeState = hasActiveLocalResumeLock && (pauseActiveFromLog || shouldForceRunningDuringResumeLock);
                 const hasLocalOnly = (gameLogRef.current || []).some((event) => event?.id && !lastRemoteGameLogIdsRef.current.has(event.id));
                 setSyncDebug((prev) => ({
                     ...prev,
@@ -1325,7 +1787,9 @@
                     lastLocalLineupRevisionAtSync: localLineupRevision,
                     keepLocalRotation,
                     pendingQueue: (pendingLiveEventsRef.current || []).length,
-                    hasLocalOnly
+                    hasLocalOnly,
+                    forceLocalResume: shouldForceLocalResumeState,
+                    forceRunningResumeLock: shouldForceRunningDuringResumeLock
                 }));
                 const effectiveLineupRevision = keepLocalRotation
                     ? Math.max(localLineupRevision, remoteLineupRevision)
@@ -1351,6 +1815,8 @@
 
                 setTeamAId(remoteTeamAId);
                 setTeamBId(remoteTeamBId);
+                setLiveSessionInstanceId(remoteSessionInstanceId);
+                setLiveSessionCreatedAt(remoteSessionCreatedAt);
                 setTeamAScore(replayed?.teamAScore || session.teamAScore || 0);
                 setTeamBScore(replayed?.teamBScore || session.teamBScore || 0);
                 setCurrentQuarter(replayed?.currentQuarter || session.currentQuarter || 1);
@@ -1359,15 +1825,29 @@
                 setTeamBLineup(teamBRotation.lineup);
                 setTeamBBench(teamBRotation.bench);
                 setLiveStats(replayed?.liveStats || session.liveStats || {});
-                setPeriodClockSeconds(Math.max(0, Number.parseInt(session.periodClockSeconds, 10) || getPeriodDurationSeconds(replayed?.currentQuarter || session.currentQuarter || 1)));
-                setIsPeriodClockRunning(Boolean(session.isPeriodClockRunning));
+                setPeriodSnapshots(Array.isArray(session.periodSnapshots) ? session.periodSnapshots : []);
+                setPeriodClockSeconds(remoteClockSeconds);
+                setIsPeriodClockRunning(
+                    shouldForceRunningDuringResumeLock
+                        ? true
+                        : ((pauseActiveFromLog && !shouldForceLocalResumeState) ? false : Boolean(session.isPeriodClockRunning))
+                );
+                setIsPlayPaused(
+                    shouldForceRunningDuringResumeLock
+                        ? false
+                        : ((pauseActiveFromLog && !shouldForceLocalResumeState) ? true : Boolean(session.isPlayPaused))
+                );
                 setLivePlayerSeconds(session.livePlayerSeconds || {});
                 setLiveGameSnapshot(replaySnapshot || null);
                 setGameLog(effectiveGameLog);
                 setLoggedHistory(effectiveLoggedHistory);
                 setPlayedPlayers(replayed?.playedPlayers || session.playedPlayers || []);
-                setDnpPlayers(session.dnpPlayers || []);
+                const keepLocalDnpState = isGameLiveRef.current && localDnpUpdatedAt > 0 && remoteDnpUpdatedAt < localDnpUpdatedAt;
+                setDnpPlayers(keepLocalDnpState ? (dnpPlayersRef.current || []) : (session.dnpPlayers || []));
                 setAwaitingPeriodStart(Boolean(session.awaitingPeriodStart));
+                sessionRevisionRef.current = Math.max(Number(sessionRevisionRef.current || 0), Number(session.sessionRevision || 0));
+                lastLocalSessionUpdatedAtRef.current = Math.max(localSessionUpdatedAt, remoteSessionUpdatedAt);
+                lastLocalDnpUpdatedAtRef.current = Math.max(localDnpUpdatedAt, remoteDnpUpdatedAt);
                 setLineupRevision((prev) => {
                     const next = Math.max(prev, effectiveLineupRevision || 0);
                     lineupRevisionRef.current = next;
@@ -1383,6 +1863,8 @@
                 setIsGameLive(false);
                 setTeamAId('');
                 setTeamBId('');
+                setLiveSessionInstanceId('');
+                setLiveSessionCreatedAt(0);
                 setTeamAScore(0);
                 setTeamBScore(0);
                 setCurrentQuarter(1);
@@ -1395,6 +1877,7 @@
                 setLiveStats({});
                 setLivePlayerSeconds({});
                 setLiveGameSnapshot(null);
+                setPeriodSnapshots([]);
                 setGameLog([]);
                 setLoggedHistory([]);
                 setPlayedPlayers([]);
@@ -1402,6 +1885,7 @@
                 setAwaitingPeriodStart(false);
                 setLineupRevision(0);
                 lineupRevisionRef.current = 0;
+                sessionRevisionRef.current = 0;
                 hadLiveSessionRef.current = false;
             };
 
@@ -1532,15 +2016,15 @@
                 return b.pointsFor - a.pointsFor;
             });
             const standingsLeaderDefs = [
-                { id: 'pts', label: 'PTS' },
-                { id: 'reb', label: 'REB' },
-                { id: 'ast', label: 'AST' },
-                { id: 'stl', label: 'STL' },
-                { id: 'blk', label: 'BLK' },
-                { id: 'to', label: 'TO' },
-                { id: 'fgPct', label: 'FG%' },
-                { id: 'fg3Pct', label: '3P%' },
-                { id: 'pf', label: 'PF' }
+                { id: 'pts', label: 'PTS', tabLabel: 'Points' },
+                { id: 'reb', label: 'REB', tabLabel: 'Rebounds' },
+                { id: 'ast', label: 'AST', tabLabel: 'Assists' },
+                { id: 'stl', label: 'STL', tabLabel: 'Steals' },
+                { id: 'blk', label: 'BLK', tabLabel: 'Blocks' },
+                { id: 'to', label: 'TO', tabLabel: 'Turnovers' },
+                { id: 'fgPct', label: 'FG%', tabLabel: 'Field Goal %' },
+                { id: 'fg3Pct', label: '3P%', tabLabel: 'Three Point %' },
+                { id: 'pf', label: 'PF', tabLabel: 'Fouls' }
             ];
             const getTeamTotalValue = (team, key) => {
                 const players = Array.isArray(team?.players) ? team.players : [];
@@ -1616,21 +2100,111 @@
                 const topRaw = Number(top?.totalsByCategory?.[def.id] || 0);
                 const isPct = def.id === 'fgPct' || def.id === 'fg3Pct';
                 const topGp = Math.max(1, Number(top?.gamesPlayed || 0));
+                const rankedTeams = sorted.map((team) => {
+                    const raw = Number(team.totalsByCategory[def.id] || 0);
+                    const gp = Math.max(1, Number(team.gamesPlayed || 0));
+                    const value = standingsStatMode === 'perGame' && !isPct ? (raw / gp) : raw;
+
+                    return {
+                        id: team.id,
+                        name: team.name,
+                        color: team.color,
+                        value
+                    };
+                });
+                const maxValue = rankedTeams.reduce((max, team) => Math.max(max, Math.max(0, Number(team.value || 0))), 0);
+
                 return {
                     id: def.id,
                     label: def.label,
                     teamId: top?.id || '',
                     teamName: top?.name || '-',
                     teamColor: top?.color || '#94a3b8',
-                    value: standingsStatMode === 'perGame' && !isPct ? (topRaw / topGp) : topRaw
+                    value: standingsStatMode === 'perGame' && !isPct ? (topRaw / topGp) : topRaw,
+                    bars: rankedTeams.map((team) => ({
+                        ...team,
+                        width: maxValue > 0 ? (Math.max(0, Number(team.value || 0)) / maxValue) * 100 : 0
+                    }))
                 };
             });
+            const selectedStandingsLeader = statCategoryLeaders.find((row) => row.id === selectedStandingsLeaderStat) || statCategoryLeaders[0] || null;
+
+            useEffect(() => {
+                if (activeTab !== 'standings') {
+                    setStandingsBarsVisible(false);
+                    return undefined;
+                }
+
+                setStandingsBarsVisible(false);
+                setStandingsBarsCycle((prev) => prev + 1);
+                let nextFrame = null;
+                const frame = window.requestAnimationFrame(() => {
+                    nextFrame = window.requestAnimationFrame(() => {
+                        setStandingsBarsVisible(true);
+                    });
+                });
+
+                return () => {
+                    window.cancelAnimationFrame(frame);
+                    if (nextFrame !== null) {
+                        window.cancelAnimationFrame(nextFrame);
+                    }
+                };
+            }, [activeTab, standingsStatMode, selectedStandingsLeaderStat, teamStatTotals.length]);
+
+            useEffect(() => {
+                if (!standingsLeaderDefs.some((def) => def.id === selectedStandingsLeaderStat)) {
+                    setSelectedStandingsLeaderStat(standingsLeaderDefs[0]?.id || 'pts');
+                }
+            }, [selectedStandingsLeaderStat]);
             const selectedHistoryGame = selectedHistoryGameId
                 ? (games.find(g => g.id === selectedHistoryGameId) || null)
                 : null;
             const currentLiveGameLog = getCurrentGameLogSegment(gameLog);
-            const liveQuarterStats = computeQuarterTeamStatsFromLog(currentLiveGameLog);
+            const finalizedPeriods = new Set(
+                currentLiveGameLog
+                    .filter((event) => event?.kind === 'meta' && event?.metaType === 'quarterEnd')
+                    .map((event) => getQuarterFromEvent(event))
+                    .filter((quarter) => Number.isFinite(quarter) && quarter > 0)
+            );
+            const liveQuarterStatsFromLog = computeQuarterTeamStatsFromLog(currentLiveGameLog);
+            const frozenQuarterStatsByQuarter = new Map((periodSnapshots || []).map((snapshot) => [Number(snapshot?.quarter || 0), snapshot]));
+            const maxLiveQuarter = Math.max(
+                4,
+                currentQuarter || 1,
+                ...liveQuarterStatsFromLog.map((row) => Number(row?.quarter || 0)),
+                ...Array.from(frozenQuarterStatsByQuarter.keys())
+            );
+            const liveQuarterStats = Array.from({ length: maxLiveQuarter }, (_, idx) => idx + 1).map((quarter) => {
+                const frozen = frozenQuarterStatsByQuarter.get(quarter) || null;
+                if (frozen?.quarterStats) {
+                    return {
+                        quarter,
+                        teamA: cloneQuarterStats(frozen.quarterStats.teamA),
+                        teamB: cloneQuarterStats(frozen.quarterStats.teamB)
+                    };
+                }
+
+                const logRow = liveQuarterStatsFromLog.find((row) => Number(row.quarter) === quarter) || null;
+                return {
+                    quarter,
+                    teamA: cloneQuarterStats(logRow?.teamA || createEmptyQuarterStats()),
+                    teamB: cloneQuarterStats(logRow?.teamB || createEmptyQuarterStats())
+                };
+            });
             const liveTimeouts = computeTimeoutsFromLog(currentLiveGameLog);
+            const regulationQuarterCoverage = Array.from({ length: 4 }, (_, idx) => {
+                const quarter = idx + 1;
+                const hasEvidence = currentLiveGameLog.some((event) => {
+                    if (!event || getQuarterFromEvent(event) !== quarter) return false;
+                    if (event.kind === 'stat' || event.kind === 'sub') return true;
+                    return event.kind === 'meta' && (event.metaType === 'quarterStart' || event.metaType === 'quarterEnd');
+                });
+                return { quarter, hasEvidence };
+            });
+            const missingRegulationQuarters = regulationQuarterCoverage
+                .filter((row) => !row.hasEvidence)
+                .map((row) => row.quarter);
             const timeoutUsage = computeTimeoutUsage(currentLiveGameLog, currentQuarter);
             const timeoutLimit = currentQuarter > 4 ? 1 : 5;
             const teamATimeoutUsed = currentQuarter > 4 ? timeoutUsage.teamA.currentOvertime : timeoutUsage.teamA.regulation;
@@ -1649,43 +2223,57 @@
             const hasCurrentQuarterStarted = currentLiveGameLog.some(
                 (event) => event.kind === 'meta' && event.metaType === 'quarterStart' && getQuarterFromEvent(event) === currentQuarter
             );
-            const latestPeriodMetaEvent = currentLiveGameLog.find(
+            const latestPeriodMetaEvent = getLatestLogEvent(
+                currentLiveGameLog,
                 (event) => event?.kind === 'meta' && (event.metaType === 'matchStart' || event.metaType === 'quarterStart' || event.metaType === 'quarterEnd')
             );
-            const latestClockAdjustForCurrentQuarter = currentLiveGameLog.find(
-                (event) => event?.kind === 'meta' && event.metaType === 'clockAdjust' && getQuarterFromEvent(event) === currentQuarter
-            );
-            const adjustedClockSecondsAfterQuarterEnd = latestClockAdjustForCurrentQuarter
-                ? Math.max(0, Number.parseInt(parseClockInputToSeconds(String(latestClockAdjustForCurrentQuarter.clockRemaining || '0')) || 0, 10))
-                : 0;
+            const latestPeriodMetaQuarter = latestPeriodMetaEvent ? getQuarterFromEvent(latestPeriodMetaEvent) : 0;
+            const adjustedClockSecondsAfterQuarterEnd = Math.max(0, Number(periodClockSeconds || 0));
             const awaitingPeriodStartFromLog = latestPeriodMetaEvent
                 ? (
                     latestPeriodMetaEvent.metaType === 'matchStart' ||
-                    (latestPeriodMetaEvent.metaType === 'quarterEnd' && adjustedClockSecondsAfterQuarterEnd <= 1)
+                    (latestPeriodMetaEvent.metaType === 'quarterEnd' && (
+                        adjustedClockSecondsAfterQuarterEnd <= 1
+                        || !hasCurrentQuarterStarted
+                        || latestPeriodMetaQuarter === currentQuarter
+                    ))
                 )
-                : false;
-            const isAwaitingPeriodStart = awaitingPeriodStart || awaitingPeriodStartFromLog;
+                : null;
+            const isAwaitingPeriodStart = awaitingPeriodStartFromLog === null
+                ? awaitingPeriodStart
+                : awaitingPeriodStartFromLog;
             const nextPeriodToStart = hasCurrentQuarterStarted ? currentQuarter + 1 : currentQuarter;
             const nextPeriodStartLabel = getPeriodLabel(nextPeriodToStart);
+            const isNextPeriodOvertime = nextPeriodToStart > 4;
+            const shouldBlockOvertimeStart = isNextPeriodOvertime && !isTieGame;
             const timeoutIsActive = Boolean(isPlayPaused);
             // Lock undo only while a period is finalized and waiting state is active.
             // Do not lock it permanently for the rest of the game after one quarter ends.
             const undoLockedByQuarterEnd = isAwaitingPeriodStart || awaitingOvertimeDecision;
-            const latestPauseMetaType = currentLiveGameLog.find(
-                (event) => event?.kind === 'meta' && ['timeout', 'officialsTimeout', 'manualPause', 'foulPause'].includes(event.metaType)
-            )?.metaType || null;
+            const latestPauseMetaType = getLatestActivePauseMetaType(currentLiveGameLog);
             const allowAllActionsWhileManualPause = latestPauseMetaType === 'manualPause';
             const canCallOfficialsWhilePaused = latestPauseMetaType === 'manualPause' || latestPauseMetaType === 'foulPause';
+            const isTeamTimeoutPauseActive = timeoutIsActive && (latestPauseMetaType === 'timeout' || latestPauseMetaType === 'officialsTimeout');
+            const hasStartedCurrentPeriod = hasCurrentQuarterStarted && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
+            const hasStoppedCurrentPeriod = hasStartedCurrentPeriod && periodClockSeconds > 0 && !isPeriodClockRunning;
             const derivedPeriodActionMode = !hasMatchStarted
                 ? 'startMatch'
                 : isAwaitingPeriodStart
-                    ? 'startPeriod'
+                    ? (shouldBlockOvertimeStart ? 'endGame' : 'startPeriod')
                 : currentQuarter >= 4 && awaitingOvertimeDecision
                     ? (isTieGame ? 'startOvertime' : 'endGame')
-                : ((timeoutIsActive || isPlayPaused || (!isPeriodClockRunning && periodClockSeconds > 0)) && periodClockSeconds > 0)
+                : hasStartedCurrentPeriod && periodClockSeconds <= 0
+                    ? 'endPeriod'
+                : hasStartedCurrentPeriod && periodClockSeconds > 0 && isPeriodClockRunning
+                    ? 'pauseGame'
+                    : hasStoppedCurrentPeriod
                     ? 'resume'
-                    : 'endPeriod';
-            const periodActionMode = pendingPeriodActionMode || derivedPeriodActionMode;
+                    : 'startPeriod';
+            const safePendingPeriodActionMode = ((pendingPeriodActionMode === 'startOvertime' && !isTieGame)
+                || (pendingPeriodActionMode === 'startPeriod' && shouldBlockOvertimeStart))
+                ? null
+                : pendingPeriodActionMode;
+            const periodActionMode = safePendingPeriodActionMode || derivedPeriodActionMode;
             const periodActionLabel = periodActionMode === 'startMatch'
                 ? 'Start Match'
                 : periodActionMode === 'startPeriod'
@@ -1695,22 +2283,125 @@
                 : periodActionMode === 'resume'
                     ? `Resume ${getPeriodLabel(currentQuarter)}`
                     : periodActionMode === 'endGame'
-                        ? 'End Game'
-                        : `End ${getPeriodLabel(currentQuarter)}`;
+                        ? 'End Game & Lock Stats'
+                    : periodActionMode === 'pauseGame'
+                        ? 'Pause Game'
+                        : (currentQuarter <= 4
+                            ? `End Quarter & Lock Data (${getPeriodLabel(currentQuarter)})`
+                            : `End Period & Lock Data (${getPeriodLabel(currentQuarter)})`);
             const periodActionIsStart = periodActionLabel.startsWith('Start');
             const periodActionIsResume = periodActionLabel.startsWith('Resume');
             const periodActionIsEnd = periodActionLabel.startsWith('End');
+            const periodActionIsPause = periodActionMode === 'pauseGame';
             const periodActionIsPositive = periodActionIsStart || periodActionIsResume;
-            const canTriggerStatLogging = hasMatchStarted && (!timeoutIsActive || allowAllActionsWhileManualPause) && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
-            const alwaysAllowedActionIds = new Set(['pf_technical', 'pts_1', 'ft_miss']);
+            const canTriggerStatLogging = hasMatchStarted
+                && isPeriodClockRunning
+                && (!timeoutIsActive || allowAllActionsWhileManualPause)
+                && !isAwaitingPeriodStart
+                && !awaitingOvertimeDecision;
+            const liveGameplayControlDisplay = isLiveGameplayModalActive && liveGameplayControlSnapshotRef.current
+                ? liveGameplayControlSnapshotRef.current
+                : {
+                    canTriggerStatLogging,
+                    isPeriodClockRunning,
+                    periodActionLabel,
+                    periodActionIsStart,
+                    periodActionIsResume,
+                    periodActionIsEnd,
+                    periodActionIsPause,
+                    periodActionIsPositive
+                };
+            const displayCanTriggerStatLogging = liveGameplayControlDisplay.canTriggerStatLogging;
+            const displayIsPeriodClockRunning = liveGameplayControlDisplay.isPeriodClockRunning;
+            const displayPeriodActionLabel = liveGameplayControlDisplay.periodActionLabel;
+            const displayPeriodActionIsStart = liveGameplayControlDisplay.periodActionIsStart;
+            const displayPeriodActionIsResume = liveGameplayControlDisplay.periodActionIsResume;
+            const displayPeriodActionIsEnd = liveGameplayControlDisplay.periodActionIsEnd;
+            const displayPeriodActionIsPause = liveGameplayControlDisplay.periodActionIsPause;
+            const displayPeriodActionIsPositive = liveGameplayControlDisplay.periodActionIsPositive;
+            useEffect(() => {
+                if (isLiveGameplayModalActive) return;
+                liveGameplayControlSnapshotRef.current = {
+                    canTriggerStatLogging,
+                    isPeriodClockRunning,
+                    periodActionLabel,
+                    periodActionIsStart,
+                    periodActionIsResume,
+                    periodActionIsEnd,
+                    periodActionIsPause,
+                    periodActionIsPositive
+                };
+            }, [
+                isLiveGameplayModalActive,
+                canTriggerStatLogging,
+                isPeriodClockRunning,
+                periodActionLabel,
+                periodActionIsStart,
+                periodActionIsResume,
+                periodActionIsEnd,
+                periodActionIsPause,
+                periodActionIsPositive
+            ]);
+            const alwaysAllowedActionIds = new Set(['pf_technical']);
+            const stoppedClockActionIds = new Set(['pts_1', 'ft_miss']);
             const canTriggerAlwaysAction = (action) => Boolean(action && isGameLive && alwaysAllowedActionIds.has(action.id));
-            const canUseActionTrigger = (action) => canTriggerStatLogging || canTriggerAlwaysAction(action);
+            const canTriggerRunningClockAction = (action) => Boolean(
+                action
+                && displayCanTriggerStatLogging
+                && !stoppedClockActionIds.has(action.id)
+            );
+            const canTriggerStoppedClockAction = (action) => Boolean(
+                action
+                && isGameLive
+                && stoppedClockActionIds.has(action.id)
+                && hasMatchStarted
+                && !isAwaitingPeriodStart
+                && !awaitingOvertimeDecision
+                && !displayIsPeriodClockRunning
+            );
+            const canUseActionTrigger = (action) => canTriggerRunningClockAction(action) || canTriggerAlwaysAction(action) || canTriggerStoppedClockAction(action);
             const teamACanTimeout = teamATimeoutUsed < timeoutLimit;
             const teamBCanTimeout = teamBTimeoutUsed < timeoutLimit;
-            const teamATimeoutEnabled = hasMatchStarted && !timeoutIsActive && teamACanTimeout;
-            const teamBTimeoutEnabled = hasMatchStarted && !timeoutIsActive && teamBCanTimeout;
+            const teamATimeoutEnabled = hasMatchStarted && !isTeamTimeoutPauseActive && teamACanTimeout;
+            const teamBTimeoutEnabled = hasMatchStarted && !isTeamTimeoutPauseActive && teamBCanTimeout;
             const canPauseGame = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart && isPeriodClockRunning;
             const canOfficialsTimeout = hasMatchStarted && (!isAwaitingPeriodStart || hasCurrentQuarterStarted) && (!timeoutIsActive || canCallOfficialsWhilePaused);
+            const canEndCurrentPeriod = hasMatchStarted && hasCurrentQuarterStarted && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
+            const canFinalizeGame = hasMatchStarted && periodActionMode === 'endGame';
+            const latestUndoEntry = (loggedHistory || []).find((entry) => !entry?.isUndoCompensation) || null;
+            const latestUndoLog = latestUndoEntry ? gameLog.find((log) => log.id === latestUndoEntry.id) : null;
+            const latestUndoPlayer = latestUndoEntry?.playerId
+                ? teams.flatMap((team) => team.players || []).find((player) => player.id === latestUndoEntry.playerId)
+                : null;
+            const undoStatLabelMap = {
+                pts: 'PTS',
+                reb: 'REB',
+                ast: 'AST',
+                stl: 'STL',
+                blk: 'BLK',
+                to: 'TO',
+                pf: 'PF',
+                fg2m: '2FGM',
+                fg3m: '3FGM',
+                fg2m_miss: '2FG Miss',
+                fg3m_miss: '3FG Miss',
+                ftm: 'FTM',
+                ft_miss: 'FT Miss'
+            };
+            const undoDelta = Number(latestUndoEntry?.changeAmount || 0);
+            const undoDeltaText = `${undoDelta >= 0 ? '+' : ''}${undoDelta}`;
+            const undoStatLabel = latestUndoEntry?.statField ? (undoStatLabelMap[latestUndoEntry.statField] || String(latestUndoEntry.statField).toUpperCase()) : '';
+            const undoTargetSummary = undoLockedByQuarterEnd
+                ? ''
+                : (latestUndoEntry && latestUndoPlayer
+                    ? `Undo target: #${latestUndoPlayer.number || '-'} ${latestUndoPlayer.name} ${undoDeltaText} ${undoStatLabel}`
+                    : '');
+            const undoTargetBlockedReason = undoLockedByQuarterEnd
+                ? 'locked after period end'
+                : isProtectedLogEntry(latestUndoLog, finalizedPeriods)
+                    ? (String(latestUndoLog?.lockReason || '').includes('checkpoint10') ? 'checkpoint lock' : 'period-end lock')
+                    : '';
+            const canUndoLatest = Boolean(latestUndoEntry) && !undoLockedByQuarterEnd && !isProtectedLogEntry(latestUndoLog, finalizedPeriods);
             const teamAFoulsForDisplay = currentQuarter <= 4
                 ? Number((liveQuarterStats.find((row) => row.quarter === currentQuarter)?.teamA?.pf) || 0)
                 : liveQuarterStats
@@ -1721,20 +2412,80 @@
                 : liveQuarterStats
                     .filter((row) => row.quarter >= 4 && row.quarter <= currentQuarter)
                     .reduce((sum, row) => sum + Number(row.teamB?.pf || 0), 0);
+
+            const buildQuarterFoulMapForTeam = (isTeamAValue) => {
+                return (currentLiveGameLog || []).reduce((acc, event) => {
+                    if (!event || event.kind !== 'stat' || event.statField !== 'pf') return acc;
+                    if (Boolean(event.isTeamA) !== Boolean(isTeamAValue)) return acc;
+
+                    const playerId = event.playerId;
+                    const quarter = Number.parseInt(event.quarter, 10);
+                    const delta = Number(event.changeAmount || 0);
+                    if (!playerId || !Number.isFinite(quarter) || quarter <= 0 || !delta) return acc;
+
+                    const playerQuarterMap = acc[playerId] || {};
+                    const nextQuarterValue = Math.max(0, Number(playerQuarterMap[quarter] || 0) + delta);
+                    acc[playerId] = {
+                        ...playerQuarterMap,
+                        [quarter]: nextQuarterValue
+                    };
+                    return acc;
+                }, {});
+            };
+
+            const homeQuarterFoulMap = buildQuarterFoulMapForTeam(true);
+            const awayQuarterFoulMap = buildQuarterFoulMapForTeam(false);
+            const remainingRegulationPeriods = currentQuarter > 4
+                ? 1
+                : Math.max(1, 4 - currentQuarter);
             const homeFoulTroublePlayers = (teams.find((t) => t.id === teamAId)?.players || [])
                 .map((player) => ({
                     ...player,
-                    fouls: Number(liveStats[player.id]?.pf || 0)
+                    fouls: Number(liveStats[player.id]?.pf || 0),
+                    quarterFouls: homeQuarterFoulMap[player.id] || {},
+                    peakQuarterFouls: Object.values(homeQuarterFoulMap[player.id] || {}).reduce((max, value) => Math.max(max, Number(value || 0)), 0)
                 }))
-                .filter((player) => player.fouls >= 4)
-                .sort((a, b) => b.fouls - a.fouls || String(a.number || '').localeCompare(String(b.number || '')));
+                .map((player) => {
+                    const foulsToLimit = Math.max(0, 5 - Number(player.fouls || 0));
+                    const allowedPerRemainingPeriod = foulsToLimit / remainingRegulationPeriods;
+                    const isHighRiskFoulPace = allowedPerRemainingPeriod <= 1;
+                    const isThreeFoulConcern = Number(player.fouls || 0) >= 3;
+                    const isFoulTrouble = Number(player.fouls || 0) >= 5 || isHighRiskFoulPace || isThreeFoulConcern;
+                    return {
+                        ...player,
+                        foulsToLimit,
+                        allowedPerRemainingPeriod,
+                        isHighRiskFoulPace,
+                        isThreeFoulConcern,
+                        isFoulTrouble
+                    };
+                })
+                .filter((player) => player.isFoulTrouble)
+                .sort((a, b) => Number(a.fouls >= 5) - Number(b.fouls >= 5) || a.allowedPerRemainingPeriod - b.allowedPerRemainingPeriod || b.fouls - a.fouls || String(a.number || '').localeCompare(String(b.number || '')));
             const awayFoulTroublePlayers = (teams.find((t) => t.id === teamBId)?.players || [])
                 .map((player) => ({
                     ...player,
-                    fouls: Number(liveStats[player.id]?.pf || 0)
+                    fouls: Number(liveStats[player.id]?.pf || 0),
+                    quarterFouls: awayQuarterFoulMap[player.id] || {},
+                    peakQuarterFouls: Object.values(awayQuarterFoulMap[player.id] || {}).reduce((max, value) => Math.max(max, Number(value || 0)), 0)
                 }))
-                .filter((player) => player.fouls >= 4)
-                .sort((a, b) => b.fouls - a.fouls || String(a.number || '').localeCompare(String(b.number || '')));
+                .map((player) => {
+                    const foulsToLimit = Math.max(0, 5 - Number(player.fouls || 0));
+                    const allowedPerRemainingPeriod = foulsToLimit / remainingRegulationPeriods;
+                    const isHighRiskFoulPace = allowedPerRemainingPeriod <= 1;
+                    const isThreeFoulConcern = Number(player.fouls || 0) >= 3;
+                    const isFoulTrouble = Number(player.fouls || 0) >= 5 || isHighRiskFoulPace || isThreeFoulConcern;
+                    return {
+                        ...player,
+                        foulsToLimit,
+                        allowedPerRemainingPeriod,
+                        isHighRiskFoulPace,
+                        isThreeFoulConcern,
+                        isFoulTrouble
+                    };
+                })
+                .filter((player) => player.isFoulTrouble)
+                .sort((a, b) => Number(a.fouls >= 5) - Number(b.fouls >= 5) || a.allowedPerRemainingPeriod - b.allowedPerRemainingPeriod || b.fouls - a.fouls || String(a.number || '').localeCompare(String(b.number || '')));
             const foulBarMax = 5;
             const foulPeriodLabel = currentQuarter <= 4 ? getPeriodLabel(currentQuarter) : `${getPeriodLabel(4)}+`;
             const timeoutScopeLabel = currentQuarter > 4 ? getPeriodLabel(currentQuarter) : 'Reg';
@@ -1749,7 +2500,35 @@
 
                 const periodLabel = getPeriodLabel(currentQuarter);
                 showToast(`${periodLabel} reached 00:00. Press End ${periodLabel} to finalize period stats.`, 'info');
+                setPeriodEndAlert({
+                    title: `${periodLabel} Ended`,
+                    text: `Finalize ${periodLabel} first, then start the next period. This keeps stats recorded in the correct period.`
+                });
             };
+
+            useEffect(() => {
+                if (!periodEndAlert) return;
+
+                const shouldKeepVisible =
+                    isGameLive
+                    && hasCurrentQuarterStarted
+                    && !isAwaitingPeriodStart
+                    && !awaitingOvertimeDecision
+                    && !isPeriodClockRunning
+                    && Number(periodClockSeconds) <= 0;
+
+                if (!shouldKeepVisible) {
+                    setPeriodEndAlert(null);
+                }
+            }, [
+                periodEndAlert,
+                isGameLive,
+                hasCurrentQuarterStarted,
+                isAwaitingPeriodStart,
+                awaitingOvertimeDecision,
+                isPeriodClockRunning,
+                periodClockSeconds
+            ]);
 
             useEffect(() => {
                 if (!isGameLive) return;
@@ -1774,10 +2553,181 @@
             useEffect(() => {
                 if (!isGameLive) return;
                 if (suppressPeriodAutoStopRef.current) return;
+                if (suppressTimeoutAutoStopRef.current) {
+                    suppressTimeoutAutoStopRef.current = false;
+                    return;
+                }
                 if (!timeoutIsActive) return;
                 if (!isPeriodClockRunning) return;
                 setIsPeriodClockRunning(false);
             }, [isGameLive, timeoutIsActive, isPeriodClockRunning]);
+
+            useEffect(() => {
+                if (!isGameLive) return;
+                if (!isPeriodClockRunning) return;
+                if (timeoutIsActive) return;
+
+                if (suppressModalAutoPauseRef.current) {
+                    suppressModalAutoPauseRef.current = false;
+                    return;
+                }
+
+                const foulActionModalOpen = showLoggingModal && !!activeAction && isFoulLikeAction(activeAction);
+                const actionModalOpen = showLoggingModal && !!activeAction && !isFoulLikeAction(activeAction);
+                const liveEditModalOpen = Boolean(liveLogEditTarget);
+
+                if (foulActionModalOpen) {
+                    markLocalSessionUpdated();
+                    pendingFoulActionPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                    return;
+                }
+
+                if (actionModalOpen) {
+                    markLocalSessionUpdated();
+                    actionModalSoftPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                    return;
+                }
+
+                if (showSubstitutionModal) {
+                    markLocalSessionUpdated();
+                    pendingSubSelectionAutoPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                    return;
+                }
+
+                if (showAddFromBenchModal) {
+                    markLocalSessionUpdated();
+                    addFromBenchModalSoftPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                    return;
+                }
+
+                if (liveEditModalOpen) {
+                    markLocalSessionUpdated();
+                    actionModalSoftPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                }
+            }, [
+                isGameLive,
+                isPeriodClockRunning,
+                timeoutIsActive,
+                showLoggingModal,
+                activeAction,
+                showSubstitutionModal,
+                showAddFromBenchModal,
+                liveLogEditTarget
+            ]);
+
+            const tryApplyPendingModalSoftResume = (liveGameplayModalOpen) => {
+                if (!pendingModalSoftResumeRef.current) return false;
+                if (!isGameLive) {
+                    pendingModalSoftResumeRef.current = false;
+                    return false;
+                }
+                if (liveGameplayModalOpen) return false;
+                if (timeoutIsActive) return false;
+                if (isAwaitingPeriodStart || awaitingOvertimeDecision) return false;
+                if (Number(periodClockSeconds) <= 0) return false;
+
+                pendingModalSoftResumeRef.current = false;
+                markLocalSessionUpdated();
+                armLocalResumeStabilityWindow();
+                suppressPeriodAutoStopRef.current = true;
+                suppressTimeoutAutoStopRef.current = true;
+                suppressModalAutoPauseRef.current = true;
+                setIsPlayPaused(false);
+                setIsPeriodClockRunning(true);
+                return true;
+            };
+
+            useEffect(() => {
+                const liveGameplayModalOpen = Boolean(
+                    (showLoggingModal && !!activeAction)
+                    || showSubstitutionModal
+                    || showAddFromBenchModal
+                    || liveLogEditTarget
+                );
+
+                const wasOpen = wasLiveGameModalOpenRef.current;
+                wasLiveGameModalOpenRef.current = liveGameplayModalOpen;
+
+                if (!isGameLive) return;
+                if (!wasOpen || liveGameplayModalOpen) return;
+
+                const shouldSoftResume =
+                    actionModalSoftPauseRef.current
+                    || pendingSubSelectionAutoPauseRef.current
+                    || addFromBenchModalSoftPauseRef.current
+                    || pendingFoulActionPauseRef.current;
+
+                actionModalSoftPauseRef.current = false;
+                pendingSubSelectionAutoPauseRef.current = false;
+                addFromBenchModalSoftPauseRef.current = false;
+                pendingFoulActionPauseRef.current = false;
+
+                if (!shouldSoftResume) {
+                    pendingModalSoftResumeRef.current = false;
+                    return;
+                }
+
+                pendingModalSoftResumeRef.current = true;
+                tryApplyPendingModalSoftResume(liveGameplayModalOpen);
+            }, [
+                isGameLive,
+                showLoggingModal,
+                activeAction,
+                showSubstitutionModal,
+                showAddFromBenchModal,
+                liveLogEditTarget,
+                timeoutIsActive,
+                isAwaitingPeriodStart,
+                awaitingOvertimeDecision,
+                periodClockSeconds
+            ]);
+
+            useEffect(() => {
+                const liveGameplayModalOpen = Boolean(
+                    (showLoggingModal && !!activeAction)
+                    || showSubstitutionModal
+                    || showAddFromBenchModal
+                    || liveLogEditTarget
+                );
+                tryApplyPendingModalSoftResume(liveGameplayModalOpen);
+            }, [
+                isGameLive,
+                showLoggingModal,
+                activeAction,
+                showSubstitutionModal,
+                showAddFromBenchModal,
+                liveLogEditTarget,
+                timeoutIsActive,
+                isAwaitingPeriodStart,
+                awaitingOvertimeDecision,
+                periodClockSeconds
+            ]);
+
+            useEffect(() => {
+                if (!isGameLive) return;
+                if (Date.now() >= Number(localResumeLockUntilRef.current || 0)) return;
+                if (timeoutIsActive) return;
+                if (isAwaitingPeriodStart || awaitingOvertimeDecision) return;
+                if (Number(periodClockSeconds) <= 0) return;
+                if (isPeriodClockRunning) return;
+
+                suppressPeriodAutoStopRef.current = true;
+                setIsPlayPaused(false);
+                suppressTimeoutAutoStopRef.current = true;
+                setIsPeriodClockRunning(true);
+            }, [
+                isGameLive,
+                timeoutIsActive,
+                isAwaitingPeriodStart,
+                awaitingOvertimeDecision,
+                periodClockSeconds,
+                isPeriodClockRunning
+            ]);
 
             useEffect(() => {
                 if (!isGameLive || !isPeriodClockRunning) return;
@@ -1797,25 +2747,34 @@
                         }
                         return prev - 1;
                     });
-
-                    setLivePlayerSeconds((prev) => {
-                        const next = { ...prev };
-                        [...teamALineup, ...teamBLineup].forEach((playerId) => {
-                            if (!playerId) return;
-                            next[playerId] = (next[playerId] || 0) + 1;
-                        });
-                        return next;
-                    });
                 }, 1000);
 
                 return () => window.clearInterval(timerId);
             }, [isGameLive, isPeriodClockRunning, currentQuarter, teamAScore, teamBScore, teamALineup, teamBLineup, pendingPeriodActionMode]);
 
             useEffect(() => {
+                if (!isGameLive) return;
+
+                const recomputed = deriveTotalPlayerSecondsFromTimeline(gameLog, currentQuarter, periodClockSeconds);
+                setLivePlayerSeconds((prev) => {
+                    const prevKeys = Object.keys(prev || {});
+                    const nextKeys = Object.keys(recomputed || {});
+                    if (prevKeys.length !== nextKeys.length) return recomputed;
+                    const changed = nextKeys.some((playerId) => Math.round(Number(prev?.[playerId] || 0)) !== Math.round(Number(recomputed?.[playerId] || 0)));
+                    return changed ? recomputed : prev;
+                });
+            }, [isGameLive, gameLog, currentQuarter, periodClockSeconds]);
+
+            useEffect(() => {
                 if (isGameLive) return;
                 if (!pendingPeriodActionMode) return;
                 setPendingPeriodActionMode(null);
             }, [isGameLive, pendingPeriodActionMode]);
+
+            useEffect(() => {
+                if (!canFinalizeGame) return;
+                setShowExtraGameControls(true);
+            }, [canFinalizeGame]);
 
             useEffect(() => {
                 if (isEditingClockInput) return;
@@ -1838,9 +2797,35 @@
                 setHistoryWriteupInput(selectedHistoryGame?.gameWriteup || '');
             }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.gameWriteup : '']);
 
+            useEffect(() => {
+                if (activeTab !== 'history' || historyDetailTab !== 'potg') return;
+                if (!selectedHistoryGame) return;
+                if (String(selectedHistoryGame.potgWriteup || '').trim()) return;
+                if (generatingPotgWriteupGameId === selectedHistoryGame.id) return;
+                if (attemptedAutoPotgWriteupRef.current.has(selectedHistoryGame.id)) return;
+
+                const teamAObj = teams.find((team) => team.id === selectedHistoryGame.teamAId);
+                const teamBObj = teams.find((team) => team.id === selectedHistoryGame.teamBId);
+                const playerOfTheGame = getPlayerOfTheGame(selectedHistoryGame, teamAObj, teamBObj);
+                if (!playerOfTheGame) return;
+
+                attemptedAutoPotgWriteupRef.current.add(selectedHistoryGame.id);
+                handleGeneratePotgWriteup({
+                    game: selectedHistoryGame,
+                    playerOfTheGame,
+                    auto: true
+                });
+            }, [activeTab, historyDetailTab, selectedHistoryGame, teams, generatingPotgWriteupGameId]);
+
+            useEffect(() => {
+                setPlayerArtSourceDataUrl('');
+                setPlayerArtOutputDataUrl('');
+                setPlayerArtDirection('');
+            }, [selectedHistoryGameId]);
+
             /* Managing body scrolling locks */
             useEffect(() => {
-                const isAnyModalOpen = showNewTeamModal || showNewPlayerModal || showSubstitutionModal || showAddFromBenchModal || showLoggingModal || !!advancedEditingPlayer || !!confirmDialog || !!foulAlert || showAuthModal;
+                const isAnyModalOpen = showNewTeamModal || showNewPlayerModal || showSubstitutionModal || showAddFromBenchModal || showLoggingModal || !!advancedEditingPlayer || !!confirmDialog || !!foulAlert || showAuthModal || !!liveLogEditTarget;
                 if (isAnyModalOpen) {
                     document.body.style.overflow = 'hidden';
                     document.body.style.position = 'fixed';
@@ -1855,7 +2840,7 @@
                     document.body.style.position = '';
                     document.body.style.width = '';
                 };
-            }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, showLoggingModal, advancedEditingPlayer, confirmDialog, foulAlert, showAuthModal]);
+            }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, showLoggingModal, advancedEditingPlayer, confirmDialog, foulAlert, showAuthModal, liveLogEditTarget]);
 
             const handleImportCSV = (e) => {
                 const file = e.target.files[0];
@@ -1988,6 +2973,19 @@
                     lastLiveSeqRef.current = 0;
                 }
 
+                try {
+                    const savedTombstone = localStorage.getItem(DISCARDED_LIVE_SESSION_TOMBSTONE_KEY);
+                    const parsedTombstone = savedTombstone ? JSON.parse(savedTombstone) : null;
+                    const safeSessionId = String(parsedTombstone?.sessionInstanceId || '').trim();
+                    const safeDiscardedAt = Number.parseInt(parsedTombstone?.discardedAt, 10) || 0;
+                    discardedLiveSessionTombstoneRef.current = {
+                        sessionInstanceId: safeSessionId,
+                        discardedAt: safeDiscardedAt
+                    };
+                } catch (e) {
+                    discardedLiveSessionTombstoneRef.current = { sessionInstanceId: '', discardedAt: 0 };
+                }
+
                 const loadActiveSession = async () => {
                     let hydratedFromRemote = false;
                     try {
@@ -2027,7 +3025,16 @@
 
             useEffect(() => {
                 const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const socket = new WebSocket(`${socketProtocol}//${window.location.host}`);
+                const socketHost = window.location.host || 'localhost:3000';
+                let socket = null;
+
+                try {
+                    socket = new WebSocket(`${socketProtocol}//${socketHost}`);
+                } catch (error) {
+                    // Opening from file:// can have an empty host; fail soft so UI still renders.
+                    return () => {};
+                }
+
                 syncSocketRef.current = socket;
 
                 socket.addEventListener('message', (event) => {
@@ -2035,6 +3042,10 @@
                         const payload = JSON.parse(event.data);
                         if (payload?.type === 'live_event') {
                             if (payload.sourceClientId && payload.sourceClientId === syncClientIdRef.current) {
+                                return;
+                            }
+                            const hasPendingPut = pendingActiveSessionSyncRef.current?.mode === 'put';
+                            if (!isGameLiveRef.current && !hadLiveSessionRef.current && !hasPendingPut) {
                                 return;
                             }
                             applyIncomingLiveEvent(payload);
@@ -2059,7 +3070,19 @@
                                 if (payload.session) {
                                     applyRemoteLiveSession(payload.session);
                                 } else {
-                                    clearRemoteLiveSession();
+                                    // Only clear if the broadcast came from an identified client
+                                    // (i.e. another tab intentionally ended the game via DELETE).
+                                    // A null sourceClientId means a server-side write (team/statAction
+                                    // save) triggered the broadcast; the DB may simply not have our
+                                    // session yet (e.g. after a server restart). In that case keep
+                                    // the local session alive and re-queue a PUT to restore it.
+                                    const broadcastFromIdentifiedClient = payload.sourceClientId && payload.sourceClientId !== syncClientIdRef.current;
+                                    if (broadcastFromIdentifiedClient) {
+                                        clearRemoteLiveSession();
+                                    } else if (isGameLiveRef.current) {
+                                        // Re-push our session to the server so it's back in the DB.
+                                        flushPendingActiveSessionSync();
+                                    }
                                 }
                             }
                         }
@@ -2081,6 +3104,18 @@
                 return () => {
                     socket.close();
                 };
+            }, []);
+
+            // Periodic heartbeat: every 30 s re-fetch any missed live events and
+            // retry any pending session PUT/DELETE so a short network blip or a
+            // dropped WS message doesn't leave the app desynced indefinitely.
+            useEffect(() => {
+                const heartbeat = window.setInterval(() => {
+                    fetchMissingLiveEvents();
+                    flushPendingLiveEvents();
+                    flushPendingActiveSessionSync();
+                }, 30000);
+                return () => window.clearInterval(heartbeat);
             }, []);
 
             useEffect(() => {
@@ -2201,6 +3236,33 @@
             }, [isGameLive, gameLog]);
 
             useEffect(() => {
+                if (!Array.isArray(gameLog) || gameLog.length === 0) return;
+
+                let changed = false;
+                const next = [...gameLog];
+                let ordinal = gameLog.length;
+
+                // Walk oldest -> newest to assign stable ordinal locks.
+                for (let idx = gameLog.length - 1; idx >= 0; idx -= 1) {
+                    const entry = gameLog[idx];
+                    const reason = getLogLockReason(entry, ordinal);
+                    if (reason && entry?.lockProtected !== true) {
+                        next[idx] = {
+                            ...(entry || {}),
+                            lockProtected: true,
+                            lockReason: reason
+                        };
+                        changed = true;
+                    }
+                    ordinal -= 1;
+                }
+
+                if (changed) {
+                    setGameLog(next);
+                }
+            }, [gameLog]);
+
+            useEffect(() => {
                 teamsRef.current = teams;
                 isGameLiveRef.current = isGameLive;
                 teamALineupRef.current = teamALineup;
@@ -2210,8 +3272,11 @@
                 gameLogRef.current = gameLog;
                 liveGameSnapshotRef.current = liveGameSnapshot;
                 loggedHistoryRef.current = loggedHistory;
+                dnpPlayersRef.current = dnpPlayers;
                 lineupRevisionRef.current = lineupRevision;
-            }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, lineupRevision]);
+                liveSessionInstanceIdRef.current = liveSessionInstanceId;
+                liveSessionCreatedAtRef.current = liveSessionCreatedAt;
+            }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, dnpPlayers, lineupRevision, liveSessionInstanceId, liveSessionCreatedAt]);
 
             useEffect(() => {
                 if (suppressLiveSessionSyncRef.current) {
@@ -2236,7 +3301,12 @@
 
                 if (isGameLive) {
                     const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
-                    const session = { teamAId, teamBId, teamAScore, teamBScore, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart };
+                    const sessionUpdatedAt = Date.now();
+                    const persistedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now());
+                    const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+                    sessionRevisionRef.current = nextSessionRevision;
+                    lastLocalSessionUpdatedAtRef.current = sessionUpdatedAt;
+                    const session = { teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
                     localStorage.setItem('active_live_session', JSON.stringify(session));
                     hadLiveSessionRef.current = true;
                     setSyncDebug((prev) => ({
@@ -2260,7 +3330,7 @@
                         flushPendingActiveSessionSync();
                     }
                 }
-            }, [isGameLive, teamAId, teamBId, teamAScore, teamBScore, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
+            }, [isGameLive, teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
 
             const showToast = (message, type = 'success') => {
                 setToast({ message, type });
@@ -2285,9 +3355,7 @@
                     email: safePlayer.email || '',
                     social: safePlayer.social || '',
                     contact: safePlayer.contact || '',
-                    positions: Array.isArray(safePlayer.positions)
-                        ? safePlayer.positions.filter((pos) => PLAYER_POSITIONS.includes(pos))
-                        : [],
+                    positions: normalizePlayerPositions(safePlayer),
                     totalStats: {
                         pts: 0,
                         ast: 0,
@@ -2321,6 +3389,8 @@
                     showToast('Cannot mark DNP after a player has recorded stats.', 'info');
                     return;
                 }
+                markLocalSessionUpdated();
+                lastLocalDnpUpdatedAtRef.current = Date.now();
                 setDnpPlayers(prev => currentlyMarked ? prev.filter(id => id !== playerId) : [...prev, playerId]);
             };
 
@@ -2398,30 +3468,51 @@
                 setGeneratingWriteupGameId(game.id);
 
                 try {
+                    const toPromptPerformer = (entry, teamName) => ({
+                        name: entry.name,
+                        number: entry.number,
+                        teamName,
+                        perScore: Number(entry.perScore || 0),
+                        stats: {
+                            pts: Number(entry.stats?.pts || 0),
+                            reb: Number(entry.stats?.reb || 0),
+                            ast: Number(entry.stats?.ast || 0),
+                            stl: Number(entry.stats?.stl || 0),
+                            blk: Number(entry.stats?.blk || 0),
+                            to: Number(entry.stats?.to || 0)
+                        }
+                    });
+
+                    const standoutPerformersByTeam = {
+                        teamA: (topTeamAPerformers || []).slice(0, 2).map((entry) => toPromptPerformer(entry, game.teamAName)),
+                        teamB: (topTeamBPerformers || []).slice(0, 2).map((entry) => toPromptPerformer(entry, game.teamBName))
+                    };
+
                     const bestPerformers = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])]
                         .map((entry) => {
                             const belongsToTeamA = !!teamAObj?.players?.some((p) => p.id === entry.id);
-                            return {
-                                name: entry.name,
-                                number: entry.number,
-                                teamName: belongsToTeamA ? game.teamAName : game.teamBName,
-                                perScore: Number(entry.perScore || 0),
-                                stats: {
-                                    pts: Number(entry.stats?.pts || 0),
-                                    reb: Number(entry.stats?.reb || 0),
-                                    ast: Number(entry.stats?.ast || 0),
-                                    stl: Number(entry.stats?.stl || 0),
-                                    blk: Number(entry.stats?.blk || 0),
-                                    to: Number(entry.stats?.to || 0)
-                                }
-                            };
+                            return toPromptPerformer(entry, belongsToTeamA ? game.teamAName : game.teamBName);
                         })
                         .sort((a, b) => b.perScore - a.perScore || b.stats.pts - a.stats.pts)
                         .slice(0, 8);
 
                     const orderedGameLog = [...(Array.isArray(game.gameLog) ? game.gameLog : [])].reverse();
+                    const isRecapNoiseEvent = (entry) => {
+                        const text = String(entry?.text || '').toLowerCase();
+                        if (entry?.hiddenFromLog) return true;
+                        if (entry?.metaType === 'periodCheckpoint') return true;
+                        if (entry?.isUndoCompensation) return true;
+                        if (entry?.kind === 'stat' && entry?.undoOfId) return true;
+                        if (entry?.metaType === 'clockAdjust') return true;
+                        if (/clock adjusted|sync clock|clock updated/.test(text)) return true;
+                        if (/^undo:\s*reversed/i.test(text)) return true;
+                        if (/\bcorrection\b/.test(text)) return true;
+                        if (entry?.kind === 'meta' && ['manualPause', 'playResume', 'foulPause'].includes(entry?.metaType)) return true;
+                        return false;
+                    };
+                    const recapReadyGameLog = orderedGameLog.filter((entry) => !isRecapNoiseEvent(entry));
 
-                    const pbpForPrompt = orderedGameLog
+                    const pbpForPrompt = recapReadyGameLog
                         .slice(-220)
                         .map((entry) => ({
                             time: String(entry?.time || ''),
@@ -2430,7 +3521,7 @@
                         }))
                         .filter((entry) => entry.text.trim());
 
-                    const finalMomentsForPrompt = orderedGameLog
+                    const finalMomentsForPrompt = recapReadyGameLog
                         .slice(-45)
                         .map((entry) => ({
                             time: String(entry?.time || ''),
@@ -2438,6 +3529,132 @@
                             text: String(entry?.text || '')
                         }))
                         .filter((entry) => entry.text.trim());
+
+                    const extractScorePairFromLogText = (text) => {
+                        const normalized = String(text || '');
+                        const legacyMatch = normalized.match(/\[(\d+)\s*-\s*(\d+)\]/);
+                        if (legacyMatch) {
+                            return {
+                                teamAScore: Number(legacyMatch[1]),
+                                teamBScore: Number(legacyMatch[2])
+                            };
+                        }
+
+                        const acronymMatch = normalized.match(/\[[A-Za-z0-9]{2,6}\s+(\d+)\s*-\s*[A-Za-z0-9]{2,6}\s+(\d+)\]/);
+                        if (acronymMatch) {
+                            return {
+                                teamAScore: Number(acronymMatch[1]),
+                                teamBScore: Number(acronymMatch[2])
+                            };
+                        }
+
+                        return null;
+                    };
+
+                    const scoreSnapshots = recapReadyGameLog
+                        .map((entry) => {
+                            const text = String(entry?.text || '');
+                            const parsedScores = extractScorePairFromLogText(text);
+                            if (!parsedScores) return null;
+                            const teamAScore = Number(parsedScores.teamAScore);
+                            const teamBScore = Number(parsedScores.teamBScore);
+                            if (!Number.isFinite(teamAScore) || !Number.isFinite(teamBScore)) return null;
+                            return {
+                                time: String(entry?.time || ''),
+                                teamAScore,
+                                teamBScore,
+                                marginA: teamAScore - teamBScore
+                            };
+                        })
+                        .filter(Boolean);
+
+                    let leadSwingSummary = null;
+                    if (scoreSnapshots.length > 0) {
+                        let largestLead = {
+                            teamKey: 'none',
+                            teamName: 'None',
+                            leadPoints: 0,
+                            atTime: scoreSnapshots[0].time || ''
+                        };
+
+                        scoreSnapshots.forEach((snap) => {
+                            const absLead = Math.abs(Number(snap.marginA || 0));
+                            if (absLead <= largestLead.leadPoints) return;
+                            largestLead = {
+                                teamKey: snap.marginA > 0 ? 'teamA' : (snap.marginA < 0 ? 'teamB' : 'none'),
+                                teamName: snap.marginA > 0 ? game.teamAName : (snap.marginA < 0 ? game.teamBName : 'None'),
+                                leadPoints: absLead,
+                                atTime: snap.time || ''
+                            };
+                        });
+
+                        const peakIndex = scoreSnapshots.findIndex((snap) => {
+                            const absLead = Math.abs(Number(snap.marginA || 0));
+                            return absLead === largestLead.leadPoints;
+                        });
+
+                        const tail = peakIndex >= 0 ? scoreSnapshots.slice(peakIndex + 1) : [];
+                        let leadWasErased = false;
+                        let leadWasNearlyErased = false;
+
+                        if (largestLead.teamKey === 'teamA') {
+                            const minMarginAfterPeak = tail.length ? Math.min(...tail.map((snap) => Number(snap.marginA || 0))) : largestLead.leadPoints;
+                            leadWasErased = minMarginAfterPeak <= 0;
+                            leadWasNearlyErased = minMarginAfterPeak <= 2;
+                        } else if (largestLead.teamKey === 'teamB') {
+                            const maxMarginAfterPeak = tail.length ? Math.max(...tail.map((snap) => Number(snap.marginA || 0))) : -largestLead.leadPoints;
+                            leadWasErased = maxMarginAfterPeak >= 0;
+                            leadWasNearlyErased = maxMarginAfterPeak >= -2;
+                        }
+
+                        leadSwingSummary = {
+                            largestLeadTeam: largestLead.teamName,
+                            largestLeadPoints: Number(largestLead.leadPoints || 0),
+                            largestLeadAtTime: largestLead.atTime,
+                            leadWasErased,
+                            leadWasNearlyErased,
+                            isHugeLead: Number(largestLead.leadPoints || 0) >= 10
+                        };
+                    }
+
+                    const substitutionEvents = recapReadyGameLog.filter((entry) => entry?.kind === 'sub');
+                    const teamASubEvents = substitutionEvents.filter((entry) => entry?.isTeamA === true);
+                    const teamBSubEvents = substitutionEvents.filter((entry) => entry?.isTeamA === false);
+
+                    const classifyRotationPattern = (subCount) => {
+                        if (subCount >= 14) return 'heavy rotation';
+                        if (subCount >= 8) return 'balanced rotation';
+                        if (subCount >= 4) return 'tight rotation';
+                        return 'very tight rotation';
+                    };
+
+                    const buildLineupPattern = (teamObj, subEvents, isTeamA) => {
+                        const playersUsed = (teamObj?.players || []).filter((player) => Boolean(game?.playerStats?.[player.id])).length;
+                        const uniqueSubPlayers = new Set();
+                        subEvents.forEach((event) => {
+                            if (event?.outId) uniqueSubPlayers.add(event.outId);
+                            if (event?.inId) uniqueSubPlayers.add(event.inId);
+                        });
+                        const lateSubCount = finalMomentsForPrompt.filter((entry) => {
+                            const raw = recapReadyGameLog.find((log) => String(log?.text || '') === String(entry?.text || '') && String(log?.time || '') === String(entry?.time || ''));
+                            if (!raw) return false;
+                            return raw.kind === 'sub' && raw.isTeamA === isTeamA;
+                        }).length;
+
+                        return {
+                            teamName: teamObj?.name || (isTeamA ? game.teamAName : game.teamBName),
+                            subCount: subEvents.length,
+                            playersUsed,
+                            uniqueSubPlayers: uniqueSubPlayers.size,
+                            lateSubCount,
+                            rotationPattern: classifyRotationPattern(subEvents.length)
+                        };
+                    };
+
+                    const lineupPatternSummary = {
+                        teamA: buildLineupPattern(teamAObj, teamASubEvents, true),
+                        teamB: buildLineupPattern(teamBObj, teamBSubEvents, false)
+                    };
 
                     const response = await apiRequest('/api/generate-writeup', {
                         method: 'POST',
@@ -2458,8 +3675,11 @@
                                 stats: playerOfTheGame.stats || {}
                             } : null,
                             bestPerformers,
+                            standoutPerformersByTeam,
                             playByPlay: pbpForPrompt,
-                            finalMoments: finalMomentsForPrompt
+                            finalMoments: finalMomentsForPrompt,
+                            leadSwingSummary,
+                            lineupPatternSummary
                         })
                     });
 
@@ -2475,6 +3695,66 @@
                     showToast(error?.message || 'Failed to generate writeup.', 'error');
                 } finally {
                     setGeneratingWriteupGameId(null);
+                }
+            };
+
+            const handleGeneratePotgWriteup = async ({ game, playerOfTheGame, auto = false }) => {
+                if (!game || !playerOfTheGame || !canOperateLive) return;
+                if (generatingPotgWriteupGameId === game.id) return;
+
+                setGeneratingPotgWriteupGameId(game.id);
+
+                try {
+                    const response = await apiRequest('/api/generate-potg-writeup', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            game: {
+                                id: game.id,
+                                date: game.date,
+                                teamAId: game.teamAId,
+                                teamBId: game.teamBId,
+                                teamAName: game.teamAName,
+                                teamBName: game.teamBName,
+                                teamAScore: Number(game.teamAScore || 0),
+                                teamBScore: Number(game.teamBScore || 0)
+                            },
+                            playerOfTheGame: {
+                                id: playerOfTheGame.id,
+                                name: playerOfTheGame.name,
+                                number: playerOfTheGame.number,
+                                teamId: playerOfTheGame.teamId,
+                                teamName: playerOfTheGame.teamName,
+                                stats: playerOfTheGame.stats || {}
+                            }
+                        })
+                    });
+
+                    const generated = String(response?.writeup || '').trim();
+                    if (!generated) {
+                        throw new Error('Could not generate a player spotlight for this game.');
+                    }
+
+                    const updatedGames = games.map((existingGame) => {
+                        if (existingGame.id !== game.id) return existingGame;
+                        return {
+                            ...existingGame,
+                            potgWriteup: generated
+                        };
+                    });
+
+                    setGames(updatedGames);
+                    await saveFullState(teams, updatedGames);
+                    if (!auto) {
+                        showToast('POTG spotlight generated and saved.', 'success');
+                    }
+                } catch (error) {
+                    if (auto) {
+                        attemptedAutoPotgWriteupRef.current.delete(game.id);
+                    } else {
+                        showToast(error?.message || 'Failed to generate POTG spotlight.', 'error');
+                    }
+                } finally {
+                    setGeneratingPotgWriteupGameId(null);
                 }
             };
 
@@ -2608,7 +3888,7 @@
                                         id: `player_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
                                         name: impPlayerObj.name,
                                         number: impPlayerObj.number,
-                                        positions: Array.isArray(impPlayerObj.positions) ? impPlayerObj.positions.filter((pos) => PLAYER_POSITIONS.includes(pos)) : [],
+                                        positions: normalizePlayerPositions(impPlayerObj),
                                         gamesPlayed: 0,
                                         totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
                                     };
@@ -2668,7 +3948,7 @@
                             id: p.id,
                             name: p.name,
                             number: p.number,
-                            positions: Array.isArray(p.positions) ? p.positions.filter((pos) => PLAYER_POSITIONS.includes(pos)) : [],
+                            positions: normalizePlayerPositions(p),
                             gamesPlayed: 0,
                             totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
                         }))
@@ -2756,8 +4036,152 @@
                 }
             };
 
-            const handleStartMatch = (e) => {
-                e.preventDefault();
+            const clearTransientLiveActionState = () => {
+                setActiveAction(null);
+                setCorrectionMode(false);
+                setShowLoggingModal(false);
+                setShowSyncClockEditor(false);
+                setIsEditingClockInput(false);
+                setShowSubstitutionModal(false);
+                setSubTargetPlayer(null);
+                setShowAddFromBenchModal(false);
+                setAddFromBenchTeam(null);
+                setAddFromBenchSelection([]);
+                actionModalSoftPauseRef.current = false;
+                pendingFoulActionPauseRef.current = false;
+                pendingSubSelectionAutoPauseRef.current = false;
+                addFromBenchModalSoftPauseRef.current = false;
+                suppressModalAutoPauseRef.current = false;
+            };
+
+            const createLiveCheckpointSnapshot = (quarterValue = currentQuarter) => ({
+                teamAId,
+                teamBId,
+                teamAScore,
+                teamBScore,
+                currentQuarter: quarterValue || currentQuarter || 1,
+                teamALineup: [...teamALineup],
+                teamABench: [...teamABench],
+                teamBLineup: [...teamBLineup],
+                teamBBench: [...teamBBench],
+                liveStats: cloneStatsMap(liveStats || {}),
+                playedPlayers: [...playedPlayers]
+            });
+
+            const clearLocalLiveSessionArtifacts = ({ keepTeamSelection = false } = {}) => {
+                localStorage.removeItem('active_live_session');
+
+                pendingLiveEventsRef.current = [];
+                persistPendingLiveEvents();
+                lastLiveSeqRef.current = 0;
+                try {
+                    localStorage.setItem(LIVE_EVENTS_LAST_SEQ_KEY, '0');
+                } catch (err) {}
+
+                processedGameLogIdsRef.current = new Set();
+                remoteEventIdsRef.current = new Set();
+                liveEventQueueReadyRef.current = false;
+                lastRemoteGameLogIdsRef.current = new Set();
+                lastObservedLogIdRef.current = null;
+
+                pendingActiveSessionSyncRef.current = null;
+                persistPendingActiveSessionSync();
+
+                setSyncDebug((prev) => ({
+                    ...prev,
+                    pendingQueue: 0,
+                    hasLocalOnly: false
+                }));
+
+                hadLiveSessionRef.current = false;
+                setIsGameLive(false);
+                setIsPlayPaused(false);
+                setActiveAction(null);
+                setCorrectionMode(false);
+                setAwaitingOvertimeDecision(false);
+                setAwaitingPeriodStart(false);
+                setShowLoggingModal(false);
+                setShowSubstitutionModal(false);
+                setSubTargetPlayer(null);
+                setShowAddFromBenchModal(false);
+                setAddFromBenchTeam(null);
+                setAddFromBenchSelection([]);
+                setShowHomeBenchAdder(false);
+                setShowAwayBenchAdder(false);
+                setShowSyncClockEditor(false);
+                setIsEditingClockInput(false);
+                setFoulAlert(null);
+
+                if (!keepTeamSelection) {
+                    setTeamAId('');
+                    setTeamBId('');
+                }
+                setLiveSessionInstanceId('');
+                setLiveSessionCreatedAt(0);
+                setTeamAScore(0);
+                setTeamBScore(0);
+                setCurrentQuarter(1);
+                setPeriodClockSeconds(getPeriodDurationSeconds(1));
+                setIsPeriodClockRunning(false);
+                setManualClockInput(formatSecondsAsClock(getPeriodDurationSeconds(1)));
+                setPendingPeriodActionMode(null);
+                setTeamALineup([]);
+                setTeamABench([]);
+                setTeamBLineup([]);
+                setTeamBBench([]);
+                setLiveStats({});
+                setLivePlayerSeconds({});
+                setLiveGameSnapshot(null);
+                setPeriodSnapshots([]);
+                setGameLog([]);
+                setLoggedHistory([]);
+                setPlayedPlayers([]);
+                setDnpPlayers([]);
+                setLineupRevision(0);
+                lineupRevisionRef.current = 0;
+                sessionRevisionRef.current = 0;
+            };
+
+            const clearLiveSessionEverywhere = async ({ keepTeamSelection = false } = {}) => {
+                let clearedOnServer = false;
+                const discardedSessionInstanceId = String(liveSessionInstanceIdRef.current || '').trim();
+                const discardedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || 0);
+                if (discardedSessionInstanceId) {
+                    markDiscardedSessionTombstone(discardedSessionInstanceId, Date.now());
+                }
+
+                if (navigator.onLine) {
+                    try {
+                        await apiRequest('/api/active-session', {
+                            method: 'DELETE',
+                            body: JSON.stringify({
+                                sourceClientId: syncClientIdRef.current,
+                                clearLiveEvents: true,
+                                discardedSessionInstanceId,
+                                discardedSessionCreatedAt
+                            })
+                        });
+                        clearedOnServer = true;
+                    } catch (error) {
+                        clearedOnServer = false;
+                    }
+                }
+
+                if (!clearedOnServer) {
+                    queueActiveSessionSync('delete', null, {
+                        clearLiveEvents: true,
+                        discardedSessionInstanceId,
+                        discardedSessionCreatedAt
+                    });
+                    flushPendingActiveSessionSync();
+                }
+
+                clearLocalLiveSessionArtifacts({ keepTeamSelection });
+                return clearedOnServer;
+            };
+
+            const handleStartMatch = async (e) => {
+                e?.preventDefault?.();
                 if (!canOperateLive) {
                     showToast('Operator/Admin access required for live game operation.', 'info');
                     return;
@@ -2768,10 +4192,14 @@
                 const teamBObj = teams.find(t => t.id === teamBId);
                 if (!teamAObj || !teamBObj || teamAObj.players.length === 0 || teamBObj.players.length === 0) return;
 
+                await clearLiveSessionEverywhere({ keepTeamSelection: true });
+
                 const startersA = teamAObj.players.slice(0, 5).map(p => p.id);
                 const benchA = teamAObj.players.slice(5).map(p => p.id);
                 const startersB = teamBObj.players.slice(0, 5).map(p => p.id);
                 const benchB = teamBObj.players.slice(5).map(p => p.id);
+                const nextSessionInstanceId = generateLiveSessionInstanceId();
+                const nextSessionCreatedAt = Date.now();
 
                 setTeamALineup(startersA);
                 setTeamABench(benchA);
@@ -2800,23 +4228,36 @@
                 };
 
                 setLiveStats(initializedStats);
+                setPeriodSnapshots([]);
+                setLiveSessionInstanceId(nextSessionInstanceId);
+                setLiveSessionCreatedAt(nextSessionCreatedAt);
+                sessionRevisionRef.current = 0;
                 setTeamAScore(0);
                 setTeamBScore(0);
                 setCurrentQuarter(1);
                 setPeriodClockSeconds(0);
                 setIsPlayPaused(false);
                 setIsPeriodClockRunning(false);
+                setPendingPeriodActionMode(null);
                 setLivePlayerSeconds({});
                 setAwaitingOvertimeDecision(false);
-                setAwaitingPeriodStart(false);
-                setActiveAction(null);
-                setCorrectionMode(false);
+                setAwaitingPeriodStart(true);
+                clearTransientLiveActionState();
                 setLoggedHistory([]);
-                setGameLog([{ id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, time: getWallClockTime(), text: `Match initialized: ${teamAObj.name} vs ${teamBObj.name}`, kind: 'meta' }]);
+                setGameLog([{
+                    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    time: getWallClockTime(),
+                    text: 'Start Match',
+                    kind: 'meta',
+                    metaType: 'matchStart',
+                    quarter: 1,
+                    clockRemaining: formatSecondsAsClock(0)
+                }]);
                 setLiveGameSnapshot(initialLiveSnapshot);
                 setLineupRevision(0);
                 lineupRevisionRef.current = 0;
                 setIsGameLive(true);
+                showToast('Match started. Press Start Q1 to begin period play.', 'success');
             };
 
             const handlePlayerClick = (playerId, isTeamA) => {
@@ -2831,7 +4272,12 @@
                     showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
                     return;
                 }
-                if (timeoutIsActive && !allowAllActionsWhileManualPause && !canTriggerAlwaysAction(activeAction)) {
+                if (
+                    timeoutIsActive
+                    && !allowAllActionsWhileManualPause
+                    && !canTriggerAlwaysAction(activeAction)
+                    && !canTriggerStoppedClockAction(activeAction)
+                ) {
                     showToast('Only Technical Foul, Free Throw, and Free Throw Missed are allowed while paused/stopped.', 'info');
                     return;
                 }
@@ -2874,7 +4320,7 @@
                     : teamBScore;
 
                 const scoreSuffix = isPointOrFieldGoalAction
-                    ? ` [${projectedTeamAScore}-${projectedTeamBScore}]`
+                    ? ` ${formatScoreTag(projectedTeamAScore, projectedTeamBScore)}`
                     : '';
 
                 // Foul warnings & DQ logic
@@ -2889,9 +4335,8 @@
                 }
 
                 const logWithTag = `${logText}${scoreSuffix}`;
-                const isSelectedFoulAction = isFoulLikeAction(activeAction);
-                const shouldAutoPauseForFoul = isSelectedFoulAction && !correctionMode && changeAmount > 0 && !timeoutIsActive;
-
+                const isSelectedFoulAction = statField === 'pf';
+                const shouldAutoPauseForFoul = isSelectedFoulAction && !correctionMode && changeAmount > 0;
                 const logEntryId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 const historyEntry = { id: logEntryId, playerId, statField, changeAmount, attachedTrackingStat, trackingDelta: 1 * multiplier, previousTeamAScore: teamAScore, previousTeamBScore: teamBScore, logText: logWithTag, kind: 'stat' };
                 historyEntry.actionId = activeAction.id;
@@ -2957,24 +4402,31 @@
                         clockRemaining: formatSecondsAsClock(periodClockSeconds),
                         isTeamA
                     };
-                    setGameLog((prev) => [foulPauseEvent, statLogEvent, ...prev].slice(0, 300));
-                    setIsPlayPaused(true);
-                    setIsPeriodClockRunning(false);
-                    showToast('Clock stopped for foul stoppage. Press Resume to continue.', 'info');
+                    setGameLog((prev) => [foulPauseEvent, statLogEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
                 } else {
-                    setGameLog((prev) => [statLogEvent, ...prev.slice(0, 300)]);
+                    setGameLog((prev) => [statLogEvent, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 }
                 triggerPlayerFlash(playerId);
                 flashPlayerElements(playerId);
-                pendingFoulSelectionAutoPauseRef.current = false;
                 setActiveAction(null);
                 setCorrectionMode(false);
                 setShowLoggingModal(false);
+
+                if (shouldAutoPauseForFoul) {
+                    pendingFoulActionPauseRef.current = false;
+                    markLocalSessionUpdated();
+                    setIsPlayPaused(true);
+                    setIsPeriodClockRunning(false);
+                    showToast('Clock stopped for foul stoppage. Press Resume to continue.', 'info');
+                    return;
+                }
+
+                pendingFoulActionPauseRef.current = false;
             };
 
             const restoreClockFromLatestLog = (logs = [], fallbackQuarter = currentQuarter) => {
                 const sourceLogs = Array.isArray(logs) ? logs : [];
-                const latestQuarterEvent = sourceLogs.find((event) => {
+                const latestQuarterEvent = getLatestLogEvent(sourceLogs, (event) => {
                     const parsedQuarter = Number.parseInt(event?.quarter, 10);
                     return Number.isFinite(parsedQuarter) && parsedQuarter > 0;
                 });
@@ -2985,7 +4437,7 @@
                 // Keep period label synchronized with the remaining event timeline.
                 setCurrentQuarter(resolvedQuarter);
 
-                const latestClockEvent = sourceLogs.find((event) => {
+                const latestClockEvent = getLatestLogEvent(sourceLogs, (event) => {
                     const parsed = parseClockInputToSeconds(event?.clockRemaining);
                     return parsed !== null;
                 });
@@ -2999,7 +4451,7 @@
                 }
 
                 const hasStartedInLogs = sourceLogs.some((event) => event?.kind === 'meta' && event?.metaType === 'matchStart');
-                const latestPeriodMeta = sourceLogs.find(
+                const latestPeriodMeta = getLatestLogEvent(sourceLogs,
                     (event) => event?.kind === 'meta' && (event.metaType === 'matchStart' || event.metaType === 'quarterStart' || event.metaType === 'quarterEnd')
                 );
                 const isAwaitingFromLogs = latestPeriodMeta
@@ -3020,28 +4472,107 @@
                     showToast('Undo is disabled after ending a quarter.', 'info');
                     return;
                 }
-                setIsPeriodClockRunning(false);
-                const [lastAction, ...remainingHistory] = loggedHistory;
-                const remainingGameLog = gameLog.filter(log => log.id !== lastAction.id);
-                const replayed = buildLiveStateFromEvents(liveGameSnapshot, remainingGameLog);
-                if (!replayed) return;
 
+                const latestHistoryEntry = (loggedHistory || []).find((entry) => !entry?.isUndoCompensation);
+                if (!latestHistoryEntry) {
+                    showToast('No undoable stat action found.', 'info');
+                    return;
+                }
+                const latestHistoryLog = gameLog.find((log) => log.id === latestHistoryEntry?.id);
+                if (isProtectedLogEntry(latestHistoryLog, finalizedPeriods)) {
+                    const lockReason = String(latestHistoryLog?.lockReason || '').includes('checkpoint10')
+                        ? 'checkpoint lock (every 10 entries)'
+                        : 'period-end lock';
+                    showToast(`Undo blocked: latest action is protected by ${lockReason}.`, 'info');
+                    return;
+                }
+
+                setIsPlayPaused(true);
+                setIsPeriodClockRunning(false);
+                const lastAction = latestHistoryEntry;
+                const remainingHistory = loggedHistory.filter((entry) => entry?.id !== lastAction.id);
+                const compensationEvent = {
+                    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    time: getWallClockTime(),
+                    text: `UNDO: Reversed ${lastAction.logText || 'last stat action'}`,
+                    kind: 'stat',
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                    isTeamA: latestHistoryLog?.isTeamA,
+                    actionId: lastAction.actionId,
+                    countsTeamFoul: lastAction.countsTeamFoul,
+                    playerId: lastAction.playerId,
+                    statField: lastAction.statField,
+                    changeAmount: -1 * Number(lastAction.changeAmount || 0),
+                    attachedTrackingStat: lastAction.attachedTrackingStat,
+                    trackingDelta: -1 * Number(lastAction.trackingDelta || 0),
+                    isUndoCompensation: true,
+                    undoOfId: lastAction.id
+                };
+                const nextGameLog = [compensationEvent, ...gameLog].slice(0, MAX_LIVE_LOG_ENTRIES);
                 setLoggedHistory(remainingHistory);
-                setLiveStats(replayed.liveStats);
-                setTeamAScore(replayed.teamAScore);
-                setTeamBScore(replayed.teamBScore);
-                setCurrentQuarter(replayed.currentQuarter || 1);
-                setTeamALineup(replayed.teamALineup);
-                setTeamABench(replayed.teamABench);
-                setTeamBLineup(replayed.teamBLineup);
-                setTeamBBench(replayed.teamBBench);
-                setPlayedPlayers(replayed.playedPlayers);
-                setGameLog(remainingGameLog);
-                restoreClockFromLatestLog(remainingGameLog, replayed.currentQuarter || currentQuarter);
+                setGameLog(nextGameLog);
+
+                const statSource = (lastAction && lastAction.playerId && lastAction.statField)
+                    ? lastAction
+                    : null;
+
+                if (statSource) {
+                    setLiveStats((prev) => {
+                        const currentPlayerStats = prev[statSource.playerId] || {};
+                        const revertedValue = Math.max(0, (currentPlayerStats[statSource.statField] || 0) - (statSource.changeAmount || 0));
+                        const revertedPlayerStats = {
+                            ...currentPlayerStats,
+                            [statSource.statField]: revertedValue
+                        };
+
+                        if (statSource.attachedTrackingStat) {
+                            const trackingDelta = Number.isFinite(statSource.trackingDelta)
+                                ? statSource.trackingDelta
+                                : ((statSource.changeAmount || 0) > 0 ? 1 : -1);
+                            revertedPlayerStats[statSource.attachedTrackingStat] = Math.max(
+                                0,
+                                (currentPlayerStats[statSource.attachedTrackingStat] || 0) - trackingDelta
+                            );
+                        }
+
+                        const updated = {
+                            ...prev,
+                            [statSource.playerId]: revertedPlayerStats
+                        };
+
+                        let totalA = 0;
+                        let totalB = 0;
+                        const teamAObj = teams.find(t => t.id === teamAId);
+                        const teamBObj = teams.find(t => t.id === teamBId);
+                        if (teamAObj) teamAObj.players.forEach(p => { totalA += updated[p.id]?.pts || 0; });
+                        if (teamBObj) teamBObj.players.forEach(p => { totalB += updated[p.id]?.pts || 0; });
+                        setTeamAScore(totalA);
+                        setTeamBScore(totalB);
+
+                        return updated;
+                    });
+                } else {
+                    const replayed = buildLiveStateFromEvents(liveGameSnapshot, nextGameLog);
+                    if (replayed) {
+                        setLiveStats(replayed.liveStats);
+                        setTeamAScore(replayed.teamAScore);
+                        setTeamBScore(replayed.teamBScore);
+                        setCurrentQuarter(replayed.currentQuarter || 1);
+                        setTeamALineup(replayed.teamALineup);
+                        setTeamABench(replayed.teamABench);
+                        setTeamBLineup(replayed.teamBLineup);
+                        setTeamBBench(replayed.teamBBench);
+                        setPlayedPlayers(replayed.playedPlayers);
+                    }
+                }
+
+                restoreClockFromLatestLog(nextGameLog, currentQuarter);
                 if (lastAction.playerId) {
                     triggerPlayerFlash(lastAction.playerId);
                     flashPlayerElements(lastAction.playerId);
                 }
+                showToast('Undo applied. Game paused. Press Resume to continue.', 'info');
             };
 
             const handleDeleteLogEntry = (logId) => {
@@ -3051,6 +4582,21 @@
                 }
                 const entry = gameLog.find(log => log.id === logId);
                 if (!entry) return;
+
+                const entryQuarter = Number(getQuarterFromEvent(entry));
+                const isCurrentPeriodEntry = entryQuarter === Number(currentQuarter);
+                if (!isCurrentPeriodEntry) {
+                    showToast('Delete is only allowed for the current period.', 'info');
+                    return;
+                }
+
+                if (isProtectedLogEntry(entry, finalizedPeriods)) {
+                    const lockReason = String(entry?.lockReason || '').includes('checkpoint10')
+                        ? 'checkpoint lock (every 10 entries)'
+                        : 'period-end lock';
+                    showToast(`Delete blocked: this log is protected by ${lockReason}.`, 'info');
+                    return;
+                }
 
                 setIsPeriodClockRunning(false);
 
@@ -3130,77 +4676,243 @@
                 restoreClockFromLatestLog(remainingGameLog, replayed.currentQuarter || currentQuarter);
             };
 
+            const handleOpenLiveLogEdit = (logId) => {
+                if (!logId) return;
+                const targetEntry = gameLog.find((entry) => entry?.id === logId);
+                if (!targetEntry) return;
+
+                if (!isEditableStatLogEntry(targetEntry)) {
+                    showToast('Only stat log entries can be edited.', 'info');
+                    return;
+                }
+
+                if (Number(getQuarterFromEvent(targetEntry)) !== Number(currentQuarter)) {
+                    showToast('Edit is only allowed for the current period.', 'info');
+                    return;
+                }
+
+                if (isProtectedLogEntry(targetEntry, finalizedPeriods)) {
+                    const lockReason = String(targetEntry?.lockReason || '').includes('checkpoint10')
+                        ? 'checkpoint lock (every 10 entries)'
+                        : 'period-end lock';
+                    showToast(`Edit blocked: this log is protected by ${lockReason}.`, 'info');
+                    return;
+                }
+
+                const selectedActionExists = editableLiveStatActions.some((action) => action.id === targetEntry.actionId);
+                const defaultActionId = selectedActionExists
+                    ? targetEntry.actionId
+                    : (editableLiveStatActions[0]?.id || '');
+
+                if (!defaultActionId) {
+                    showToast('No editable stat actions are available.', 'info');
+                    return;
+                }
+
+                setEditingLiveLogId(logId);
+                setEditingLiveLogActionId(defaultActionId);
+            };
+
+            const handleCloseLiveLogEdit = () => {
+                setEditingLiveLogId(null);
+                setEditingLiveLogActionId('');
+            };
+
+            const handleApplyLiveLogEdit = () => {
+                if (!liveLogEditTarget) {
+                    handleCloseLiveLogEdit();
+                    return;
+                }
+
+                if (Number(getQuarterFromEvent(liveLogEditTarget)) !== Number(currentQuarter)) {
+                    showToast('Edit is only allowed for the current period.', 'info');
+                    handleCloseLiveLogEdit();
+                    return;
+                }
+
+                if (isProtectedLogEntry(liveLogEditTarget, finalizedPeriods)) {
+                    const lockReason = String(liveLogEditTarget?.lockReason || '').includes('checkpoint10')
+                        ? 'checkpoint lock (every 10 entries)'
+                        : 'period-end lock';
+                    showToast(`Edit blocked: this log is protected by ${lockReason}.`, 'info');
+                    handleCloseLiveLogEdit();
+                    return;
+                }
+
+                const nextAction = editableLiveStatActions.find((action) => action.id === editingLiveLogActionId);
+                if (!nextAction) {
+                    showToast('Choose a valid action to apply the edit.', 'info');
+                    return;
+                }
+
+                const changeSign = Number(liveLogEditTarget.changeAmount || 0) < 0 ? -1 : 1;
+                const nextChangeAmount = Number(nextAction.val || 0) * changeSign;
+                const nextTrackingDelta = nextAction.trackingStat ? changeSign : 0;
+                const nextCountsTeamFoul = nextAction.stat !== 'pf' ? true : nextAction.countsTeamFoul !== false;
+
+                const playerObj = teams.flatMap((team) => team.players || []).find((player) => player.id === liveLogEditTarget.playerId);
+                const teamPrefixMatch = String(liveLogEditTarget.text || '').match(/^\[(HOME|AWAY)\]\s*/);
+                const teamPrefix = teamPrefixMatch ? teamPrefixMatch[0] : '';
+                const editedLogText = `${teamPrefix}⚡ ${playerObj?.name || 'Player'}: ${nextAction.label}`;
+
+                const nextGameLog = gameLog.map((entry) => {
+                    if (entry.id !== liveLogEditTarget.id) return entry;
+                    return {
+                        ...entry,
+                        actionId: nextAction.id,
+                        statField: nextAction.stat,
+                        changeAmount: nextChangeAmount,
+                        attachedTrackingStat: nextAction.trackingStat,
+                        trackingDelta: nextTrackingDelta,
+                        countsTeamFoul: nextCountsTeamFoul,
+                        text: editedLogText
+                    };
+                });
+
+                const nextLoggedHistory = loggedHistory.map((entry) => {
+                    if (entry.id !== liveLogEditTarget.id) return entry;
+                    return {
+                        ...entry,
+                        actionId: nextAction.id,
+                        statField: nextAction.stat,
+                        changeAmount: nextChangeAmount,
+                        attachedTrackingStat: nextAction.trackingStat,
+                        trackingDelta: nextTrackingDelta,
+                        countsTeamFoul: nextCountsTeamFoul,
+                        logText: editedLogText
+                    };
+                });
+
+                const replayed = buildLiveStateFromEvents(liveGameSnapshot, nextGameLog);
+
+                setGameLog(nextGameLog);
+                setLoggedHistory(nextLoggedHistory);
+
+                if (!replayed) {
+                    restoreClockFromLatestLog(nextGameLog, currentQuarter);
+                    handleCloseLiveLogEdit();
+                    showToast('Log edited. Replay unavailable for this legacy session, so totals may be stale.', 'info');
+                    return;
+                }
+
+                setLiveStats(replayed.liveStats);
+                setTeamAScore(replayed.teamAScore);
+                setTeamBScore(replayed.teamBScore);
+                setCurrentQuarter(replayed.currentQuarter || 1);
+                setTeamALineup(replayed.teamALineup);
+                setTeamABench(replayed.teamABench);
+                setTeamBLineup(replayed.teamBLineup);
+                setTeamBBench(replayed.teamBBench);
+                setPlayedPlayers(replayed.playedPlayers);
+                restoreClockFromLatestLog(nextGameLog, replayed.currentQuarter || currentQuarter);
+
+                if (liveLogEditTarget.playerId) {
+                    triggerPlayerFlash(liveLogEditTarget.playerId);
+                    flashPlayerElements(liveLogEditTarget.playerId);
+                }
+
+                handleCloseLiveLogEdit();
+                showToast('Log edited.', 'success');
+            };
+
             const autoFinalizeEndedPeriodAndStartNextPeriod = () => {
                 const periodLabel = getPeriodLabel(currentQuarter);
                 const quarterEndLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const checkpointSnapshot = createLiveCheckpointSnapshot(currentQuarter);
+                const frozenQuarterStats = liveQuarterStatsFromLog.find((row) => Number(row?.quarter) === Number(currentQuarter)) || null;
+                const checkpointEvent = {
+                    id: `${Date.now() + 1}_checkpoint_${String(currentQuarter).padStart(2, '0')}`,
+                    time: getWallClockTime(),
+                    text: `Checkpoint ${periodLabel}`,
+                    kind: 'meta',
+                    metaType: 'periodCheckpoint',
+                    quarter: currentQuarter,
+                    clockRemaining: '00:00',
+                    hiddenFromLog: true,
+                    lockProtected: true,
+                    lockReason: 'periodCheckpoint',
+                    checkpointSnapshot
+                };
                 const quarterEndEvent = {
                     id: quarterEndLogId,
                     time: getWallClockTime(),
-                    text: `End ${periodLabel}`,
+                    text: `End ${periodLabel} ${formatScoreTag(teamAScore, teamBScore)}`,
                     kind: 'meta',
                     metaType: 'quarterEnd',
                     quarter: currentQuarter,
                     clockRemaining: '00:00'
                 };
 
+                setPendingPeriodActionMode(null);
+                setActiveAction(null);
+                setCorrectionMode(false);
+                setShowLoggingModal(false);
+                setShowSyncClockEditor(false);
+                setIsEditingClockInput(false);
+                actionModalSoftPauseRef.current = false;
+                pendingFoulActionPauseRef.current = false;
+                pendingSubSelectionAutoPauseRef.current = false;
+                addFromBenchModalSoftPauseRef.current = false;
                 setPeriodClockSeconds(0);
                 setIsPeriodClockRunning(false);
+                setLiveGameSnapshot(checkpointSnapshot);
+                setPeriodSnapshots((prev) => {
+                    const next = (prev || []).filter((snapshot) => Number(snapshot?.quarter || 0) !== Number(currentQuarter));
+                    next.push({
+                        quarter: currentQuarter,
+                        quarterStats: {
+                            teamA: cloneQuarterStats(frozenQuarterStats?.teamA || createEmptyQuarterStats()),
+                            teamB: cloneQuarterStats(frozenQuarterStats?.teamB || createEmptyQuarterStats())
+                        },
+                        liveGameSnapshot: checkpointSnapshot
+                    });
+                    return next.sort((a, b) => Number(a.quarter || 0) - Number(b.quarter || 0));
+                });
 
                 if (currentQuarter < 4) {
                     const nextQuarter = currentQuarter + 1;
                     const nextLabel = getPeriodLabel(nextQuarter);
-                    const quarterStartEvent = {
-                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                        time: getWallClockTime(),
-                        text: `Start ${nextLabel}`,
-                        kind: 'meta',
-                        metaType: 'quarterStart',
-                        quarter: nextQuarter,
-                        clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
-                    };
-
+                    const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
                     setCurrentQuarter(nextQuarter);
-                    setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
-                    suppressPeriodAutoStopRef.current = true;
+                    setPeriodClockSeconds(nextQuarterSeconds);
+                    setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+                    setShowSyncClockEditor(false);
+                    setIsEditingClockInput(false);
                     setIsPlayPaused(false);
-                    setIsPeriodClockRunning(true);
-                    setAwaitingPeriodStart(false);
+                    setIsPeriodClockRunning(false);
+                    setAwaitingPeriodStart(true);
                     setAwaitingOvertimeDecision(false);
-                    setGameLog((prev) => [quarterStartEvent, quarterEndEvent, ...prev].slice(0, 300));
-                    showToast(`${periodLabel} finalized. ${nextLabel} started automatically.`, 'info');
+                    setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+                    showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, 'info');
                     return true;
                 }
 
                 if (teamAScore === teamBScore) {
                     const nextQuarter = currentQuarter + 1;
                     const nextLabel = getPeriodLabel(nextQuarter);
-                    const quarterStartEvent = {
-                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                        time: getWallClockTime(),
-                        text: `Start ${nextLabel}`,
-                        kind: 'meta',
-                        metaType: 'quarterStart',
-                        quarter: nextQuarter,
-                        clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
-                    };
-
+                    const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
                     setCurrentQuarter(nextQuarter);
-                    setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
-                    suppressPeriodAutoStopRef.current = true;
+                    setPeriodClockSeconds(nextQuarterSeconds);
+                    setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+                    setShowSyncClockEditor(false);
+                    setIsEditingClockInput(false);
                     setIsPlayPaused(false);
-                    setIsPeriodClockRunning(true);
-                    setAwaitingPeriodStart(false);
+                    setIsPeriodClockRunning(false);
+                    setAwaitingPeriodStart(true);
                     setAwaitingOvertimeDecision(false);
-                    setGameLog((prev) => [quarterStartEvent, quarterEndEvent, ...prev].slice(0, 300));
-                    showToast(`${periodLabel} finalized. ${nextLabel} started automatically.`, 'info');
+                    setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+                    showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, 'info');
                     return true;
                 }
 
                 setAwaitingOvertimeDecision(true);
                 setAwaitingPeriodStart(false);
                 setIsPlayPaused(false);
-                setGameLog((prev) => [quarterEndEvent, ...prev].slice(0, 300));
-                showToast(`${periodLabel} finalized. Game is not tied, press End Game.`, 'info');
+                const nextGameLog = [checkpointEvent, quarterEndEvent, ...gameLog].slice(0, MAX_LIVE_LOG_ENTRIES);
+                setGameLog(nextGameLog);
+                setAwaitingOvertimeDecision(false);
+                handleEndGame({ finalGameLogOverride: nextGameLog });
+                showToast(`${periodLabel} finalized. Match ended and locked.`, 'success');
                 return false;
             };
 
@@ -3208,44 +4920,267 @@
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
 
-                if (currentQuarter >= 4) {
-                    const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                    setPeriodClockSeconds(0);
-                    setIsPeriodClockRunning(false);
-                    setGameLog(prev => [{
-                        id: quarterLogId,
-                        time: getWallClockTime(),
-                        text: `End ${getPeriodLabel(currentQuarter)}`,
-                        kind: 'meta',
-                        metaType: 'quarterEnd',
-                        quarter: currentQuarter,
-                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
-                    }, ...prev.slice(0, 300)]);
-                    setAwaitingOvertimeDecision(true);
-                    if (teamAScore === teamBScore) {
-                        showToast(`${getPeriodLabel(currentQuarter)} complete. Scores are tied, start overtime to continue.`, 'info');
-                    } else {
-                        showToast(`${getPeriodLabel(currentQuarter)} complete. Overtime unavailable because game is not tied.`, 'info');
+                autoFinalizeEndedPeriodAndStartNextPeriod();
+            };
+
+            const getChronologicalEvents = (events = []) => {
+                return [...(events || [])].sort((a, b) => {
+                    const aKey = Number.parseInt(String(a?.id || '').split('_')[0], 10);
+                    const bKey = Number.parseInt(String(b?.id || '').split('_')[0], 10);
+                    const safeA = Number.isFinite(aKey) ? aKey : 0;
+                    const safeB = Number.isFinite(bKey) ? bKey : 0;
+                    if (safeA !== safeB) return safeA - safeB;
+                    return String(a?.id || '').localeCompare(String(b?.id || ''));
+                });
+            };
+
+            const remapCurrentQuarterClockHistory = (events = [], targetQuarter, previousSeconds, nextSeconds, options = {}) => {
+                const { forceShift = false } = options || {};
+                const clockDeltaSeconds = nextSeconds - previousSeconds;
+                if (clockDeltaSeconds === 0) return events;
+
+                const duration = getPeriodDurationSeconds(targetQuarter);
+                const minimumPastClock = Math.min(duration, Math.max(0, nextSeconds + 1));
+                const adjustedById = new Map();
+                const quarterEvents = getChronologicalEvents(events)
+                    .filter((event) => getQuarterFromEvent(event) === targetQuarter)
+                    .map((event) => {
+                        const parsed = parseClockInputToSeconds(event?.clockRemaining);
+                        return parsed === null ? null : { event, parsed };
+                    })
+                    .filter(Boolean);
+
+                if (quarterEvents.length === 0) return events;
+
+                const getStableEventJitter = (event) => {
+                    const seed = String(event?.id || event?.text || 'evt');
+                    let acc = 0;
+                    for (let i = 0; i < seed.length; i += 1) acc += seed.charCodeAt(i);
+                    return acc % 2; // 0..1 sec, deterministic per event
+                };
+
+                const getNaturalGapSeconds = (event) => {
+                    let baseGap = 2;
+                    if (event?.kind === 'sub') baseGap = 4;
+                    if (event?.kind === 'meta') {
+                        if (['timeout', 'officialsTimeout', 'manualPause', 'foulPause'].includes(event.metaType)) baseGap = 5;
+                        if (['quarterStart', 'quarterEnd', 'onCourtClear', 'onCourtAdd'].includes(event.metaType)) baseGap = 4;
+                        if (event.metaType === 'clockAdjust') baseGap = 3;
                     }
-                    return;
+                    if (event?.kind === 'stat') {
+                        if (event.statField === 'pf' || event.actionId === 'pf_technical') baseGap = 3;
+                        if (event.statField === 'pts' && Math.abs(Number(event.changeAmount || 0)) >= 3) baseGap = 3;
+                    }
+                    return Math.max(1, Math.min(6, baseGap + getStableEventJitter(event)));
+                };
+
+                // If existing times are already valid for the new synced clock context, keep them untouched.
+                let previousClock = duration;
+                let needsRepair = false;
+                for (const entry of quarterEvents) {
+                    const candidate = Math.max(0, Math.min(duration, Number(entry.parsed || 0)));
+                    const violatesBounds = candidate < minimumPastClock || candidate > duration;
+                    const violatesOrder = candidate > previousClock;
+                    if (violatesBounds || violatesOrder) {
+                        needsRepair = true;
+                        break;
+                    }
+                    previousClock = candidate;
                 }
 
-                const nextQuarter = currentQuarter + 1;
-                const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                setPeriodClockSeconds(0);
-                setAwaitingPeriodStart(true);
-                setAwaitingOvertimeDecision(false);
-                setIsPeriodClockRunning(false);
-                setGameLog(prev => [{
-                    id: quarterLogId,
-                    time: getWallClockTime(),
-                    text: `End ${getPeriodLabel(currentQuarter)}`,
-                    kind: 'meta',
-                    metaType: 'quarterEnd',
-                    quarter: currentQuarter,
-                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
-                }, ...prev.slice(0, 300)]);
-                showToast(`${getPeriodLabel(currentQuarter)} ended. Press Start ${getPeriodLabel(nextQuarter)} to continue.`, 'info');
+                if (!needsRepair && !forceShift) {
+                    return events;
+                }
+
+                previousClock = duration;
+                quarterEvents.forEach((entry) => {
+                    const event = entry.event;
+                    const original = Math.max(0, Math.min(duration, Number(entry.parsed || 0)));
+                    const minimumClockBound = forceShift ? Math.max(0, nextSeconds) : minimumPastClock;
+                    let repaired = forceShift
+                        ? Math.max(minimumClockBound, Math.min(duration, original + clockDeltaSeconds))
+                        : original;
+                    const outOfBounds = repaired < minimumClockBound || repaired > duration;
+                    const outOfOrder = repaired > previousClock;
+
+                    if (outOfBounds || outOfOrder) {
+                        const desiredGap = getNaturalGapSeconds(event);
+                        const upperBound = previousClock;
+                        const naturalTarget = Math.max(minimumClockBound, upperBound - desiredGap);
+                        repaired = Math.max(minimumClockBound, Math.min(upperBound, naturalTarget));
+                    }
+
+                    const rounded = Math.max(minimumClockBound, Math.min(duration, Math.round(repaired)));
+                    adjustedById.set(event.id, formatSecondsAsClock(rounded));
+                    previousClock = rounded;
+                });
+
+                return (events || []).map((event) => {
+                    if (!event?.id || !adjustedById.has(event.id)) return event;
+                    return {
+                        ...event,
+                        clockRemaining: adjustedById.get(event.id)
+                    };
+                });
+            };
+
+            const deriveQuarterPlayerSecondsFromTimeline = (events = [], targetQuarter, targetClockSeconds) => {
+                const duration = getPeriodDurationSeconds(targetQuarter);
+                const clampClock = (seconds) => Math.max(0, Math.min(duration, Number(seconds || 0)));
+                const baselineSnapshot = liveGameSnapshot || {
+                    teamAId,
+                    teamBId,
+                    currentQuarter: 1,
+                    teamALineup: [...teamALineup],
+                    teamABench: [...teamABench],
+                    teamBLineup: [...teamBLineup],
+                    teamBBench: [...teamBBench]
+                };
+
+                const seededA = sanitizeTeamRotation(
+                    baselineSnapshot.teamAId,
+                    baselineSnapshot.teamALineup || [],
+                    baselineSnapshot.teamABench || [],
+                    { fillToFive: false }
+                );
+                const seededB = sanitizeTeamRotation(
+                    baselineSnapshot.teamBId,
+                    baselineSnapshot.teamBLineup || [],
+                    baselineSnapshot.teamBBench || [],
+                    { fillToFive: false }
+                );
+
+                let activeQuarter = Number.parseInt(baselineSnapshot.currentQuarter, 10) || 1;
+                let lineupA = [...seededA.lineup];
+                let benchA = [...seededA.bench];
+                let lineupB = [...seededB.lineup];
+                let benchB = [...seededB.bench];
+                let trackingStarted = activeQuarter === targetQuarter;
+                let lastClock = trackingStarted ? duration : null;
+                const totals = {};
+
+                const addElapsed = (seconds) => {
+                    const delta = Math.max(0, Number(seconds || 0));
+                    if (delta <= 0) return;
+
+                    [...lineupA, ...lineupB].forEach((playerId) => {
+                        if (!playerId) return;
+                        totals[playerId] = (totals[playerId] || 0) + delta;
+                    });
+                };
+
+                getChronologicalEvents(events).forEach((event) => {
+                    const eventQuarter = getQuarterFromEvent(event);
+                    if (Number.isFinite(eventQuarter) && eventQuarter > 0 && activeQuarter !== eventQuarter) {
+                        activeQuarter = eventQuarter;
+                        if (activeQuarter === targetQuarter && !trackingStarted) {
+                            trackingStarted = true;
+                            lastClock = duration;
+                        }
+                    }
+
+                    if (event?.kind === 'meta' && event?.metaType === 'quarterStart') {
+                        activeQuarter = eventQuarter || activeQuarter;
+                        if (activeQuarter === targetQuarter) {
+                            trackingStarted = true;
+                            const startClock = parseClockInputToSeconds(event?.clockRemaining);
+                            lastClock = startClock === null ? duration : clampClock(startClock);
+                        }
+                    }
+
+                    const parsedClock = parseClockInputToSeconds(event?.clockRemaining);
+                    if (trackingStarted && activeQuarter === targetQuarter && parsedClock !== null) {
+                        if (lastClock === null) lastClock = duration;
+                        const boundedClock = clampClock(parsedClock);
+                        addElapsed(lastClock - boundedClock);
+                        lastClock = boundedClock;
+                    }
+
+                    if (event?.kind === 'sub') {
+                        if (event.isTeamA) {
+                            lineupA = lineupA.map((id) => (id === event.outId ? event.inId : id));
+                            benchA = benchA.map((id) => (id === event.inId ? event.outId : id));
+                            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamAId, lineupA, benchA, { fillToFive: true });
+                            lineupA = sanitized.lineup;
+                            benchA = sanitized.bench;
+                        } else {
+                            lineupB = lineupB.map((id) => (id === event.outId ? event.inId : id));
+                            benchB = benchB.map((id) => (id === event.inId ? event.outId : id));
+                            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamBId, lineupB, benchB, { fillToFive: true });
+                            lineupB = sanitized.lineup;
+                            benchB = sanitized.bench;
+                        }
+                    }
+
+                    if (event?.kind === 'meta' && event?.metaType === 'onCourtClear') {
+                        if (event.isTeamA) {
+                            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamAId, [], [...benchA, ...lineupA], { fillToFive: false });
+                            lineupA = sanitized.lineup;
+                            benchA = sanitized.bench;
+                        } else if (event.isTeamA === false) {
+                            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamBId, [], [...benchB, ...lineupB], { fillToFive: false });
+                            lineupB = sanitized.lineup;
+                            benchB = sanitized.bench;
+                        }
+                    }
+
+                    if (event?.kind === 'meta' && event?.metaType === 'onCourtAdd' && event?.playerId) {
+                        if (event.isTeamA) {
+                            const sanitized = sanitizeTeamRotation(
+                                baselineSnapshot.teamAId,
+                                [...lineupA, event.playerId],
+                                benchA.filter((id) => id !== event.playerId),
+                                { fillToFive: false }
+                            );
+                            lineupA = sanitized.lineup;
+                            benchA = sanitized.bench;
+                        } else if (event.isTeamA === false) {
+                            const sanitized = sanitizeTeamRotation(
+                                baselineSnapshot.teamBId,
+                                [...lineupB, event.playerId],
+                                benchB.filter((id) => id !== event.playerId),
+                                { fillToFive: false }
+                            );
+                            lineupB = sanitized.lineup;
+                            benchB = sanitized.bench;
+                        }
+                    }
+                });
+
+                if (trackingStarted && activeQuarter === targetQuarter) {
+                    if (lastClock === null) lastClock = duration;
+                    addElapsed(lastClock - clampClock(targetClockSeconds));
+                }
+
+                return totals;
+            };
+
+            const deriveTotalPlayerSecondsFromTimeline = (events = [], activeQuarter = currentQuarter, activeClockSeconds = periodClockSeconds) => {
+                const resolvedQuarter = Math.max(1, Number.parseInt(activeQuarter, 10) || 1);
+                const chronological = getChronologicalEvents(events || []);
+                const maxQuarterInLog = chronological.reduce((maxQuarter, event) => {
+                    const eventQuarter = getQuarterFromEvent(event);
+                    return eventQuarter > maxQuarter ? eventQuarter : maxQuarter;
+                }, resolvedQuarter);
+                const finalQuarter = Math.max(resolvedQuarter, maxQuarterInLog);
+                const totals = {};
+
+                for (let quarter = 1; quarter <= finalQuarter; quarter += 1) {
+                    const targetClockForQuarter = quarter < resolvedQuarter
+                        ? 0
+                        : (quarter === resolvedQuarter
+                            ? Math.max(0, Number(activeClockSeconds || 0))
+                            : getPeriodDurationSeconds(quarter));
+
+                    const quarterTotals = deriveQuarterPlayerSecondsFromTimeline(events, quarter, targetClockForQuarter);
+                    Object.entries(quarterTotals || {}).forEach(([playerId, seconds]) => {
+                        const safeSeconds = Math.max(0, Number(seconds || 0));
+                        if (!playerId || safeSeconds <= 0) return;
+                        totals[playerId] = Math.round((totals[playerId] || 0) + safeSeconds);
+                    });
+                }
+
+                return totals;
             };
 
             const handleApplyManualClock = () => {
@@ -3261,18 +5196,11 @@
                 const maxSeconds = getPeriodDurationSeconds(currentQuarter);
                 const nextSeconds = Math.max(0, Math.min(parsed, maxSeconds));
                 const nextLabel = formatSecondsAsClock(nextSeconds);
-                const elapsedDeltaSeconds = periodClockSeconds - nextSeconds;
+                const adjustedExistingLog = remapCurrentQuarterClockHistory(gameLog, currentQuarter, periodClockSeconds, nextSeconds);
 
-                if (elapsedDeltaSeconds !== 0) {
-                    setLivePlayerSeconds((prev) => {
-                        const next = { ...prev };
-                        const activePlayerIds = [...new Set([...teamALineup, ...teamBLineup].filter(Boolean))];
-                        activePlayerIds.forEach((playerId) => {
-                            next[playerId] = Math.max(0, (next[playerId] || 0) + elapsedDeltaSeconds);
-                        });
-                        return next;
-                    });
-                }
+                markLocalSessionUpdated();
+                const recomputedPlayerSeconds = deriveTotalPlayerSecondsFromTimeline(adjustedExistingLog, currentQuarter, nextSeconds);
+                setLivePlayerSeconds(recomputedPlayerSeconds);
 
                 setPeriodClockSeconds(nextSeconds);
                 setManualClockInput(nextLabel);
@@ -3280,25 +5208,28 @@
                 setShowSyncClockEditor(false);
                 setIsPlayPaused(true);
                 setIsPeriodClockRunning(false);
-                if (nextSeconds > 1 && isAwaitingPeriodStart) {
+                if (nextSeconds > 1 && (isAwaitingPeriodStart || awaitingOvertimeDecision)) {
                     setAwaitingPeriodStart(false);
                     setAwaitingOvertimeDecision(false);
                 }
 
-                const adjustLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                const adjustEvent = {
-                    id: adjustLogId,
-                    time: getWallClockTime(),
-                    text: `Clock adjusted to ${nextLabel}`,
-                    kind: 'meta',
-                    metaType: 'clockAdjust',
-                    quarter: currentQuarter,
-                    clockRemaining: nextLabel
-                };
+                const pauseAlreadyActiveInTimeline = isTimeoutCurrentlyActive(adjustedExistingLog);
+                if (pauseAlreadyActiveInTimeline) {
+                    setGameLog(adjustedExistingLog.slice(0, MAX_LIVE_LOG_ENTRIES));
+                } else {
+                    const manualPauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                    setGameLog([{
+                        id: manualPauseLogId,
+                        time: getWallClockTime(),
+                        text: 'Manual pause (clock sync)',
+                        kind: 'meta',
+                        metaType: 'manualPause',
+                        quarter: currentQuarter,
+                        clockRemaining: nextLabel
+                    }, ...adjustedExistingLog].slice(0, MAX_LIVE_LOG_ENTRIES));
+                }
 
-                setGameLog((prev) => [adjustEvent, ...prev.slice(0, 300)]);
-
-                if (nextSeconds > 1 && isAwaitingPeriodStart) {
+                if (nextSeconds > 1 && (isAwaitingPeriodStart || awaitingOvertimeDecision)) {
                     showToast(`Clock updated to ${nextLabel}. You can now press Resume ${getPeriodLabel(currentQuarter)}.`, 'success');
                 } else {
                     showToast(`Clock updated to ${nextLabel}. Game paused.`, 'success');
@@ -3312,11 +5243,19 @@
 
                 const nextQuarter = nextPeriodToStart;
                 const nextLabel = getPeriodLabel(nextQuarter);
+                const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
                 const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                markLocalSessionUpdated();
                 setCurrentQuarter(nextQuarter);
-                setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
+                setPeriodClockSeconds(nextQuarterSeconds);
+                setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+                setShowSyncClockEditor(false);
+                setIsEditingClockInput(false);
+                setPendingPeriodActionMode('pauseGame');
+                armLocalResumeStabilityWindow();
                 suppressPeriodAutoStopRef.current = true;
                 setIsPlayPaused(false);
+                suppressTimeoutAutoStopRef.current = true;
                 setIsPeriodClockRunning(true);
                 setAwaitingPeriodStart(false);
                 setAwaitingOvertimeDecision(false);
@@ -3327,8 +5266,8 @@
                     kind: 'meta',
                     metaType: 'quarterStart',
                     quarter: nextQuarter,
-                    clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
-                }, ...prev.slice(0, 300)]);
+                    clockRemaining: formatSecondsAsClock(nextQuarterSeconds)
+                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 showToast(`${nextLabel} started.`, 'success');
             };
 
@@ -3343,11 +5282,19 @@
 
                 const nextQuarter = currentQuarter + 1;
                 const nextLabel = getPeriodLabel(nextQuarter);
+                const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
                 const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                markLocalSessionUpdated();
                 setCurrentQuarter(nextQuarter);
-                setPeriodClockSeconds(getPeriodDurationSeconds(nextQuarter));
+                setPeriodClockSeconds(nextQuarterSeconds);
+                setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+                setShowSyncClockEditor(false);
+                setIsEditingClockInput(false);
+                setPendingPeriodActionMode('pauseGame');
+                armLocalResumeStabilityWindow();
                 suppressPeriodAutoStopRef.current = true;
                 setIsPlayPaused(false);
+                suppressTimeoutAutoStopRef.current = true;
                 setIsPeriodClockRunning(true);
                 setAwaitingPeriodStart(false);
                 setAwaitingOvertimeDecision(false);
@@ -3358,8 +5305,8 @@
                     kind: 'meta',
                     metaType: 'quarterStart',
                     quarter: nextQuarter,
-                    clockRemaining: formatSecondsAsClock(getPeriodDurationSeconds(nextQuarter))
-                }, ...prev.slice(0, 300)]);
+                    clockRemaining: formatSecondsAsClock(nextQuarterSeconds)
+                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 showToast(`Overtime started: ${nextLabel}.`, 'success');
             };
 
@@ -3368,13 +5315,41 @@
                 if (!ensureTeamOperationAccess(isTeamA, 'manage substitutions for this team')) return;
                 const playerObj = teams.flatMap(t => t.players).find(p => p.id === playerId);
                 if (!playerObj) return;
+                const benchIds = isTeamA ? teamABench : teamBBench;
+                const eligibleBenchIds = benchIds.filter((id) => !dnpPlayers.includes(id));
+                if (eligibleBenchIds.length === 0) {
+                    showToast('No eligible bench players available (DNP excluded).', 'info');
+                    return;
+                }
+
+                const shouldAutoPauseForSubSelection = shouldSoftPauseForLiveGameModal('substitution')
+                    && isGameLive
+                    && isPeriodClockRunning
+                    && !timeoutIsActive;
+                pendingSubSelectionAutoPauseRef.current = false;
+                if (shouldAutoPauseForSubSelection) {
+                    markLocalSessionUpdated();
+                    pendingSubSelectionAutoPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                    showToast('Clock paused while substitution modal is open. Choose a player or cancel to resume.', 'info');
+                }
+
                 setSubTargetPlayer({ id: playerId, name: playerObj.name, number: playerObj.number, team: isTeamA ? 'A' : 'B' });
                 setShowSubstitutionModal(true);
+            };
+
+            const handleCancelSubstitutionModal = () => {
+                setShowSubstitutionModal(false);
+                setSubTargetPlayer(null);
             };
 
             const executeSubstitution = (outId, inId, isTeamA) => {
                 if (!canOperateLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'manage substitutions for this team')) return;
+                if (dnpPlayers.includes(inId)) {
+                    showToast('Player is marked DNP and cannot be substituted in.', 'info');
+                    return;
+                }
                 const teamObj = isTeamA ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
                 const outPlayer = teamObj?.players.find(p => p.id === outId);
                 const inPlayer = teamObj?.players.find(p => p.id === inId);
@@ -3415,6 +5390,7 @@
                     setPlayedPlayers(prev => [...prev, inId]);
                 }
                 if (dnpPlayers.includes(inId)) {
+                    lastLocalDnpUpdatedAtRef.current = Date.now();
                     setDnpPlayers(prev => prev.filter(id => id !== inId));
                 }
 
@@ -3445,10 +5421,12 @@
                     outId,
                     inId,
                     isTeamA
-                }, ...prev.slice(0, 300)]);
+                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
 
                 setShowSubstitutionModal(false);
                 setSubTargetPlayer(null);
+
+                showToast('Substitution completed.', 'success');
             };
 
             const handleClearOnCourtPlayers = (isTeamA) => {
@@ -3493,7 +5471,7 @@
                 }
                 processedGameLogIdsRef.current.add(clearEvent.id);
                 enqueueLiveEvent(clearEvent);
-                setGameLog((prev) => [clearEvent, ...prev.slice(0, 300)]);
+                setGameLog((prev) => [clearEvent, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
 
                 showToast(`On-court cleared for ${isTeamA ? 'home' : 'away'} team.`, 'info');
             };
@@ -3522,8 +5500,9 @@
                 const lineup = isTeamA ? teamALineup : teamBLineup;
                 const bench = isTeamA ? teamABench : teamBBench;
                 const rosterIds = (teamObj?.players || []).map((p) => p.id);
-                const fallbackCandidates = rosterIds.filter((id) => !lineup.includes(id));
-                const addCandidates = bench.length > 0 ? bench : fallbackCandidates;
+                const fallbackCandidates = rosterIds.filter((id) => !lineup.includes(id) && !dnpPlayers.includes(id));
+                const addCandidates = (bench.length > 0 ? bench : fallbackCandidates)
+                    .filter((id) => !dnpPlayers.includes(id));
                 if (lineup.length >= 5) {
                     showToast('On-court already has 5 players.', 'info');
                     return;
@@ -3533,15 +5512,37 @@
                     return;
                 }
 
+                const shouldSoftPauseForAddBench = shouldSoftPauseForLiveGameModal('addFromBench')
+                    && isGameLive
+                    && isPeriodClockRunning
+                    && !timeoutIsActive;
+                addFromBenchModalSoftPauseRef.current = false;
+                if (shouldSoftPauseForAddBench) {
+                    markLocalSessionUpdated();
+                    addFromBenchModalSoftPauseRef.current = true;
+                    setIsPeriodClockRunning(false);
+                    showToast('Clock paused while add-player modal is open. Add players or cancel to resume.', 'info');
+                }
+
                 setAddFromBenchTeam(isTeamA ? 'A' : 'B');
                 setAddFromBenchSelection([]);
                 setShowAddFromBenchModal(true);
+            };
+
+            const handleCancelAddFromBenchModal = () => {
+                setShowAddFromBenchModal(false);
+                setAddFromBenchTeam(null);
+                setAddFromBenchSelection([]);
             };
 
             const handleAddOnCourtPlayer = (playerId, isTeamA) => {
                 if (!canOperateLive) return;
                 if (!isGameLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'add players for this team')) return;
+                if (dnpPlayers.includes(playerId)) {
+                    showToast('Player is marked DNP and cannot be added.', 'info');
+                    return;
+                }
 
                 const teamId = isTeamA ? teamAId : teamBId;
                 const teamObj = teams.find((t) => t.id === teamId);
@@ -3587,6 +5588,7 @@
                     setPlayedPlayers((prev) => [...prev, playerId]);
                 }
                 if (dnpPlayers.includes(playerId)) {
+                    lastLocalDnpUpdatedAtRef.current = Date.now();
                     setDnpPlayers((prev) => prev.filter((id) => id !== playerId));
                 }
 
@@ -3615,7 +5617,7 @@
                 }
                 processedGameLogIdsRef.current.add(addEvent.id);
                 enqueueLiveEvent(addEvent);
-                setGameLog((prev) => [addEvent, ...prev.slice(0, 300)]);
+                setGameLog((prev) => [addEvent, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
 
                 showToast(`${playerObj.name} added on-court.`, 'success');
             };
@@ -3640,6 +5642,7 @@
                 const uniqueRequested = Array.from(new Set(playerIds || []));
                 const validCandidates = uniqueRequested.filter((playerId) => {
                     if (currentLineup.includes(playerId)) return false;
+                    if (dnpPlayers.includes(playerId)) return false;
                     const playerObj = teamObj.players.find((p) => p.id === playerId);
                     if (!playerObj) return false;
                     return (liveStats[playerId]?.pf || 0) < 5;
@@ -3677,6 +5680,7 @@
                     selectedToAdd.forEach((id) => next.add(id));
                     return Array.from(next);
                 });
+                lastLocalDnpUpdatedAtRef.current = Date.now();
                 setDnpPlayers((prev) => prev.filter((id) => !selectedToAdd.includes(id)));
 
                 selectedToAdd.forEach((playerId) => {
@@ -3714,7 +5718,7 @@
                         return next;
                     });
                 }
-                setGameLog((prev) => [...addLogs, ...prev].slice(0, 300));
+                setGameLog((prev) => [...addLogs, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
 
                 setAddFromBenchSelection([]);
                 setShowAddFromBenchModal(false);
@@ -3722,9 +5726,11 @@
                 showToast(`${selectedToAdd.length} player${selectedToAdd.length > 1 ? 's' : ''} added on-court.`, 'success');
             };
 
-            const handleEndGame = async () => {
+            const handleEndGame = async (options = {}) => {
                 if (!canOperateLive) return;
                 if (!teamAId || !teamBId) return;
+
+                setPendingPeriodActionMode(null);
 
                 const teamAObj = teams.find(t => t.id === teamAId);
                 const teamBObj = teams.find(t => t.id === teamBId);
@@ -3732,6 +5738,24 @@
 
                 const gameId = `game_${Date.now()}`;
                 const gameDate = `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+                const sourceGameLog = Array.isArray(options.finalGameLogOverride)
+                    ? options.finalGameLogOverride
+                    : gameLog;
+                const shouldFinalizeRemainingClock = hasMatchStarted && hasCurrentQuarterStarted && isPeriodClockRunning && periodClockSeconds > 0;
+                let finalizedGameLog = [...sourceGameLog];
+                let finalizedClockSeconds = periodClockSeconds;
+
+                if (shouldFinalizeRemainingClock) {
+                    finalizedGameLog = remapCurrentQuarterClockHistory(sourceGameLog, currentQuarter, periodClockSeconds, 0, { forceShift: true });
+                    finalizedClockSeconds = 0;
+                }
+
+                const finalizedLivePlayerSeconds = deriveTotalPlayerSecondsFromTimeline(
+                    finalizedGameLog,
+                    currentQuarter,
+                    finalizedClockSeconds
+                );
 
                 const participantStats = {};
 
@@ -3747,7 +5771,7 @@
 
                         participantStats[player.id] = {
                             ...statsLive,
-                            min: formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)
+                            min: formatSecondsAsMinutes(finalizedLivePlayerSeconds[player.id] || 0)
                         };
 
                         return {
@@ -3785,10 +5809,17 @@
                     teamBScore,
                     playerStats: participantStats,
                     dnpPlayers: [...dnpPlayers],
-                    gameLog: [...gameLog]
+                    periodSnapshots: [...periodSnapshots],
+                    gameLog: [...finalizedGameLog]
                 };
 
                 await saveNewGameState(newGame, updatedTeams);
+
+                // End the active live session immediately when a game is finalized.
+                localStorage.removeItem('active_live_session');
+                hadLiveSessionRef.current = false;
+                queueActiveSessionSync('delete');
+                flushPendingActiveSessionSync();
 
                 setIsGameLive(false);
                 setTeamAId("");
@@ -3799,6 +5830,7 @@
                 setIsPlayPaused(false);
                 setPeriodClockSeconds(getPeriodDurationSeconds(1));
                 setIsPeriodClockRunning(false);
+                setPendingPeriodActionMode(null);
                 setAwaitingOvertimeDecision(false);
                 setAwaitingPeriodStart(false);
                 setTeamALineup([]);
@@ -3808,6 +5840,7 @@
                 setLiveStats({});
                 setLivePlayerSeconds({});
                 setLiveGameSnapshot(null);
+                setPeriodSnapshots([]);
                 setGameLog([]);
                 setLoggedHistory([]);
                 setPlayedPlayers([]);
@@ -3821,6 +5854,20 @@
             };
 
             const openEndGameConfirm = () => {
+                if (missingRegulationQuarters.length > 0) {
+                    const missingLabel = missingRegulationQuarters.map((q) => `Q${q}`).join(', ');
+                    setConfirmDialog({
+                        title: 'Finalize With Missing Quarter Logs?',
+                        text: `No play-by-play evidence found for ${missingLabel}. Finalizing now will lock an incomplete timeline. If you intentionally started tracking late, you may continue.`,
+                        confirmLabel: 'Finalize Anyway',
+                        onConfirm: () => {
+                            handleEndGame();
+                            setConfirmDialog(null);
+                        }
+                    });
+                    return;
+                }
+
                 setConfirmDialog({
                     title: 'End Match?',
                     text: 'Lock boxscores permanently.',
@@ -3836,48 +5883,56 @@
                 if (!isGameLive) return;
 
                 if (periodActionMode === 'startMatch') {
-                    const startLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                    setIsPlayPaused(false);
-                    setGameLog((prev) => [{
-                        id: startLogId,
-                        time: getWallClockTime(),
-                        text: 'Start Match',
-                        kind: 'meta',
-                        metaType: 'matchStart',
-                        quarter: 1,
-                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
-                    }, ...prev.slice(0, 300)]);
-                    setAwaitingPeriodStart(true);
-                    setAwaitingOvertimeDecision(false);
-                    showToast('Match started. Press Start Q1 to begin period play.', 'success');
+                    clearTransientLiveActionState();
+                    handleStartMatch();
                     return;
                 }
 
                 if (periodActionMode === 'startPeriod') {
-                    setPendingPeriodActionMode('startPeriod');
+                    clearTransientLiveActionState();
+                    setPendingPeriodActionMode(null);
                     setIsPlayPaused(false);
                     handleStartNextQuarter();
                     return;
                 }
 
-                if (periodActionMode === 'startOvertime' || periodActionMode === 'endGame') {
+                if (periodActionMode === 'startOvertime' || periodActionMode === 'pauseGame' || periodActionMode === 'endGame') {
                     if (periodActionMode === 'startOvertime') {
-                        setPendingPeriodActionMode('startOvertime');
+                        clearTransientLiveActionState();
+                        setPendingPeriodActionMode(null);
                         setIsPlayPaused(false);
                         handleStartOvertime();
+                    } else if (periodActionMode === 'endGame') {
+                        handleEndGame();
                     } else {
-                        openEndGameConfirm();
+                        handlePauseGame();
                     }
                     return;
                 }
 
                 if (periodActionMode === 'resume') {
-                    setPendingPeriodActionMode('resume');
+                    clearTransientLiveActionState();
+                    markLocalSessionUpdated();
+                    const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                    setPendingPeriodActionMode('pauseGame');
+                    setAwaitingPeriodStart(false);
+                    setAwaitingOvertimeDecision(false);
+                    armLocalResumeStabilityWindow();
                     setIsPlayPaused(false);
                     if (periodClockSeconds > 0) {
                         suppressPeriodAutoStopRef.current = true;
+                        suppressTimeoutAutoStopRef.current = true;
                         setIsPeriodClockRunning(true);
                     }
+                    setGameLog((prev) => [{
+                        id: resumeLogId,
+                        time: getWallClockTime(),
+                        text: `Play resumed (${getPeriodLabel(currentQuarter)})`,
+                        kind: 'meta',
+                        metaType: 'playResume',
+                        quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                    }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                     showToast('Play resumed.', 'success');
                     return;
                 }
@@ -3897,7 +5952,7 @@
                     showToast(`Press Start ${nextPeriodStartLabel} before calling timeout.`, 'info');
                     return;
                 }
-                if (timeoutIsActive) {
+                if (isTeamTimeoutPauseActive) {
                     showToast('Timeout already active. Press Resume Play to continue.', 'info');
                     return;
                 }
@@ -3919,6 +5974,9 @@
                 const timeoutLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 const teamName = teamObj?.name || (isTeamA ? 'HOME' : 'AWAY');
 
+                markLocalSessionUpdated();
+                setIsPlayPaused(true);
+                setIsPeriodClockRunning(false);
                 setGameLog((prev) => [{
                     id: timeoutLogId,
                     time: getWallClockTime(),
@@ -3928,9 +5986,7 @@
                     quarter: currentQuarter,
                     clockRemaining: formatSecondsAsClock(periodClockSeconds),
                     isTeamA
-                }, ...prev.slice(0, 300)]);
-                setIsPlayPaused(true);
-                setIsPeriodClockRunning(false);
+                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
 
                 showToast(`Timeout called: ${teamName}`, 'info');
             };
@@ -3951,8 +6007,19 @@
                     return;
                 }
 
+                const pauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                markLocalSessionUpdated();
                 setIsPlayPaused(true);
                 setIsPeriodClockRunning(false);
+                setGameLog((prev) => [{
+                    id: pauseLogId,
+                    time: getWallClockTime(),
+                    text: 'Manual pause',
+                    kind: 'meta',
+                    metaType: 'manualPause',
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 showToast('Game paused.', 'info');
             };
 
@@ -3973,6 +6040,9 @@
                 }
 
                 const officialsLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                markLocalSessionUpdated();
+                setIsPlayPaused(true);
+                setIsPeriodClockRunning(false);
                 setGameLog((prev) => [{
                     id: officialsLogId,
                     time: getWallClockTime(),
@@ -3981,10 +6051,109 @@
                     metaType: 'officialsTimeout',
                     quarter: currentQuarter,
                     clockRemaining: formatSecondsAsClock(periodClockSeconds)
-                }, ...prev.slice(0, 300)]);
-                setIsPlayPaused(true);
-                setIsPeriodClockRunning(false);
+                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 showToast('Officials timeout called.', 'info');
+            };
+
+            const PLAYER_STAT_FIELDS = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg2m_miss', 'fg3m_miss', 'ftm', 'ft_miss'];
+
+            const createEmptyPlayerTotals = () => ({
+                pts: 0,
+                ast: 0,
+                reb: 0,
+                stl: 0,
+                blk: 0,
+                to: 0,
+                pf: 0,
+                fg2m: 0,
+                fg3m: 0,
+                fg2m_miss: 0,
+                fg3m_miss: 0,
+                ftm: 0,
+                ft_miss: 0
+            });
+
+            const rebuildCareerStatsFromGames = (baseTeams, sourceGames) => {
+                const resetTeams = (baseTeams || []).map((team) => ({
+                    ...team,
+                    players: (team.players || []).map((player) => ({
+                        ...player,
+                        gamesPlayed: 0,
+                        totalStats: createEmptyPlayerTotals()
+                    }))
+                }));
+
+                const playerLookup = new Map();
+                resetTeams.forEach((team, teamIndex) => {
+                    (team.players || []).forEach((player, playerIndex) => {
+                        playerLookup.set(player.id, { teamIndex, playerIndex });
+                    });
+                });
+
+                (sourceGames || []).forEach((game) => {
+                    const statsByPlayer = game?.playerStats || {};
+                    const dnpSet = new Set(Array.isArray(game?.dnpPlayers) ? game.dnpPlayers : []);
+
+                    Object.entries(statsByPlayer).forEach(([playerId, statLine]) => {
+                        if (dnpSet.has(playerId)) return;
+                        const playerRef = playerLookup.get(playerId);
+                        if (!playerRef) return;
+
+                        const player = resetTeams[playerRef.teamIndex].players[playerRef.playerIndex];
+                        player.gamesPlayed = (player.gamesPlayed || 0) + 1;
+                        PLAYER_STAT_FIELDS.forEach((field) => {
+                            player.totalStats[field] = (player.totalStats[field] || 0) + (Number(statLine?.[field] || 0) || 0);
+                        });
+                    });
+                });
+
+                return resetTeams;
+            };
+
+            const handleToggleHistoricDnp = async (gameId, playerId) => {
+                if (!isLoggedIn) return;
+                const targetGame = games.find((game) => game.id === gameId);
+                if (!targetGame) return;
+
+                const hasSavedRow = Boolean(targetGame.playerStats?.[playerId]);
+                if (!hasSavedRow) return;
+
+                const statLine = targetGame.playerStats?.[playerId] || {};
+                const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(statLine[field] || 0) > 0);
+                const currentlyDnp = Array.isArray(targetGame.dnpPlayers) && targetGame.dnpPlayers.includes(playerId);
+                if (!currentlyDnp && hasTrackedStats) {
+                    showToast('Cannot mark DNP for a player with recorded stats in this game.', 'info');
+                    return;
+                }
+
+                const applyToggle = async () => {
+                    const updatedGames = games.map((game) => {
+                        if (game.id !== gameId) return game;
+                        const nextDnpSet = new Set(Array.isArray(game.dnpPlayers) ? game.dnpPlayers : []);
+                        if (nextDnpSet.has(playerId)) {
+                            nextDnpSet.delete(playerId);
+                        } else {
+                            nextDnpSet.add(playerId);
+                        }
+                        return {
+                            ...game,
+                            dnpPlayers: Array.from(nextDnpSet)
+                        };
+                    });
+
+                    const updatedTeams = rebuildCareerStatsFromGames(teams, updatedGames);
+                    setGames(updatedGames);
+                    setTeams(updatedTeams);
+                    await saveFullState(updatedTeams, updatedGames);
+                    showToast(currentlyDnp ? 'Player set back to Counted for this game.' : 'Player marked DNP for this game.', 'success');
+                };
+
+                if (!currentlyDnp) {
+                    const shouldSetDnp = window.confirm('Finalize DNP Status?\n\nMark this player as DNP for this game and exclude this game from their games played?');
+                    if (!shouldSetDnp) return;
+                }
+
+                await applyToggle();
             };
 
             const handleSaveHistoricEdit = async (e) => {
@@ -4062,20 +6231,12 @@
             const handleResetMatch = () => {
                 setConfirmDialog({
                     title: "Clear & Restart Match?",
-                    text: "This will permanently wipe all current scores, timeline logs, and active stats back to 0. Competing teams will remain selected.",
+                    text: "This will wipe current scores, timeline logs, lineups, and active stats, then keep this matchup ready for a fresh start.",
                     onConfirm: async () => {
-                        const teamAObj = teams.find(t => t.id === teamAId);
-                        const teamBObj = teams.find(t => t.id === teamBId);
-                        if (!teamAObj || !teamBObj) return;
-
-                        const startersA = teamAObj.players.slice(0, 5).map(p => p.id);
-                        const benchA = teamAObj.players.slice(5).map(p => p.id);
-                        const startersB = teamBObj.players.slice(0, 5).map(p => p.id);
-                        const benchB = teamBObj.players.slice(5).map(p => p.id);
-
-                        const initializedStats = {};
-                        teamAObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
-                        teamBObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
+                        const resetTeamAId = teamAId;
+                        const resetTeamBId = teamBId;
+                        markLocalSessionUpdated();
+                        setConfirmDialog(null);
                         // Reset event/sync queue state so old stats cannot replay after restart.
                         pendingLiveEventsRef.current = [];
                         persistPendingLiveEvents();
@@ -4088,33 +6249,19 @@
                         liveEventQueueReadyRef.current = false;
                         lastRemoteGameLogIdsRef.current = new Set();
                         lastObservedLogIdRef.current = null;
+                        pendingActiveSessionSyncRef.current = null;
+                        persistPendingActiveSessionSync();
 
-                        try {
-                            await apiRequest('/api/live-events/reset', {
-                                method: 'POST',
-                                body: JSON.stringify({ sourceClientId: syncClientIdRef.current })
-                            });
-                        } catch (error) {
-                            console.error('Failed to clear live event history during match reset.', error);
-                        }
-
-                        setTeamALineup(startersA);
-                        setTeamABench(benchA);
-                        setTeamBLineup(startersB);
-                        setLiveGameSnapshot({
-                            teamAId,
-                            teamBId,
-                            teamAScore: 0,
-                            teamBScore: 0,
-                            currentQuarter: 1,
-                            teamALineup: startersA,
-                            teamABench: benchA,
-                            teamBLineup: startersB,
-                            teamBBench: benchB,
-                            liveStats: initializedStats,
-                            playedPlayers: []
-                        });
-                        setTeamBBench(benchB);
+                        setIsGameLive(true);
+                        setTeamAId(resetTeamAId);
+                        setTeamBId(resetTeamBId);
+                        setLiveSessionInstanceId(generateLiveSessionInstanceId());
+                        setLiveSessionCreatedAt(Date.now());
+                        sessionRevisionRef.current = 0;
+                        setTeamALineup([]);
+                        setTeamABench([]);
+                        setTeamBLineup([]);
+                        setTeamBBench([]);
                         setPlayedPlayers([]);
                         setDnpPlayers([]);
                         setShowHomeBenchAdder(false);
@@ -4125,23 +6272,39 @@
                         setAddFromBenchTeam(null);
                         setAddFromBenchSelection([]);
                         setFoulAlert(null);
+                        setShowLoggingModal(false);
+                        setShowLiveRunningBoxscore(true);
+                        setShowSyncClockEditor(false);
+                        setIsEditingClockInput(false);
+                        setPendingPeriodActionMode(null);
+                        setManualClockInput(formatSecondsAsClock(getPeriodDurationSeconds(1)));
 
-                        setLiveStats(initializedStats);
+                        setLiveStats({});
                         setLivePlayerSeconds({});
                         setTeamAScore(0);
                         setTeamBScore(0);
                         setCurrentQuarter(1);
+                        setPeriodClockSeconds(getPeriodDurationSeconds(1));
+                        setIsPeriodClockRunning(false);
                         setIsPlayPaused(false);
                         setAwaitingOvertimeDecision(false);
                         setAwaitingPeriodStart(false);
                         setActiveAction(null);
                         setCorrectionMode(false);
+                        setPeriodSnapshots([]);
+                        setLiveGameSnapshot(null);
                         setLoggedHistory([]);
                         setGameLog([]);
                         setLineupRevision(0);
                         lineupRevisionRef.current = 0;
-                        setConfirmDialog(null);
-                        showToast("Current game stats cleared! Ready to restart.", "info");
+                        showToast("Match restarted. Press Start Match to begin fresh.", "info");
+
+                        apiRequest('/api/live-events/reset', {
+                            method: 'POST',
+                            body: JSON.stringify({ sourceClientId: syncClientIdRef.current })
+                        }).catch((error) => {
+                            console.error('Failed to clear live event history during match reset.', error);
+                        });
                     }
                 });
             };
@@ -4151,57 +6314,7 @@
                     title: "Cancel Match?",
                     text: "This deletes all active progress for this session. No logs will be saved to disk.",
                     onConfirm: async () => {
-                        let deletedFromDatabase = false;
-
-                        // Try deleting the active session from the server immediately.
-                        if (navigator.onLine) {
-                            try {
-                                await apiRequest('/api/active-session', {
-                                    method: 'DELETE',
-                                    body: JSON.stringify({ sourceClientId: syncClientIdRef.current })
-                                });
-                                deletedFromDatabase = true;
-                                pendingActiveSessionSyncRef.current = null;
-                                persistPendingActiveSessionSync();
-                            } catch (error) {
-                                deletedFromDatabase = false;
-                            }
-                        }
-
-                        // Offline or failed delete: queue a delete so database cleanup happens on reconnect.
-                        if (!deletedFromDatabase) {
-                            queueActiveSessionSync('delete');
-                            flushPendingActiveSessionSync();
-                        }
-
-                        localStorage.removeItem('active_live_session');
-
-                        // Reset pending live event queue so the next match starts clean.
-                        pendingLiveEventsRef.current = [];
-                        persistPendingLiveEvents();
-                        lastLiveSeqRef.current = 0;
-                        try {
-                            localStorage.setItem(LIVE_EVENTS_LAST_SEQ_KEY, '0');
-                        } catch (e) {}
-                        processedGameLogIdsRef.current = new Set();
-                        remoteEventIdsRef.current = new Set();
-                        liveEventQueueReadyRef.current = false;
-                        lastRemoteGameLogIdsRef.current = new Set();
-                        lastObservedLogIdRef.current = null;
-
-                        setSyncDebug((prev) => ({
-                            ...prev,
-                            pendingQueue: 0
-                        }));
-
-                        hadLiveSessionRef.current = false;
-                        setIsGameLive(false);
-                        setIsPlayPaused(false);
-                        setActiveAction(null);
-                        setAwaitingOvertimeDecision(false);
-                        setDnpPlayers([]);
-                        setLineupRevision(0);
-                        lineupRevisionRef.current = 0;
+                        const deletedFromDatabase = await clearLiveSessionEverywhere({ keepTeamSelection: false });
                         setConfirmDialog(null);
 
                         if (deletedFromDatabase) {
@@ -4264,6 +6377,8 @@
                             const updatedPlayers = team.players.map(player => {
                                 const pstats = gameToDelete.playerStats[player.id];
                                 if (!pstats) return player; // Player didn't participate in this specific game
+                                const explicitDnp = Array.isArray(gameToDelete.dnpPlayers) && gameToDelete.dnpPlayers.includes(player.id);
+                                if (explicitDnp) return player;
 
                                 return {
                                     ...player,
@@ -4342,7 +6457,7 @@
                     playerId: player.id,
                     name: player.name,
                     number: player.number,
-                    positions: Array.isArray(player.positions) ? player.positions.filter((pos) => PLAYER_POSITIONS.includes(pos)) : [],
+                    positions: normalizePlayerPositions(player),
                     pictureUrl: player.pictureUrl || '',
                     birthday: player.birthday || '',
                     email: player.email || '',
@@ -4364,9 +6479,7 @@
                             player.id === advancedEditingPlayer.playerId
                                 ? {
                                     ...player,
-                                    positions: Array.isArray(advancedEditingPlayer.positions)
-                                        ? advancedEditingPlayer.positions.filter((pos) => PLAYER_POSITIONS.includes(pos))
-                                        : [],
+                                    positions: normalizePlayerPositions(advancedEditingPlayer),
                                     pictureUrl: (advancedEditingPlayer.pictureUrl || '').trim(),
                                     birthday: (advancedEditingPlayer.birthday || '').trim(),
                                     email: (advancedEditingPlayer.email || '').trim(),
@@ -4434,6 +6547,8 @@
                     fgPct: totalAttempts === 0 ? "0%" : `${Math.round((totalMade / totalAttempts) * 100)}%`,
                     fg3Pct: total3PtAttempts === 0 ? "0%" : `${Math.round(((stats.fg3m || 0) / total3PtAttempts) * 100)}%`,
                     ftPct: ftAttempts === 0 ? "0%" : `${Math.round(((stats.ftm || 0) / ftAttempts) * 100)}%`,
+                    fgMadeAtt: `${Number(totalMade || 0)}/${Number(totalAttempts || 0)}`,
+                    fg3MadeAtt: `${Number(stats.fg3m || 0)}/${Number(total3PtAttempts || 0)}`,
                     ftm: stats.ftm || 0,
                     fta: ftAttempts
                 };
@@ -4496,13 +6611,17 @@
                 };
             };
 
-            const getPlayerRecentGamesSummaries = (teamId, playerId, limit = 5) => {
+            const getPlayerRecentGamesSummaries = (teamId, playerId, limit = null) => {
                 if (!teamId || !playerId) return [];
 
-                return [...games]
+                const sortedGames = [...games]
                     .filter((g) => g.teamAId === teamId || g.teamBId === teamId)
                     .sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a))
-                    .slice(0, limit)
+                const visibleGames = Number.isFinite(limit) && Number(limit) > 0
+                    ? sortedGames.slice(0, Number(limit))
+                    : sortedGames;
+
+                return visibleGames
                     .map((game) => {
                         const isHome = game.teamAId === teamId;
                         const opponentName = isHome ? game.teamBName : game.teamAName;
@@ -4533,7 +6652,7 @@
                 : null;
             const selectedRosterAthleteAverages = selectedRosterAthlete ? getAverages(selectedRosterAthlete) : null;
             const selectedRosterAthleteRecentGames = selectedRosterPlayer
-                ? getPlayerRecentGamesSummaries(selectedRosterPlayer.teamId, selectedRosterPlayer.playerId, 5)
+                ? getPlayerRecentGamesSummaries(selectedRosterPlayer.teamId, selectedRosterPlayer.playerId)
                 : null;
 
             const getLeaderMetric = (player, metricKey, mode) => {
@@ -4611,6 +6730,7 @@
             };
 
             const getPlayerOfTheGame = (game, teamAObj, teamBObj) => {
+                const POINTS_LEADER_BONUS = 1.25;
                 const computePerStyleScore = (stats = {}) => {
                     const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
                     const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
@@ -4662,7 +6782,18 @@
                     .filter(Boolean);
 
                 if (candidates.length === 0) return null;
-                return candidates.sort((a, b) => b.perScore - a.perScore || (b.stats.pts || 0) - (a.stats.pts || 0))[0];
+                const maxPoints = candidates.reduce((maxValue, entry) => {
+                    const pts = Number(entry?.stats?.pts || 0);
+                    return pts > maxValue ? pts : maxValue;
+                }, 0);
+
+                const weightedCandidates = candidates.map((entry) => {
+                    const pts = Number(entry?.stats?.pts || 0);
+                    const leaderBonus = maxPoints > 0 && pts === maxPoints ? POINTS_LEADER_BONUS : 0;
+                    return { ...entry, perScore: Number(entry.perScore || 0) + leaderBonus };
+                });
+
+                return weightedCandidates.sort((a, b) => b.perScore - a.perScore || (b.stats.pts || 0) - (a.stats.pts || 0))[0];
             };
 
             const getDefaultHistoryDetailTab = (game) => {
@@ -4672,11 +6803,741 @@
                 return getPlayerOfTheGame(game, teamAObj, teamBObj) ? 'potg' : 'scoring';
             };
 
+            const buildShareableGameLogUrl = (gameId) => {
+                if (!gameId) return '';
+                const url = new URL(window.location.href);
+                url.searchParams.set('view', 'game');
+                url.searchParams.set('gameId', gameId);
+                return url.toString();
+            };
+
+            const handleCopyGameLogShareLink = async (gameId) => {
+                const shareUrl = buildShareableGameLogUrl(gameId);
+                if (!shareUrl) return;
+
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(shareUrl);
+                    } else {
+                        const textArea = document.createElement('textarea');
+                        textArea.value = shareUrl;
+                        textArea.setAttribute('readonly', '');
+                        textArea.style.position = 'absolute';
+                        textArea.style.left = '-9999px';
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                    }
+                    showToast('Shareable game-log link copied.', 'success');
+                } catch (error) {
+                    showToast('Could not copy link. Please copy it manually from the browser address bar.', 'error');
+                }
+            };
+
+            const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsDataURL(file);
+            });
+
+            const readBlobAsDataUrl = (blob) => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(new Error('Failed to read image blob'));
+                reader.readAsDataURL(blob);
+            });
+
+            const buildPlayerStatSummary = (stats = {}) => {
+                const pts = Number(stats.pts || 0);
+                const reb = Number(stats.reb || 0);
+                const ast = Number(stats.ast || 0);
+                return `${pts} PTS • ${reb} REB • ${ast} AST`;
+            };
+
+            const resolvePlayerImageDataUrl = async (pictureUrl) => {
+                const src = String(pictureUrl || '').trim();
+                if (!src) return '';
+                if (src.startsWith('data:image/')) return src;
+
+                const response = await fetch(src, { cache: 'no-store' });
+                if (!response.ok) throw new Error('Could not load best player profile image.');
+                const blob = await response.blob();
+                return readBlobAsDataUrl(blob);
+            };
+
+            const handlePlayerArtUpload = async (event) => {
+                const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+                event.target.value = '';
+                if (!file) return;
+
+                if (!String(file.type || '').startsWith('image/')) {
+                    showToast('Please upload an image file.', 'error');
+                    return;
+                }
+
+                if (file.size > (4.5 * 1024 * 1024)) {
+                    showToast('Image is too large. Use a file smaller than 4.5MB.', 'error');
+                    return;
+                }
+
+                try {
+                    const dataUrl = await readFileAsDataUrl(file);
+                    setPlayerArtSourceDataUrl(dataUrl);
+                    setPlayerArtOutputDataUrl('');
+                    setPlayerArtDirection('');
+                    showToast('Player photo uploaded. You can now generate 2D art.', 'success');
+                } catch (error) {
+                    showToast('Could not read the uploaded image.', 'error');
+                }
+            };
+
+            const handleCustomCoverUpload = async (gameId, event) => {
+                const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+                event.target.value = '';
+                if (!file || !gameId) return;
+
+                if (!String(file.type || '').startsWith('image/')) {
+                    showToast('Please upload an image file.', 'error');
+                    return;
+                }
+
+                if (file.size > (4.5 * 1024 * 1024)) {
+                    showToast('Image is too large. Use a file smaller than 4.5MB.', 'error');
+                    return;
+                }
+
+                try {
+                    const dataUrl = await readFileAsDataUrl(file);
+                    await apiRequest(`/api/games/${encodeURIComponent(gameId)}/social-cover`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ imageDataUrl: dataUrl })
+                    });
+
+                    setGames((prev) => prev.map((game) => (
+                        game.id === gameId ? { ...game, socialCoverDataUrl: dataUrl } : game
+                    )));
+                    showToast('Custom social cover uploaded for this game.', 'success');
+                } catch (error) {
+                    showToast(String(error?.message || 'Could not upload custom social cover.'), 'error');
+                }
+            };
+
+            const handleClearCustomCover = async (gameId) => {
+                if (!gameId) return;
+                try {
+                    await apiRequest(`/api/games/${encodeURIComponent(gameId)}/social-cover`, {
+                        method: 'DELETE'
+                    });
+                    setGames((prev) => prev.map((game) => (
+                        game.id === gameId ? { ...game, socialCoverDataUrl: '' } : game
+                    )));
+                    showToast('Custom social cover removed. Using generated cover.', 'info');
+                } catch (error) {
+                    showToast(String(error?.message || 'Could not remove custom social cover.'), 'error');
+                }
+            };
+
+            const buildSocialCoverBaseDataUrl = ({ game, teamAObj, teamBObj }) => {
+                const W = 1200;
+                const H = 630;
+                const canvas = document.createElement('canvas');
+                canvas.width = W;
+                canvas.height = H;
+                const ctx = canvas.getContext('2d');
+
+                const colorA = teamAObj?.color || '#10b981';
+                const colorB = teamBObj?.color || '#ef4444';
+
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(0, 0, W, H);
+
+                ctx.save();
+                ctx.globalAlpha = 0.06;
+                for (let i = -H; i < W + H; i += 48) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 0);
+                    ctx.lineTo(i + H, H);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 20;
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                ctx.fillStyle = colorA;
+                ctx.fillRect(0, 0, W / 2, 6);
+                ctx.fillStyle = colorB;
+                ctx.fillRect(W / 2, 0, W / 2, 6);
+                ctx.fillStyle = colorA;
+                ctx.fillRect(0, H - 6, W / 2, 6);
+                ctx.fillStyle = colorB;
+                ctx.fillRect(W / 2, H - 6, W / 2, 6);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.beginPath();
+                ctx.roundRect(40, 28, 240, 32, 8);
+                ctx.fill();
+                ctx.fillStyle = '#f97316';
+                ctx.font = 'bold 13px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('WKND GLEAGUE SEASON 3', 160, 49);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.beginPath();
+                ctx.roundRect(W - 200, 28, 160, 32, 8);
+                ctx.fill();
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '13px system-ui, sans-serif';
+                ctx.fillText(game.date || '', W - 120, 49);
+
+                const drawTeamBlock = (anchorX, y, name, score, color, alignRight) => {
+                    ctx.textAlign = alignRight ? 'right' : 'left';
+                    ctx.fillStyle = color;
+                    ctx.font = 'bold 20px system-ui, sans-serif';
+                    ctx.fillText((name || '').toUpperCase(), anchorX, y);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 126px system-ui, sans-serif';
+                    ctx.fillText(String(score ?? 0), anchorX, y + 128);
+                };
+
+                drawTeamBlock(78, 140, game.teamAName, game.teamAScore, colorA, false);
+                drawTeamBlock(W - 78, 140, game.teamBName, game.teamBScore, colorB, true);
+
+                ctx.fillStyle = '#334155';
+                ctx.font = 'bold 28px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('VS', W / 2, 220);
+
+                const winner = Number(game.teamAScore) > Number(game.teamBScore)
+                    ? game.teamAName
+                    : (Number(game.teamBScore) > Number(game.teamAScore) ? game.teamBName : null);
+                const resultText = winner ? `${winner} wins` : 'Final Score';
+                ctx.fillStyle = '#64748b';
+                ctx.font = '18px system-ui, sans-serif';
+                ctx.fillText(resultText.toUpperCase(), W / 2, 310);
+
+                ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(60, 340);
+                ctx.lineTo(W - 60, 340);
+                ctx.stroke();
+
+                return canvas.toDataURL('image/png');
+            };
+
+            const handleGeneratePlayerArt = async ({ game, teamAObj, teamBObj, playerOfTheGame, silent = false }) => {
+                if (!playerOfTheGame) {
+                    if (!silent) showToast('No best player available for this game yet.', 'error');
+                    return null;
+                }
+
+                setIsGeneratingPlayerArt(true);
+                try {
+                    const sourceDataUrl = playerArtSourceDataUrl;
+                    const fallbackImageUrl = String(playerOfTheGame?.pictureUrl || '').trim();
+
+                    if (!sourceDataUrl && !fallbackImageUrl) {
+                        if (!silent) showToast('Upload a player photo, or add a profile image for the best player.', 'error');
+                        return null;
+                    }
+
+                    const dynamicPlayerName = String(playerOfTheGame?.name || '').trim();
+                    const dynamicTeamName = String(playerOfTheGame?.teamName || game?.teamAName || '').trim();
+                    const dynamicPlayerStatsSummary = buildPlayerStatSummary(playerOfTheGame?.stats || {});
+                    const dynamicScoreLine = `${game?.teamAName || 'HOME'} ${Number(game?.teamAScore || 0)} - ${Number(game?.teamBScore || 0)} ${game?.teamBName || 'AWAY'}`;
+
+                    const response = await fetch('/api/generate-player-2d-art', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            imageDataUrl: sourceDataUrl || null,
+                            imageUrl: sourceDataUrl ? null : fallbackImageUrl,
+                            coverImageDataUrl: buildSocialCoverBaseDataUrl({ game, teamAObj, teamBObj }),
+                            playerName: dynamicPlayerName,
+                            teamName: dynamicTeamName,
+                            playerStatsSummary: dynamicPlayerStatsSummary,
+                            gameContext: {
+                                gameId: game?.id || '',
+                                date: game?.date || '',
+                                teamAName: game?.teamAName || '',
+                                teamAScore: Number(game?.teamAScore || 0),
+                                teamBName: game?.teamBName || '',
+                                teamBScore: Number(game?.teamBScore || 0),
+                                scoreLine: dynamicScoreLine,
+                                bestPlayerName: dynamicPlayerName,
+                                bestPlayerTeam: dynamicTeamName,
+                                bestPlayerStats: dynamicPlayerStatsSummary
+                            },
+                            stylePrompt: playerArtStylePrompt
+                        })
+                    });
+
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(payload?.error || 'Failed to generate 2D player art.');
+                    }
+
+                    const generatedDataUrl = String(payload?.imageDataUrl || '');
+                    setPlayerArtOutputDataUrl(generatedDataUrl);
+                    setPlayerArtDirection(String(payload?.artDirection || ''));
+                    if (!silent) showToast('2D player art generated successfully.', 'success');
+                    return generatedDataUrl;
+                } catch (error) {
+                    if (!silent) showToast(String(error?.message || 'Failed to generate 2D player art.'), 'error');
+                    return null;
+                } finally {
+                    setIsGeneratingPlayerArt(false);
+                }
+            };
+
+            const handleGenerateSocialCover = async ({ game, teamAObj, teamBObj, playerOfTheGame }) => {
+                let generatedArtDataUrl = await handleGeneratePlayerArt({ game, teamAObj, teamBObj, playerOfTheGame, silent: true });
+                let fallbackPlayerImageDataUrl = playerArtSourceDataUrl;
+
+                if (!fallbackPlayerImageDataUrl && playerOfTheGame?.pictureUrl) {
+                    try {
+                        fallbackPlayerImageDataUrl = await resolvePlayerImageDataUrl(playerOfTheGame.pictureUrl);
+                        if (fallbackPlayerImageDataUrl) {
+                            setPlayerArtSourceDataUrl(fallbackPlayerImageDataUrl);
+                        }
+                    } catch (e) {}
+                }
+
+                if (!generatedArtDataUrl && !fallbackPlayerImageDataUrl) {
+                    showToast('Upload a player photo first, or add a best-player profile image.', 'error');
+                    return;
+                }
+
+                if (!generatedArtDataUrl && fallbackPlayerImageDataUrl) {
+                    generatedArtDataUrl = fallbackPlayerImageDataUrl;
+                    showToast('AI layer failed. Using uploaded player image directly for social cover.', 'info');
+                } else if (generatedArtDataUrl) {
+                    showToast('Social cover generated successfully.', 'success');
+                }
+
+                try {
+                    await handleDownloadCoverImage({ game, teamAObj, teamBObj, playerOfTheGame, generatedPlayerArtDataUrl: generatedArtDataUrl });
+                } catch (error) {
+                    showToast(String(error?.message || 'Failed to render social cover image.'), 'error');
+                }
+            };
+
+            const handleDownloadPlayerArt = () => {
+                if (!playerArtOutputDataUrl) return;
+                const link = document.createElement('a');
+                link.download = `wknd-player-2d-${Date.now()}.png`;
+                link.href = playerArtOutputDataUrl;
+                link.click();
+            };
+
+            const handleDownloadCoverImage = async ({ game, teamAObj, teamBObj, playerOfTheGame, generatedPlayerArtDataUrl }) => {
+                const W = 1200, H = 630;
+                const canvas = document.createElement('canvas');
+                canvas.width = W;
+                canvas.height = H;
+                const ctx = canvas.getContext('2d');
+                const customCoverDataUrl = String(game?.socialCoverDataUrl || '').trim();
+
+                const detectFaceBoundingBox = async (img) => {
+                    try {
+                        if (typeof window === 'undefined' || typeof window.FaceDetector !== 'function') return null;
+                        const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+                        const faces = await detector.detect(img);
+                        if (!Array.isArray(faces) || faces.length === 0) return null;
+                        const box = faces[0]?.boundingBox || null;
+                        if (!box) return null;
+                        const x = Number(box.x || 0);
+                        const y = Number(box.y || 0);
+                        const width = Number(box.width || 0);
+                        const height = Number(box.height || 0);
+                        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+                        return { x, y, width, height };
+                    } catch {
+                        return null;
+                    }
+                };
+
+                const loadImage = (src) => new Promise((resolve, reject) => {
+                    if (!src) {
+                        reject(new Error('No image source'));
+                        return;
+                    }
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => resolve(img);
+                    img.onerror = reject;
+                    img.src = src;
+                });
+
+                const drawPOTGAvatar = async ({ avatarSource, avatarX, avatarY, avatarR, fallbackName, ringColor }) => {
+                    ctx.beginPath();
+                    ctx.arc(avatarX, avatarY, avatarR + 5, 0, Math.PI * 2);
+                    ctx.fillStyle = `${ringColor || '#f97316'}66`;
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(avatarX, avatarY, avatarR + 1, 0, Math.PI * 2);
+                    ctx.fillStyle = '#0b1220';
+                    ctx.fill();
+
+                    let avatarDrawn = false;
+                    try {
+                        const avatarImg = await loadImage(avatarSource || '');
+                        const srcW = Number(avatarImg.naturalWidth || avatarImg.width || 0);
+                        const srcH = Number(avatarImg.naturalHeight || avatarImg.height || 0);
+                        // Default to a tighter center crop so faces are more recognizable even without detection.
+                        let cropSize = Math.max(1, Math.min(srcW, srcH) * 0.72);
+                        let sx = Math.max(0, (srcW - cropSize) / 2);
+                        let sy = Math.max(0, (srcH - cropSize) / 2);
+
+                        const faceBox = await detectFaceBoundingBox(avatarImg);
+                        if (faceBox) {
+                            const faceCenterX = faceBox.x + (faceBox.width / 2);
+                            const faceCenterY = faceBox.y + (faceBox.height / 2);
+                            const targetCrop = Math.min(srcW, srcH, Math.max(faceBox.width * 1.6, faceBox.height * 1.95));
+                            cropSize = Math.max(1, targetCrop);
+                            sx = Math.max(0, Math.min(srcW - cropSize, faceCenterX - (cropSize / 2)));
+                            sy = Math.max(0, Math.min(srcH - cropSize, faceCenterY - (cropSize * 0.5)));
+                        }
+
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI * 2);
+                        ctx.closePath();
+                        ctx.clip();
+                        ctx.drawImage(
+                            avatarImg,
+                            sx,
+                            sy,
+                            cropSize,
+                            cropSize,
+                            avatarX - avatarR,
+                            avatarY - avatarR,
+                            avatarR * 2,
+                            avatarR * 2
+                        );
+                        ctx.restore();
+                        avatarDrawn = true;
+                    } catch (_) {
+                        avatarDrawn = false;
+                    }
+
+                    if (!avatarDrawn) {
+                        ctx.beginPath();
+                        ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI * 2);
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fill();
+                        ctx.fillStyle = '#f8fafc';
+                        ctx.font = 'bold 36px system-ui, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText((fallbackName || '?').slice(0, 1).toUpperCase(), avatarX, avatarY + 12);
+                    }
+                };
+
+                if (customCoverDataUrl) {
+                    try {
+                        const cover = await loadImage(customCoverDataUrl);
+                        const srcW = Number(cover.naturalWidth || cover.width || W);
+                        const srcH = Number(cover.naturalHeight || cover.height || H);
+                        const scale = Math.max(W / srcW, H / srcH);
+                        const drawW = srcW * scale;
+                        const drawH = srcH * scale;
+                        const drawX = (W - drawW) / 2;
+                        const drawY = (H - drawH) / 2;
+                        ctx.drawImage(cover, drawX, drawY, drawW, drawH);
+                    } catch {
+                        ctx.fillStyle = '#0f172a';
+                        ctx.fillRect(0, 0, W, H);
+                    }
+
+                    const colorA = teamAObj?.color || '#10b981';
+                    const colorB = teamBObj?.color || '#ef4444';
+
+                    const scoreTextRight = W - 34;
+                    const scoreTextTop = H - 102;
+                    ctx.save();
+                    ctx.shadowColor = 'rgba(2, 6, 23, 0.95)';
+                    ctx.shadowBlur = 10;
+                    ctx.shadowOffsetY = 2;
+                    ctx.textAlign = 'right';
+                    ctx.fillStyle = colorA;
+                    ctx.font = 'bold 20px system-ui, sans-serif';
+                    ctx.fillText(`${String(game.teamAName || '').toUpperCase()} ${Number(game.teamAScore || 0)}`, scoreTextRight, scoreTextTop, 360);
+
+                    ctx.fillStyle = colorB;
+                    ctx.font = 'bold 20px system-ui, sans-serif';
+                    ctx.fillText(`${String(game.teamBName || '').toUpperCase()} ${Number(game.teamBScore || 0)}`, scoreTextRight, scoreTextTop + 26, 360);
+
+                    ctx.restore();
+
+                    const scoreBarW = 260;
+                    const scoreBarH = 8;
+                    const scoreBarX = scoreTextRight - scoreBarW;
+                    const scoreBarY = scoreTextTop + 46;
+                    ctx.fillStyle = colorA;
+                    ctx.fillRect(scoreBarX, scoreBarY, scoreBarW / 2, scoreBarH);
+                    ctx.fillStyle = colorB;
+                    ctx.fillRect(scoreBarX + (scoreBarW / 2), scoreBarY, scoreBarW / 2, scoreBarH);
+
+                    if (playerOfTheGame) {
+                        const potgBaseX = 28;
+                        const potgBaseY = H - 88;
+                        const avatarX = potgBaseX + 36;
+                        const avatarY = potgBaseY;
+                        const avatarR = 34;
+                        await drawPOTGAvatar({
+                            avatarSource: playerOfTheGame.pictureUrl || '',
+                            avatarX,
+                            avatarY,
+                            avatarR,
+                            fallbackName: playerOfTheGame.name || '?',
+                            ringColor: playerOfTheGame.teamColor || '#f97316'
+                        });
+
+                        const contentLeft = avatarX + avatarR + 16;
+                        const contentWidth = 420;
+                        ctx.save();
+                        ctx.shadowColor = 'rgba(2, 6, 23, 0.92)';
+                        ctx.shadowBlur = 10;
+                        ctx.shadowOffsetY = 2;
+                        ctx.textAlign = 'left';
+                        ctx.fillStyle = '#f97316';
+                        ctx.font = 'bold 12px system-ui, sans-serif';
+                        ctx.fillText('PLAYER OF THE GAME', contentLeft, potgBaseY - 22, contentWidth);
+
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = 'bold 30px system-ui, sans-serif';
+                        ctx.fillText(playerOfTheGame.name || '', contentLeft, potgBaseY + 6, contentWidth);
+
+                        const potgStats = playerOfTheGame.stats || {};
+                        const potgLine = [
+                            potgStats.pts != null ? `${potgStats.pts} PTS` : null,
+                            potgStats.reb != null ? `${potgStats.reb} REB` : null,
+                            potgStats.ast != null ? `${potgStats.ast} AST` : null
+                        ].filter(Boolean).join('  ·  ');
+                        ctx.fillStyle = '#e2e8f0';
+                        ctx.font = 'bold 15px system-ui, sans-serif';
+                        ctx.fillText(potgLine, contentLeft, potgBaseY + 28, contentWidth);
+                        ctx.restore();
+                    }
+
+                    const link = document.createElement('a');
+                    link.download = `wknd-game-${game.id}-cover-custom.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    showToast('Custom cover image downloaded.', 'success');
+                    return;
+                }
+
+                // Background
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(0, 0, W, H);
+
+                // If generated player art exists, blend it into the cover base.
+                if (generatedPlayerArtDataUrl) {
+                    try {
+                        const artBase = await loadImage(generatedPlayerArtDataUrl);
+                        ctx.save();
+                        ctx.globalAlpha = 0.34;
+                        ctx.drawImage(artBase, W - 760, 0, 760, H);
+                        ctx.restore();
+                    } catch (_) {}
+
+                    const rightSoftMask = ctx.createLinearGradient(W - 860, 0, W, 0);
+                    rightSoftMask.addColorStop(0, 'rgba(2, 6, 23, 0)');
+                    rightSoftMask.addColorStop(1, 'rgba(2, 6, 23, 0.34)');
+                    ctx.fillStyle = rightSoftMask;
+                    ctx.fillRect(W - 860, 0, 860, H);
+                }
+
+                // Subtle diagonal stripe overlay
+                ctx.save();
+                ctx.globalAlpha = 0.06;
+                for (let i = -H; i < W + H; i += 48) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 0);
+                    ctx.lineTo(i + H, H);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 20;
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                const colorA = teamAObj?.color || '#10b981';
+                const colorB = teamBObj?.color || '#ef4444';
+
+                // Top accent bar split by team color
+                ctx.fillStyle = colorA;
+                ctx.fillRect(0, 0, W / 2, 6);
+                ctx.fillStyle = colorB;
+                ctx.fillRect(W / 2, 0, W / 2, 6);
+
+                // Bottom accent bar
+                ctx.fillStyle = colorA;
+                ctx.fillRect(0, H - 6, W / 2, 6);
+                ctx.fillStyle = colorB;
+                ctx.fillRect(W / 2, H - 6, W / 2, 6);
+
+                // League badge area (top-left)
+                ctx.fillStyle = '#1e293b';
+                ctx.beginPath();
+                ctx.roundRect(40, 28, 160, 32, 8);
+                ctx.fill();
+                ctx.fillStyle = '#f97316';
+                ctx.font = 'bold 13px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('WKND GLEAGUE SEASON 3', 120, 49);
+
+                // Date badge (top-right)
+                ctx.fillStyle = '#1e293b';
+                ctx.beginPath();
+                ctx.roundRect(W - 200, 28, 160, 32, 8);
+                ctx.fill();
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '13px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(game.date || '', W - 120, 49);
+
+                // Team name + score blocks
+                const drawTeamBlock = (anchorX, y, name, score, color, alignRight) => {
+                    ctx.textAlign = alignRight ? 'right' : 'left';
+                    ctx.fillStyle = color;
+                    ctx.font = 'bold 20px system-ui, sans-serif';
+                    ctx.fillText((name || '').toUpperCase(), anchorX, y);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 126px system-ui, sans-serif';
+                    ctx.fillText(String(score ?? 0), anchorX, y + 128);
+                };
+
+                drawTeamBlock(78, 140, game.teamAName, game.teamAScore, colorA, false);
+                drawTeamBlock(W - 78, 140, game.teamBName, game.teamBScore, colorB, true);
+
+                // VS divider
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#334155';
+                ctx.font = 'bold 28px system-ui, sans-serif';
+                ctx.fillText('VS', W / 2, 220);
+
+                // Result line under scores
+                const winner = Number(game.teamAScore) > Number(game.teamBScore) ? game.teamAName : (Number(game.teamBScore) > Number(game.teamAScore) ? game.teamBName : null);
+                const resultText = winner ? `${winner} wins` : 'Final Score';
+                ctx.fillStyle = '#64748b';
+                ctx.font = '18px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(resultText.toUpperCase(), W / 2, 310);
+
+                // Divider line
+                ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(60, 340);
+                ctx.lineTo(W - 60, 340);
+                ctx.stroke();
+
+                // Player of the game
+                if (playerOfTheGame) {
+                    ctx.fillStyle = '#f97316';
+                    ctx.font = 'bold 13px system-ui, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('PLAYER OF THE GAME', W / 2, 380);
+
+                    // Avatar frame
+                    const avatarX = W / 2;
+                    const avatarY = 432;
+                    const avatarR = 44;
+                    ctx.beginPath();
+                    ctx.arc(avatarX, avatarY, avatarR + 5, 0, Math.PI * 2);
+                    ctx.fillStyle = `${playerOfTheGame.teamColor || '#f97316'}66`;
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(avatarX, avatarY, avatarR + 1, 0, Math.PI * 2);
+                    ctx.fillStyle = '#0b1220';
+                    ctx.fill();
+
+                    await drawPOTGAvatar({
+                        avatarSource: playerOfTheGame.pictureUrl || '',
+                        avatarX,
+                        avatarY,
+                        avatarR,
+                        fallbackName: playerOfTheGame.name || '?',
+                        ringColor: playerOfTheGame.teamColor || '#f97316'
+                    });
+
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = 'bold 14px system-ui, sans-serif';
+                    ctx.fillText(`#${playerOfTheGame.number || '-'} • ${playerOfTheGame.teamName || ''}`, W / 2, 490);
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 34px system-ui, sans-serif';
+                    ctx.fillText(playerOfTheGame.name || '', W / 2, 528);
+
+                    const potgStats = playerOfTheGame.stats || {};
+                    const potgLine = [
+                        potgStats.pts != null ? `${potgStats.pts} PTS` : null,
+                        potgStats.reb != null ? `${potgStats.reb} REB` : null,
+                        potgStats.ast != null ? `${potgStats.ast} AST` : null
+                    ].filter(Boolean).join('  ·  ');
+                    ctx.fillStyle = '#e2e8f0';
+                    ctx.font = 'bold 22px system-ui, sans-serif';
+                    ctx.fillText(potgLine, W / 2, 560);
+                }
+
+                // Recap snippet (up to 120 chars)
+                const snippet = String(game.gameWriteup || '').trim().slice(0, 120);
+                if (snippet) {
+                    ctx.fillStyle = '#475569';
+                    ctx.font = 'italic 14px system-ui, sans-serif';
+                    ctx.textAlign = 'center';
+                    const lineY = playerOfTheGame ? 592 : 395;
+                    ctx.fillText(`"${snippet}${snippet.length === 120 ? '…' : ''}"`, W / 2, lineY);
+                }
+
+                // Footer URL
+                const shareUrl = buildShareableGameLogUrl(game.id);
+                ctx.fillStyle = '#334155';
+                ctx.font = '12px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(shareUrl, W / 2, H - 22);
+
+                const link = document.createElement('a');
+                link.download = `wknd-game-${game.id}-cover.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                showToast('Cover image downloaded.', 'success');
+            };
+
+            const syncHistoryShareUrl = (gameId) => {
+                try {
+                    const url = new URL(window.location.href);
+                    if (activeTab === 'history' && gameId) {
+                        url.searchParams.set('view', 'game');
+                        url.searchParams.set('gameId', gameId);
+                    } else {
+                        url.searchParams.delete('view');
+                        url.searchParams.delete('gameId');
+                    }
+                    window.history.replaceState({}, '', url.toString());
+                } catch (e) {}
+            };
+
             const openHistoryGame = (gameId) => {
                 const targetGame = games.find((game) => game.id === gameId);
                 setSelectedHistoryGameId(gameId);
                 setHistoryDetailTab(getDefaultHistoryDetailTab(targetGame));
             };
+
+            useEffect(() => {
+                if (!pendingSharedGameId) return;
+                const targetGame = games.find((game) => game.id === pendingSharedGameId);
+                if (!targetGame) return;
+                openHistoryGame(targetGame.id);
+                setPendingSharedGameId(null);
+            }, [pendingSharedGameId, games]);
+
+            useEffect(() => {
+                syncHistoryShareUrl(selectedHistoryGameId);
+            }, [activeTab, selectedHistoryGameId]);
 
             const getTopTeamPerformers = (team, game, limit = 3) => {
                 if (!team || !game) return [];
@@ -4708,13 +7569,16 @@
                             id: player.id,
                             name: player.name,
                             number: player.number,
+                            pictureUrl: player.pictureUrl || '',
+                            teamName: team.name,
+                            teamColor: team.color,
                             stats,
                             perScore: computePerStyleScore(stats)
                         };
                     })
                     .filter(Boolean)
                     .filter((entry) => Number(entry.perScore || 0) > 0)
-                    .sort((a, b) => Number(b.perScore || 0) - Number(a.perScore || 0) || Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0))
+                        .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0))
                     .slice(0, limit);
             };
 
@@ -4831,7 +7695,7 @@
                 if (!player) return null;
                 const onCourtLastName = (typeof player.name === 'string' ? player.name.split(',')[0] : '').trim() || player.name;
                 const stats = liveStats[playerId] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
-                const hasActionArmed = activeAction !== null;
+                const hasActionArmed = activeAction !== null && !isLiveGameplayModalActive;
 
                 const performancePool = [
                     { label: 'PTS', value: stats.pts || 0 },
@@ -4876,7 +7740,7 @@
                             hasActionArmed && teamAccessAllowed
                                 ? 'armed-target hover:bg-slate-900 border-emerald-500/50' 
                                 : 'border-slate-800 hover:border-slate-700/60'
-                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${isLoggedIn && !teamAccessAllowed ? 'opacity-55 saturate-50' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
+                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${isLoggedIn && !teamAccessAllowed ? 'opacity-55 saturate-50' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${!isLiveGameplayModalActive && flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${!isLiveGameplayModalActive && subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
                     >
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                             <span className="w-12 md:w-14 min-h-[52px] text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0 inline-flex items-center justify-center">{player.number}</span>
@@ -5166,7 +8030,7 @@
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                                    <div className={`grid grid-cols-1 lg:grid-cols-12 gap-4 ${isLiveGameplayModalActive ? 'pointer-events-none select-none [&_*]:!animate-none [&_*]:!transition-none [&_*]:!transform-none [&_*]:!shadow-none' : ''}`}>
                                         {/* MOBILE BOTTOM STICKY COMPACT 2-ROW SCOREBAR */}
                                         <div className="md:hidden col-span-12 sticky top-2 z-20">
                                             <div className="bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl p-1.5 backdrop-blur-sm">
@@ -5287,14 +8151,16 @@
                                                     <button
                                                         onClick={handlePeriodAction}
                                                         className={`w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
-                                                            periodActionIsPositive
-                                                                ? 'bg-emerald-600/25 hover:bg-emerald-600/35 border-emerald-400/70 text-emerald-100 animate-pulse'
+                                                            displayPeriodActionIsPositive
+                                                                ? `bg-emerald-600/25 hover:bg-emerald-600/35 border-emerald-400/70 text-emerald-100 ${!isLiveGameplayModalActive ? 'animate-pulse' : ''}`
+                                                                : displayPeriodActionIsPause
+                                                                    ? 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/70 text-amber-100'
                                                                 : 'bg-red-600 hover:bg-red-500 border-red-400 text-white'
                                                         }`}
                                                     >
                                                         <span className="inline-flex items-center justify-center gap-1">
-                                                            {(periodActionIsStart || periodActionIsResume) ? <Icons.Play /> : (periodActionIsEnd ? <Icons.Stop /> : <Icons.Pause />)}
-                                                            {periodActionLabel}
+                                                            {(displayPeriodActionIsStart || displayPeriodActionIsResume) ? <Icons.Play /> : (displayPeriodActionIsEnd ? <Icons.Stop /> : <Icons.Pause />)}
+                                                            {displayPeriodActionLabel}
                                                         </span>
                                                     </button>
                                                     <button
@@ -5337,16 +8203,32 @@
                                                     {showExtraGameControls && (
                                                         <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2">
                                                             <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-                                                                <button
-                                                                    onClick={handlePauseGame}
-                                                                    disabled={!canPauseGame}
-                                                                    className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-amber-500/50 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                                                                >
-                                                                    <span className="inline-flex items-center justify-center gap-1">
-                                                                        <Icons.Pause />
-                                                                        Pause Game
-                                                                    </span>
-                                                                </button>
+                                                                {canFinalizeGame ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={openEndGameConfirm}
+                                                                        className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/55 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer"
+                                                                    >
+                                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                                            <Icons.Stop />
+                                                                            End Match
+                                                                        </span>
+                                                                    </button>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={handleAdvanceQuarter}
+                                                                        disabled={!canEndCurrentPeriod}
+                                                                        className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/50 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                    >
+                                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                                            <Icons.Stop />
+                                                                            {currentQuarter <= 4
+                                                                                ? `End Quarter (${getPeriodLabel(currentQuarter)})`
+                                                                                : `End Period (${getPeriodLabel(currentQuarter)})`}
+                                                                        </span>
+                                                                    </button>
+                                                                )}
                                                                 <button
                                                                     onClick={handleOfficialsTimeout}
                                                                     disabled={!canOfficialsTimeout}
@@ -5361,7 +8243,7 @@
                                                                     type="button"
                                                                     disabled={!technicalFoulAction || !canUseActionTrigger(technicalFoulAction)}
                                                                     onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, operatorFocus === 'away' ? false : true)}
-                                                                    title={!canUseActionTrigger(technicalFoulAction) ? 'Unavailable right now' : undefined}
+                                                                    title={(!undoLockedByQuarterEnd && !canUseActionTrigger(technicalFoulAction)) ? 'Unavailable right now' : undefined}
                                                                     className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/45 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                 >
                                                                     <span className="inline-flex items-center justify-center gap-1">
@@ -5369,24 +8251,26 @@
                                                                         Technical Foul
                                                                     </span>
                                                                 </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        if (!showSyncClockEditor) {
-                                                                            setShowSyncClockEditor(true);
-                                                                        }
-                                                                    }}
-                                                                    disabled={showSyncClockEditor}
-                                                                    className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${showSyncClockEditor
-                                                                        ? 'border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed opacity-70'
-                                                                        : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer'}`}
-                                                                >
-                                                                    <span className="inline-flex items-center justify-center gap-1">
-                                                                        <Icons.History />
-                                                                        Sync Clock
-                                                                    </span>
-                                                                </button>
-                                                                {showSyncClockEditor && (
+                                                                {isLoggedIn && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            if (!showSyncClockEditor) {
+                                                                                setShowSyncClockEditor(true);
+                                                                            }
+                                                                        }}
+                                                                        disabled={showSyncClockEditor}
+                                                                        className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${showSyncClockEditor
+                                                                            ? 'border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed opacity-70'
+                                                                            : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer'}`}
+                                                                    >
+                                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                                            <Icons.History />
+                                                                            Sync Clock
+                                                                        </span>
+                                                                    </button>
+                                                                )}
+                                                                {isLoggedIn && showSyncClockEditor && (
                                                                     <div className="col-span-4 md:col-span-1 w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-1.5 flex items-center gap-1">
                                                                         <input
                                                                             type="text"
@@ -5433,11 +8317,13 @@
                                             <div className="flex items-center border-b border-slate-800 pb-1.5">
                                                 <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1"><Icons.Zap /> Tap action first, then select player on court</span>
                                             </div>
-                                            {!canTriggerStatLogging && (
+                                            {!displayCanTriggerStatLogging && (
                                                 <div className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
-                                                    {hasMatchStarted
-                                                        ? 'Most stat triggers are locked while paused/stopped. Technical Foul, Free Throw, and Free Throw Missed stay enabled.'
-                                                        : 'Stat triggers are locked until you press Start Match.'}
+                                                    {isAwaitingPeriodStart || awaitingOvertimeDecision
+                                                        ? `Period finalized. ${getPeriodLabel(currentQuarter)} stats are locked. Start the next period (or end match) to continue. Undo to previous period is disabled.`
+                                                        : (hasMatchStarted
+                                                            ? 'Most stat triggers are locked while paused/stopped. Technical Foul stays enabled. Free Throw and Free Throw Missed are only enabled when the clock is stopped.'
+                                                            : 'Stat triggers are locked until you press Start Match.')}
                                                 </div>
                                             )}
 
@@ -5450,7 +8336,7 @@
                                                             key={act.id} 
                                                             disabled={!canUseActionTrigger(act)}
                                                             onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                            title={!canUseActionTrigger(act) ? 'Unavailable right now' : undefined}
+                                                            title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
                                                             className={`py-3.5 md:py-6 px-1.5 md:px-4 rounded-lg md:rounded-2xl text-center text-[9px] md:text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                         >
                                                             {act.label}
@@ -5470,7 +8356,7 @@
                                                                 key={act.id} 
                                                                 disabled={!canUseActionTrigger(act)}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                                title={!canUseActionTrigger(act) ? 'Unavailable right now' : undefined}
+                                                                title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
                                                                 className={`py-3.5 md:py-4 px-2 md:px-4 rounded-lg md:rounded-xl text-center text-[10px] md:text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
@@ -5488,7 +8374,7 @@
                                                                 key={act.id} 
                                                                 disabled={!canUseActionTrigger(act)}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                                title={!canUseActionTrigger(act) ? 'Unavailable right now' : undefined}
+                                                                title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
                                                                 className={`py-[11px] md:py-2.5 px-1.5 md:px-2 rounded-lg text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
@@ -5543,8 +8429,9 @@
                                                             {(() => {
                                                                 const teamObj = teams.find((t) => t.id === teamAId);
                                                                 const rosterIds = (teamObj?.players || []).map((p) => p.id);
-                                                                const fallbackCandidates = rosterIds.filter((id) => !teamALineup.includes(id));
-                                                                const addCandidates = teamABench.length > 0 ? teamABench : fallbackCandidates;
+                                                                const fallbackCandidates = rosterIds.filter((id) => !teamALineup.includes(id) && !dnpPlayers.includes(id));
+                                                                const addCandidates = (teamABench.length > 0 ? teamABench : fallbackCandidates)
+                                                                    .filter((id) => !dnpPlayers.includes(id));
                                                                 if (!addCandidates.length) {
                                                                     return <span className="text-[10px] text-slate-500">No bench players available</span>;
                                                                 }
@@ -5576,13 +8463,13 @@
                                                     <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">PLAY-BY-PLAY</h4>
                                                 </div>
                                                 <div className="p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]">
-                                                    {gameLog.map((log, idx) => {
-                                                        const canRemove = canOperateLive && !undoLockedByQuarterEnd && idx === 0 && !!log.id;
+                                                    {gameLog.filter((log) => !log?.hiddenFromLog).map((log, idx) => {
                                                         const isSubEvent = log?.kind === 'sub' || (typeof log.text === 'string' && log.text.includes('SUB:'));
                                                         const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
                                                         const hasAwayTag = typeof log.text === 'string' && log.text.startsWith('[AWAY] ');
                                                         const cleanText = typeof log.text === 'string' ? log.text.replace(/^\[(HOME|AWAY)\]\s*/, '') : log.text;
+                                                        const scoreTagData = parseScoreTagFromLogText(cleanText);
                                                         const dotColor = (log.isTeamA === true || hasHomeTag)
                                                             ? (liveHomeTeam?.color || '#10b981')
                                                             : (log.isTeamA === false || hasAwayTag)
@@ -5594,29 +8481,31 @@
                                                                 className={`py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''}`}
                                                             >
                                                                 <div className="flex items-center justify-between gap-2">
-                                                                    <div className="flex items-center gap-1.5 min-w-0">
-                                                                        <span className="text-amber-500">[{(log.time || '').split(' ')[0] || '--:--:--'}]</span>
-                                                                        {log?.quarter ? (
-                                                                            <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-400">
-                                                                                {getPeriodLabel(log.quarter)} {log.clockRemaining || '--:--'}
+                                                                    <div className="flex flex-col items-start gap-0 min-w-0">
+                                                                        <div className="flex w-full items-center justify-end gap-2">
+                                                                            <span className="inline-flex w-full items-center gap-2">
+                                                                                {log?.quarter ? (
+                                                                                    <span className="text-[9px] uppercase tracking-wide text-slate-400">{getPeriodLabel(log.quarter)} {log.clockRemaining || '--:--'}</span>
+                                                                                ) : null}
+                                                                                {scoreTagData ? (
+                                                                                    <span className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-300">
+                                                                                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: liveHomeTeam?.color || '#10b981' }} />
+                                                                                        <span className="font-black">{scoreTagData.teamAcronym} {scoreTagData.teamAScore}</span>
+                                                                                        <span className="text-slate-500">-</span>
+                                                                                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: liveAwayTeam?.color || '#ef4444' }} />
+                                                                                        <span className="font-black">{scoreTagData.teamBAcronym} {scoreTagData.teamBScore}</span>
+                                                                                    </span>
+                                                                                ) : null}
                                                                             </span>
-                                                                        ) : null}
+                                                                        </div>
                                                                     </div>
-                                                                    {canRemove && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleDeleteLogEntry(log.id)}
-                                                                            className="shrink-0 w-5 h-5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 hover:text-white flex items-center justify-center"
-                                                                            title="Remove log entry"
-                                                                            aria-label="Remove log entry"
-                                                                        >
-                                                                            <Icons.Undo />
-                                                                        </button>
-                                                                    )}
                                                                 </div>
                                                                 <div className="mt-1 flex items-start gap-2">
                                                                     <span className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ backgroundColor: dotColor }} />
                                                                     <span className="flex-1 min-w-0 break-words">{cleanText}</span>
+                                                                </div>
+                                                                <div className="mt-1 pr-0.5 text-right text-[8px] text-slate-500/80">
+                                                                    {(log.time || '').split(' ')[0] || '--:--:--'}
                                                                 </div>
                                                             </div>
                                                         );
@@ -5660,8 +8549,9 @@
                                                             {(() => {
                                                                 const teamObj = teams.find((t) => t.id === teamBId);
                                                                 const rosterIds = (teamObj?.players || []).map((p) => p.id);
-                                                                const fallbackCandidates = rosterIds.filter((id) => !teamBLineup.includes(id));
-                                                                const addCandidates = teamBBench.length > 0 ? teamBBench : fallbackCandidates;
+                                                                const fallbackCandidates = rosterIds.filter((id) => !teamBLineup.includes(id) && !dnpPlayers.includes(id));
+                                                                const addCandidates = (teamBBench.length > 0 ? teamBBench : fallbackCandidates)
+                                                                    .filter((id) => !dnpPlayers.includes(id));
                                                                 if (!addCandidates.length) {
                                                                     return <span className="text-[10px] text-slate-500">No bench players available</span>;
                                                                 }
@@ -5693,16 +8583,40 @@
                                         <div className={`${canOperateLive ? 'col-span-12 lg:col-span-3' : 'col-span-12 lg:hidden'} flex flex-col gap-4 h-full min-h-0`}>
                                             <div className={`bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col ${canOperateLive ? 'max-h-[420px] md:max-h-[520px] lg:max-h-[504px]' : 'max-h-[420px] md:max-h-[520px] lg:max-h-[504px]'}`}>
                                                 <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80">
-                                                    <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">PLAY-BY-PLAY</h4>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">PLAY-BY-PLAY</h4>
+                                                        {isLoggedIn && canOperateLive && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleUndo}
+                                                                disabled={!canUndoLatest}
+                                                                className="inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-200 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed"
+                                                            >
+                                                                <Icons.Undo />
+                                                                Undo
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    {isLoggedIn && canOperateLive && undoTargetSummary && (
+                                                        <div className="mt-1 text-[9px] font-mono text-slate-500">
+                                                            {undoTargetSummary}
+                                                            {undoTargetBlockedReason ? ` (${undoTargetBlockedReason})` : ''}
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <div className="p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]">
-                                                    {gameLog.map((log, idx) => {
-                                                        const canRemove = canOperateLive && !undoLockedByQuarterEnd && idx === 0 && !!log.id;
+                                                    {gameLog.filter((log) => !log?.hiddenFromLog).map((log, idx) => {
                                                         const isSubEvent = log?.kind === 'sub' || (typeof log.text === 'string' && log.text.includes('SUB:'));
                                                         const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
+                                                        const isConvertBlocked = isProtectedLogEntry(log, finalizedPeriods);
+                                                        const isCurrentPeriodLog = Number(getQuarterFromEvent(log)) === Number(currentQuarter);
+                                                        const isStatLog = isEditableStatLogEntry(log);
+                                                        const canDeleteLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
+                                                        const canEditLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
                                                         const hasAwayTag = typeof log.text === 'string' && log.text.startsWith('[AWAY] ');
                                                         const cleanText = typeof log.text === 'string' ? log.text.replace(/^\[(HOME|AWAY)\]\s*/, '') : log.text;
+                                                        const scoreTagData = parseScoreTagFromLogText(cleanText);
                                                         const dotColor = (log.isTeamA === true || hasHomeTag)
                                                             ? (liveHomeTeam?.color || '#10b981')
                                                             : (log.isTeamA === false || hasAwayTag)
@@ -5713,30 +8627,60 @@
                                                                 key={log.id || idx}
                                                                 className={`py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''}`}
                                                             >
+                                                                {/* Top row: period/clock label left, score pill right */}
                                                                 <div className="flex items-center justify-between gap-2">
-                                                                    <div className="flex items-center gap-1.5 min-w-0">
-                                                                        <span className="text-amber-500">[{(log.time || '').split(' ')[0] || '--:--:--'}]</span>
-                                                                        {log?.quarter ? (
-                                                                            <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-400">
-                                                                                {getPeriodLabel(log.quarter)} {log.clockRemaining || '--:--'}
-                                                                            </span>
-                                                                        ) : null}
-                                                                    </div>
-                                                                    {canRemove && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleDeleteLogEntry(log.id)}
-                                                                            className="shrink-0 w-5 h-5 rounded bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 hover:text-white flex items-center justify-center"
-                                                                            title="Remove log entry"
-                                                                            aria-label="Remove log entry"
-                                                                        >
-                                                                            <Icons.Undo />
-                                                                        </button>
-                                                                    )}
+                                                                    {log?.quarter ? (
+                                                                        <span className="text-[9px] uppercase tracking-wide text-slate-400">{getPeriodLabel(log.quarter)} {log.clockRemaining || '--:--'}</span>
+                                                                    ) : <span />}
+                                                                    {scoreTagData ? (
+                                                                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-300">
+                                                                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: liveHomeTeam?.color || '#10b981' }} />
+                                                                            <span className="font-black">{scoreTagData.teamAcronym} {scoreTagData.teamAScore}</span>
+                                                                            <span className="text-slate-500">-</span>
+                                                                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: liveAwayTeam?.color || '#ef4444' }} />
+                                                                            <span className="font-black">{scoreTagData.teamBAcronym} {scoreTagData.teamBScore}</span>
+                                                                        </span>
+                                                                    ) : null}
                                                                 </div>
+                                                                {/* Body: colored dot + log text */}
                                                                 <div className="mt-1 flex items-start gap-2">
                                                                     <span className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ backgroundColor: dotColor }} />
                                                                     <span className="flex-1 min-w-0 break-words">{cleanText}</span>
+                                                                </div>
+                                                                {/* Bottom row: edit/delete icons left, wall-clock timestamp right */}
+                                                                <div className="mt-1 flex items-center justify-between">
+                                                                    {isLoggedIn && canOperateLive && (canEditLiveLog || canDeleteLiveLog) ? (
+                                                                        <div className="inline-flex items-center gap-1">
+                                                                            {canEditLiveLog && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleOpenLiveLogEdit(log.id)}
+                                                                                    className="h-4 w-4 inline-flex items-center justify-center text-slate-600 hover:text-slate-400 cursor-pointer"
+                                                                                    title="Edit action (current period only)"
+                                                                                >
+                                                                                    <Icons.Edit />
+                                                                                </button>
+                                                                            )}
+                                                                            {canDeleteLiveLog && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setConfirmDialog({
+                                                                                        title: 'Delete live log entry?',
+                                                                                        text: 'This will remove the selected current-period log and replay the live state.',
+                                                                                        onConfirm: () => {
+                                                                                            setConfirmDialog(null);
+                                                                                            handleDeleteLogEntry(log.id);
+                                                                                        }
+                                                                                    })}
+                                                                                    className="h-4 w-4 inline-flex items-center justify-center text-slate-600 hover:text-rose-400 cursor-pointer"
+                                                                                    title="Delete this log (current period only)"
+                                                                                >
+                                                                                    <Icons.Trash />
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    ) : <span />}
+                                                                    <span className="text-[8px] text-slate-500/80">{(log.time || '').split(' ')[0] || '--:--:--'}</span>
                                                                 </div>
                                                             </div>
                                                         );
@@ -5788,10 +8732,31 @@
                                                         </button>
                                                         <button
                                                             type="button"
+                                                            onClick={() => setLiveBoxscoreTab('comparison')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'comparison' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                        >
+                                                            Comparison
+                                                        </button>
+                                                        <button
+                                                            type="button"
                                                             onClick={() => setLiveBoxscoreTab('fouls')}
                                                             className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'fouls' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
                                                         >
                                                             Foul Trouble
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLiveBoxscoreTab('potg')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'potg' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                        >
+                                                            POTG
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLiveBoxscoreTab('leaders')}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === 'leaders' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                        >
+                                                            Leaders
                                                         </button>
                                                     </div>
 
@@ -5838,7 +8803,17 @@
                                                                             <tr key={player.id} data-player-id={player.id} className={`hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? 'bg-emerald-500/5 font-semibold text-white' : 'opacity-70'} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10' : ''}`}>
                                                                                 <td className="py-1.5 px-3 truncate font-sans">
                                                                                     <span className="font-mono text-slate-500 text-[10px] mr-1">#{player.number}</span>
-                                                                                    {player.name}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => {
+                                                                                            setActiveTab('teams');
+                                                                                            setSelectedRosterPlayer({ teamId: teamAId, playerId: player.id });
+                                                                                        }}
+                                                                                        className="text-left text-white hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer"
+                                                                                        title="Open player profile"
+                                                                                    >
+                                                                                        {player.name}
+                                                                                    </button>
                                                                                     {onCourt && <span className="ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded">On Court</span>}
                                                                                 </td>
                                                                                 <td className="py-1.5 px-2 text-center text-emerald-300 font-bold">{formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)}</td>
@@ -5918,7 +8893,17 @@
                                                                             <tr key={player.id} data-player-id={player.id} className={`hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? 'bg-emerald-500/5 font-semibold text-white' : 'opacity-70'} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10' : ''}`}>
                                                                                 <td className="py-1.5 px-3 truncate font-sans">
                                                                                     <span className="font-mono text-slate-500 text-[10px] mr-1">#{player.number}</span>
-                                                                                    {player.name}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => {
+                                                                                            setActiveTab('teams');
+                                                                                            setSelectedRosterPlayer({ teamId: teamBId, playerId: player.id });
+                                                                                        }}
+                                                                                        className="text-left text-white hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer"
+                                                                                        title="Open player profile"
+                                                                                    >
+                                                                                        {player.name}
+                                                                                    </button>
                                                                                     {onCourt && <span className="ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded">On Court</span>}
                                                                                 </td>
                                                                                 <td className="py-1.5 px-2 text-center text-emerald-300 font-bold">{formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)}</td>
@@ -5988,6 +8973,316 @@
                                                             </table>
                                                         </div>
                                                     </div>
+                                                    ) : liveBoxscoreTab === 'comparison' ? (
+                                                    (() => {
+                                                        const livePseudoGame = {
+                                                            teamAId,
+                                                            teamBId,
+                                                            teamAScore,
+                                                            teamBScore,
+                                                            playerStats: liveStats
+                                                        };
+                                                        const liveTeamATotals = summarizeGameTeamStats(liveHomeTeam, livePseudoGame);
+                                                        const liveTeamBTotals = summarizeGameTeamStats(liveAwayTeam, livePseudoGame);
+
+                                                        return (
+                                                            <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">Team Total Comparison</h4>
+                                                                    <span className="text-[10px] text-slate-500 font-mono">Live totals for this game</span>
+                                                                </div>
+                                                                <div className="rounded-lg border border-slate-800 bg-slate-950/30 p-3 md:p-4 space-y-3">
+                                                                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-[10px] font-bold uppercase tracking-wider">
+                                                                        <span className="text-right" style={{ color: liveHomeTeam?.color || '#10b981' }}>{liveHomeTeam?.name || 'Home'}</span>
+                                                                        <span className="text-slate-500">Stat</span>
+                                                                        <span style={{ color: liveAwayTeam?.color || '#ef4444' }}>{liveAwayTeam?.name || 'Away'}</span>
+                                                                    </div>
+
+                                                                    <div className="rounded-xl border border-slate-800/70 overflow-hidden">
+                                                                    {[
+                                                                        ['PTS', liveTeamATotals.pts, liveTeamBTotals.pts],
+                                                                        ['REB', liveTeamATotals.reb, liveTeamBTotals.reb],
+                                                                        ['AST', liveTeamATotals.ast, liveTeamBTotals.ast],
+                                                                        ['STL', liveTeamATotals.stl, liveTeamBTotals.stl],
+                                                                        ['BLK', liveTeamATotals.blk, liveTeamBTotals.blk],
+                                                                        ['TO', liveTeamATotals.to, liveTeamBTotals.to],
+                                                                        ['PF', liveTeamATotals.pf, liveTeamBTotals.pf],
+                                                                        ['FG', liveTeamATotals.fg2m + liveTeamATotals.fg3m, liveTeamBTotals.fg2m + liveTeamBTotals.fg3m],
+                                                                        ['3PT', liveTeamATotals.fg3m, liveTeamBTotals.fg3m],
+                                                                        ['FT', liveTeamATotals.ftm, liveTeamBTotals.ftm]
+                                                                    ].map(([label, teamAValue, teamBValue]) => {
+                                                                        const aNum = Number(teamAValue) || 0;
+                                                                        const bNum = Number(teamBValue) || 0;
+                                                                        const totalValue = Math.max(aNum + bNum, 1);
+                                                                        const aWidth = `${Math.min(100, (aNum / totalValue) * 100)}%`;
+                                                                        const bWidth = `${Math.min(100, (bNum / totalValue) * 100)}%`;
+
+                                                                        return (
+                                                                            <div key={`live-compare-${label}`} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
+                                                                                <div className="relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2">
+                                                                                    <div className="pointer-events-none absolute inset-0 flex justify-end">
+                                                                                        <div className="h-full leader-bg-fill leader-bg-fill-left border-b" style={{ width: aWidth, backgroundColor: `${liveHomeTeam?.color || '#10b981'}0c`, borderBottomColor: `${liveHomeTeam?.color || '#10b981'}aa` }} />
+                                                                                    </div>
+                                                                                    <span className="relative z-10 block text-right text-xl leading-none font-black text-slate-100">{Math.round(aNum)}</span>
+                                                                                </div>
+                                                                                <span className="inline-flex h-full items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5">
+                                                                                    <span className="inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100">{label}</span>
+                                                                                </span>
+                                                                                <div className="relative min-w-0 overflow-hidden px-3 py-2">
+                                                                                    <div className="pointer-events-none absolute inset-0">
+                                                                                        <div className="h-full leader-bg-fill leader-bg-fill-right border-b" style={{ width: bWidth, backgroundColor: `${liveAwayTeam?.color || '#ef4444'}0c`, borderBottomColor: `${liveAwayTeam?.color || '#ef4444'}aa` }} />
+                                                                                    </div>
+                                                                                    <span className="relative z-10 block text-left text-xl leading-none font-black text-slate-100">{Math.round(bNum)}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()
+                                                    ) : liveBoxscoreTab === 'potg' ? (
+                                                    (() => {
+                                                        const livePseudoGame = {
+                                                            teamAId,
+                                                            teamBId,
+                                                            teamAScore,
+                                                            teamBScore,
+                                                            playerStats: liveStats
+                                                        };
+                                                        const livePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeam, liveAwayTeam);
+                                                        const liveTopTeamAPerformers = getTopTeamPerformers(liveHomeTeam, livePseudoGame, 3);
+                                                        const liveTopTeamBPerformers = getTopTeamPerformers(liveAwayTeam, livePseudoGame, 3);
+
+                                                        if (!livePlayerOfTheGame) {
+                                                            return (
+                                                                <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-2">
+                                                                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">Potential POTG</h4>
+                                                                    <p className="text-[11px] text-slate-500 italic">No clear POTG candidate yet. Record more live stats.</p>
+                                                                </div>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <div className="space-y-3">
+                                                                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                                                    <div>
+                                                                        <div className="text-[10px] uppercase tracking-widest text-amber-400 font-bold mb-1">Potential Player of the Game</div>
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className="w-11 h-11 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0">
+                                                                                {livePlayerOfTheGame.pictureUrl ? (
+                                                                                    <img src={livePlayerOfTheGame.pictureUrl} alt={livePlayerOfTheGame.name} className="w-full h-full object-cover" />
+                                                                                ) : (
+                                                                                    <span className="text-sm font-black text-slate-200 font-mono">{(livePlayerOfTheGame.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                )}
+                                                                            </div>
+                                                                            <div className="text-sm font-extrabold text-white">
+                                                                                #{livePlayerOfTheGame.number} {livePlayerOfTheGame.name}
+                                                                                <span className="ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full border" style={{ color: livePlayerOfTheGame.teamColor || '#fff', borderColor: `${livePlayerOfTheGame.teamColor || '#fff'}55` }}>
+                                                                                    {livePlayerOfTheGame.teamName}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="text-[11px] text-slate-400 mt-1">PER-style live rating {Number(livePlayerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.</div>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 font-mono text-slate-300">
+                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
+                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">PTS</div>
+                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.pts || 0}</div>
+                                                                        </div>
+                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
+                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">REB</div>
+                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.reb || 0}</div>
+                                                                        </div>
+                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
+                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">AST</div>
+                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.ast || 0}</div>
+                                                                        </div>
+                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
+                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">STL</div>
+                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.stl || 0}</div>
+                                                                        </div>
+                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
+                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">BLK</div>
+                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.blk || 0}</div>
+                                                                        </div>
+                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
+                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">TO</div>
+                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.to || 0}</div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3">
+                                                                    <h5 className="text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-2">Top Live Performers</h5>
+                                                                    {(() => {
+                                                                        const mergedLiveTopPerformers = [...liveTopTeamAPerformers, ...liveTopTeamBPerformers]
+                                                                            .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0))
+                                                                            .slice(0, 6);
+
+                                                                        return (
+                                                                            <div className="overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20">
+                                                                                <div className="overflow-x-auto">
+                                                                                    <table className="w-full text-left text-xs min-w-[920px]">
+                                                                                        <thead>
+                                                                                            <tr className="bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800">
+                                                                                                <th className="py-2.5 px-2 text-center">#</th>
+                                                                                                <th className="py-2.5 px-3">Player</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-teal-400">STL</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-violet-400">BLK</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-amber-500">TO</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-red-400">PF</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-slate-200">PER</th>
+                                                                                            </tr>
+                                                                                        </thead>
+                                                                                        <tbody className="divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300">
+                                                                                            {mergedLiveTopPerformers.length === 0 ? (
+                                                                                                <tr>
+                                                                                                    <td className="py-2 px-2 text-slate-600 italic" colSpan={13}>No qualifying performers</td>
+                                                                                                </tr>
+                                                                                            ) : mergedLiveTopPerformers.map((entry, idx) => {
+                                                                                                const shooting = computeShootingPercentages(entry.stats || {});
+                                                                                                return (
+                                                                                                    <tr key={`live-potg-top-${entry.id}`} className="hover:bg-slate-855/20">
+                                                                                                        <td className="py-2 px-2 text-center font-bold text-slate-500">#{idx + 1}</td>
+                                                                                                        <td className="py-2 px-3 text-white font-bold font-sans">
+                                                                                                            <span className="inline-flex items-center gap-2">
+                                                                                                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: entry.teamColor || '#94a3b8' }} />
+                                                                                                                <span>
+                                                                                                                    <span className="text-slate-500 font-mono mr-1.5 text-[10px]">#{entry.number}</span>
+                                                                                                                    {entry.name}
+                                                                                                                </span>
+                                                                                                            </span>
+                                                                                                        </td>
+                                                                                                        <td className="py-2 px-2 text-center text-orange-400 font-black">{entry.stats?.pts || 0}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-emerald-400 font-bold">{shooting.fgMadeAtt}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-cyan-400 font-bold">{shooting.fg3MadeAtt}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-pink-400 font-bold">{shooting.ftPct}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-emerald-400">{entry.stats?.reb || 0}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-blue-400">{entry.stats?.ast || 0}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-teal-400 font-mono">{entry.stats?.stl || 0}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-violet-400 font-mono">{entry.stats?.blk || 0}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-amber-500 font-mono">{entry.stats?.to || 0}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-red-400 font-mono">{entry.stats?.pf || 0}</td>
+                                                                                                        <td className="py-2 px-2 text-center font-black text-slate-100">{Number(entry.perScore || 0).toFixed(1)}</td>
+                                                                                                    </tr>
+                                                                                                );
+                                                                                            })}
+                                                                                        </tbody>
+                                                                                    </table>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })()}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()
+                                                    ) : liveBoxscoreTab === 'leaders' ? (
+                                                    (() => {
+                                                        const teamALeaders = getGameTeamLeaders(liveHomeTeam || { players: [] }, { playerStats: liveStats });
+                                                        const teamBLeaders = getGameTeamLeaders(liveAwayTeam || { players: [] }, { playerStats: liveStats });
+                                                        return (
+                                                            <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">Live Leaders</h4>
+                                                                    <span className="text-[10px] text-slate-500 font-mono">Current game top performers by team</span>
+                                                                </div>
+                                                                <div className="rounded-lg border border-slate-800 bg-slate-950/30 p-3 md:p-4 space-y-4">
+                                                                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-[10px] font-bold uppercase tracking-wider">
+                                                                        <span className="text-right" style={{ color: liveHomeTeam?.color || '#10b981' }}>{liveHomeTeam?.name || 'Home'}</span>
+                                                                        <span className="text-slate-500">Leader</span>
+                                                                        <span style={{ color: liveAwayTeam?.color || '#ef4444' }}>{liveAwayTeam?.name || 'Away'}</span>
+                                                                    </div>
+                                                                    <div className="rounded-xl border border-slate-800/70 overflow-hidden">
+                                                                    {[
+                                                                        ['PTS', teamALeaders.find((item) => item.label === 'PTS'), teamBLeaders.find((item) => item.label === 'PTS')],
+                                                                        ['REB', teamALeaders.find((item) => item.label === 'REB'), teamBLeaders.find((item) => item.label === 'REB')],
+                                                                        ['AST', teamALeaders.find((item) => item.label === 'AST'), teamBLeaders.find((item) => item.label === 'AST')],
+                                                                        ['STL', teamALeaders.find((item) => item.label === 'STL'), teamBLeaders.find((item) => item.label === 'STL')],
+                                                                        ['BLK', teamALeaders.find((item) => item.label === 'BLK'), teamBLeaders.find((item) => item.label === 'BLK')],
+                                                                        ['TO', teamALeaders.find((item) => item.label === 'TO'), teamBLeaders.find((item) => item.label === 'TO')]
+                                                                    ].map(([label, teamALeader, teamBLeader]) => {
+                                                                        const aValue = Number(teamALeader?.value || 0);
+                                                                        const bValue = Number(teamBLeader?.value || 0);
+                                                                        const aLeaders = teamALeader?.leaders || [];
+                                                                        const bLeaders = teamBLeader?.leaders || [];
+                                                                        const hasALeader = aValue > 0;
+                                                                        const hasBLeader = bValue > 0;
+                                                                        if (!hasALeader && !hasBLeader) return null;
+                                                                        const totalValue = Math.max(aValue + bValue, 1);
+                                                                        const aWidth = `${Math.min(100, (aValue / totalValue) * 100)}%`;
+                                                                        const bWidth = `${Math.min(100, (bValue / totalValue) * 100)}%`;
+                                                                        return (
+                                                                            <div key={`live-leader-${label}`} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
+                                                                                <div className="relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2">
+                                                                                    <div className="pointer-events-none absolute inset-0 flex justify-end">
+                                                                                        <div className="h-full leader-bg-fill leader-bg-fill-left border-b" style={{ width: aWidth, backgroundColor: `${liveHomeTeam?.color || '#10b981'}0c`, borderBottomColor: `${liveHomeTeam?.color || '#10b981'}aa` }} />
+                                                                                    </div>
+                                                                                    <div className="relative z-10 text-right">
+                                                                                        <div className="flex items-center justify-end gap-2">
+                                                                                            <div className="flex flex-col items-end">
+                                                                                                <div className="flex items-center -space-x-2">
+                                                                                                    {hasALeader ? aLeaders.slice(0, 2).map((leader) => (
+                                                                                                        <span key={`live-leader-a-avatar-${label}-${leader.id}`} className="w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center">
+                                                                                                            {leader.pictureUrl ? (
+                                                                                                                <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
+                                                                                                            ) : (
+                                                                                                                <span className="text-[10px] font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                                            )}
+                                                                                                        </span>
+                                                                                                    )) : null}
+                                                                                                </div>
+                                                                                                <div className="mt-1 text-[10px] text-slate-400 truncate max-w-[170px]">{hasALeader ? aLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(' / ') : '-'}</div>
+                                                                                            </div>
+                                                                                            <div className="text-base font-black text-slate-100">{hasALeader ? teamALeader.value : '-'}</div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                <span className="inline-flex h-full flex-col items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5 gap-1">
+                                                                                    <span className="inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100">{label}</span>
+                                                                                </span>
+
+                                                                                <div className="relative min-w-0 overflow-hidden px-3 py-2">
+                                                                                    <div className="pointer-events-none absolute inset-0">
+                                                                                        <div className="h-full leader-bg-fill leader-bg-fill-right border-b" style={{ width: bWidth, backgroundColor: `${liveAwayTeam?.color || '#ef4444'}0c`, borderBottomColor: `${liveAwayTeam?.color || '#ef4444'}aa` }} />
+                                                                                    </div>
+                                                                                    <div className="relative z-10 text-left">
+                                                                                        <div className="flex items-center justify-start gap-2">
+                                                                                            <div className="text-base font-black text-slate-100">{hasBLeader ? teamBLeader.value : '-'}</div>
+                                                                                            <div className="flex flex-col items-start">
+                                                                                                <div className="flex items-center -space-x-2">
+                                                                                                    {hasBLeader ? bLeaders.slice(0, 2).map((leader) => (
+                                                                                                        <span key={`live-leader-b-avatar-${label}-${leader.id}`} className="w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center">
+                                                                                                            {leader.pictureUrl ? (
+                                                                                                                <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
+                                                                                                            ) : (
+                                                                                                                <span className="text-[10px] font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                                            )}
+                                                                                                        </span>
+                                                                                                    )) : null}
+                                                                                                </div>
+                                                                                                <div className="mt-1 text-[10px] text-slate-400 truncate max-w-[170px]">{hasBLeader ? bLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(' / ') : '-'}</div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })()
                                                     ) : (
                                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                                         <div className="rounded-xl border border-slate-850/80 bg-slate-950/40 p-3 space-y-2">
@@ -5996,16 +9291,43 @@
                                                                 <h4 className="text-xs font-black uppercase text-slate-200">{teams.find(t => t.id === teamAId)?.name || 'Home'} Foul Trouble</h4>
                                                             </div>
                                                             {homeFoulTroublePlayers.length === 0 ? (
-                                                                <p className="text-[11px] text-slate-500 italic">No home players currently in foul trouble.</p>
+                                                                <p className="text-[11px] text-slate-500 italic">No home players with high foul load this game.</p>
                                                             ) : (
                                                                 <div className="space-y-2">
                                                                     {homeFoulTroublePlayers.map((player) => (
                                                                         <div key={`home-foul-trouble-${player.id}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
-                                                                            <div className="min-w-0">
-                                                                                <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
-                                                                                <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : 'text-amber-300'}`}>{player.fouls >= 5 ? 'Disqualified' : 'One foul from disqualification'}</div>
+                                                                            <div className="min-w-0 flex items-center gap-2">
+                                                                                <span className="w-8 h-8 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0">
+                                                                                    {player.pictureUrl ? (
+                                                                                        <img src={player.pictureUrl} alt={player.name} className="w-full h-full object-cover" />
+                                                                                    ) : (
+                                                                                        <span className="text-[10px] font-black text-slate-200">{(player.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                    )}
+                                                                                </span>
+                                                                                <div className="min-w-0">
+                                                                                    <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
+                                                                                    <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : ((player.isHighRiskFoulPace || player.isThreeFoulConcern) ? 'text-amber-300' : 'text-slate-400')}`}>
+                                                                                        {player.fouls >= 5
+                                                                                            ? 'Disqualified'
+                                                                                            : (player.isHighRiskFoulPace
+                                                                                                ? 'At foul-out pace over remaining quarters'
+                                                                                                : (player.isThreeFoulConcern ? '3+ fouls: concern' : 'Foul tracking'))}
+                                                                                    </div>
+                                                                                    <div className="mt-1 flex flex-wrap gap-1">
+                                                                                        {Object.entries(player.quarterFouls || {})
+                                                                                            .filter(([, value]) => Number(value || 0) > 0)
+                                                                                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                                                                            .map(([quarter, value]) => (
+                                                                                                <span key={`home-foul-q-${player.id}-${quarter}`} className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-black border ${Number(value || 0) >= 2 ? 'border-amber-500/60 bg-amber-500/15 text-amber-300' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>
+                                                                                                    {`${getPeriodLabel(Number(quarter))}: ${Number(value || 0)}PF`}
+                                                                                                </span>
+                                                                                            ))}
+                                                                                    </div>
+                                                                                </div>
                                                                             </div>
-                                                                            <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-amber-500/50 bg-amber-500/15 text-amber-300'}`}>{player.fouls} PF</span>
+                                                                            <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-amber-500/50 bg-amber-500/15 text-amber-300'}`}>
+                                                                                {player.fouls >= 5 ? `${player.fouls} PF` : `${player.fouls} PF (${player.allowedPerRemainingPeriod.toFixed(2)}/Q left)`}
+                                                                            </span>
                                                                         </div>
                                                                     ))}
                                                                 </div>
@@ -6017,16 +9339,43 @@
                                                                 <h4 className="text-xs font-black uppercase text-slate-200">{teams.find(t => t.id === teamBId)?.name || 'Away'} Foul Trouble</h4>
                                                             </div>
                                                             {awayFoulTroublePlayers.length === 0 ? (
-                                                                <p className="text-[11px] text-slate-500 italic">No away players currently in foul trouble.</p>
+                                                                <p className="text-[11px] text-slate-500 italic">No away players with high foul load this game.</p>
                                                             ) : (
                                                                 <div className="space-y-2">
                                                                     {awayFoulTroublePlayers.map((player) => (
                                                                         <div key={`away-foul-trouble-${player.id}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
-                                                                            <div className="min-w-0">
-                                                                                <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
-                                                                                <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : 'text-amber-300'}`}>{player.fouls >= 5 ? 'Disqualified' : 'One foul from disqualification'}</div>
+                                                                            <div className="min-w-0 flex items-center gap-2">
+                                                                                <span className="w-8 h-8 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0">
+                                                                                    {player.pictureUrl ? (
+                                                                                        <img src={player.pictureUrl} alt={player.name} className="w-full h-full object-cover" />
+                                                                                    ) : (
+                                                                                        <span className="text-[10px] font-black text-slate-200">{(player.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                    )}
+                                                                                </span>
+                                                                                <div className="min-w-0">
+                                                                                    <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
+                                                                                    <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : ((player.isHighRiskFoulPace || player.isThreeFoulConcern) ? 'text-amber-300' : 'text-slate-400')}`}>
+                                                                                        {player.fouls >= 5
+                                                                                            ? 'Disqualified'
+                                                                                            : (player.isHighRiskFoulPace
+                                                                                                ? 'At foul-out pace over remaining quarters'
+                                                                                                : (player.isThreeFoulConcern ? '3+ fouls: concern' : 'Foul tracking'))}
+                                                                                    </div>
+                                                                                    <div className="mt-1 flex flex-wrap gap-1">
+                                                                                        {Object.entries(player.quarterFouls || {})
+                                                                                            .filter(([, value]) => Number(value || 0) > 0)
+                                                                                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                                                                                            .map(([quarter, value]) => (
+                                                                                                <span key={`away-foul-q-${player.id}-${quarter}`} className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-black border ${Number(value || 0) >= 2 ? 'border-amber-500/60 bg-amber-500/15 text-amber-300' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>
+                                                                                                    {`${getPeriodLabel(Number(quarter))}: ${Number(value || 0)}PF`}
+                                                                                                </span>
+                                                                                            ))}
+                                                                                    </div>
+                                                                                </div>
                                                                             </div>
-                                                                            <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-amber-500/50 bg-amber-500/15 text-amber-300'}`}>{player.fouls} PF</span>
+                                                                            <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-amber-500/50 bg-amber-500/15 text-amber-300'}`}>
+                                                                                {player.fouls >= 5 ? `${player.fouls} PF` : `${player.fouls} PF (${player.allowedPerRemainingPeriod.toFixed(2)}/Q left)`}
+                                                                            </span>
                                                                         </div>
                                                                     ))}
                                                                 </div>
@@ -6145,8 +9494,8 @@
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">STL</div><div className="text-sm font-black text-teal-300">{selectedRosterAthleteAverages?.stl || '0.0'}</div></div>
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">BLK</div><div className="text-sm font-black text-violet-300">{selectedRosterAthleteAverages?.blk || '0.0'}</div></div>
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">TO</div><div className="text-sm font-black text-amber-400">{selectedRosterAthleteAverages?.to || '0.0'}</div></div>
-                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">FG%</div><div className="text-sm font-black text-emerald-400">{selectedRosterAthleteAverages?.fgPct || '0%'}</div></div>
-                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">3P%</div><div className="text-sm font-black text-cyan-400">{selectedRosterAthleteAverages?.fg3Pct || '0%'}</div></div>
+                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">FG M/A</div><div className="text-sm font-black text-emerald-400">{`${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg2m_miss || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m_miss || 0)}`}</div></div>
+                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">3PT M/A</div><div className="text-sm font-black text-cyan-400">{`${Number(selectedRosterAthlete?.totalStats?.fg3m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m_miss || 0)}`}</div></div>
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">FT%</div><div className="text-sm font-black text-pink-400">{selectedRosterAthleteAverages?.ftPct || '0%'}</div></div>
                                                     </div>
                                                 </div>
@@ -6155,18 +9504,21 @@
 
                                         <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2">
                                             <div className="flex items-center justify-between gap-2">
-                                                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Last Games</div>
-                                                <div className="text-[10px] text-slate-500 font-mono">Latest 5</div>
+                                                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Game History</div>
+                                                <div className="text-[10px] text-slate-500 font-mono">All Games</div>
                                             </div>
                                             {selectedRosterAthleteRecentGames && selectedRosterAthleteRecentGames.length > 0 ? (
                                                 <div className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/20">
-                                                    <table className="w-full min-w-[680px] text-[11px] font-mono text-slate-300">
+                                                    <table className="w-full min-w-[820px] text-[11px] font-mono text-slate-300">
                                                         <thead>
                                                             <tr className="bg-slate-950/80 text-slate-400 border-b border-slate-800">
                                                                 <th className="py-2 px-2 text-left">Date</th>
                                                                 <th className="py-2 px-2 text-left">Opp</th>
                                                                 <th className="py-2 px-2 text-center">Score</th>
+                                                                    <th className="py-2 px-2 text-center text-emerald-300">MIN</th>
                                                                 <th className="py-2 px-2 text-center text-orange-400">PTS</th>
+                                                                <th className="py-2 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
+                                                                <th className="py-2 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
                                                                 <th className="py-2 px-2 text-center">REB</th>
                                                                 <th className="py-2 px-2 text-center">AST</th>
                                                                 <th className="py-2 px-2 text-center">STL</th>
@@ -6199,7 +9551,10 @@
                                                                     <td className="py-2 px-2 text-slate-400 whitespace-nowrap">{game.date || '-'}</td>
                                                                     <td className="py-2 px-2 font-bold text-slate-200 whitespace-nowrap">vs {game.opponentName}</td>
                                                                     <td className="py-2 px-2 text-center text-slate-400 whitespace-nowrap">{selectedRosterTeam.name} {game.teamScore} - {game.opponentScore}</td>
+                                                                    <td className="py-2 px-2 text-center text-emerald-300 font-bold">{game.didPlay ? (String(game.stats?.min || '').trim() || '-') : '-'}</td>
                                                                     <td className="py-2 px-2 text-center font-black text-orange-400">{game.didPlay ? (game.stats?.pts || 0) : '-'}</td>
+                                                                    <td className="py-2 px-2 text-center text-emerald-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0) + Number(game.stats?.fg2m_miss || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
+                                                                    <td className="py-2 px-2 text-center text-cyan-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg3m || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
                                                                     <td className="py-2 px-2 text-center">{game.didPlay ? (game.stats?.reb || 0) : '-'}</td>
                                                                     <td className="py-2 px-2 text-center">{game.didPlay ? (game.stats?.ast || 0) : '-'}</td>
                                                                     <td className="py-2 px-2 text-center">{game.didPlay ? (game.stats?.stl || 0) : '-'}</td>
@@ -6230,18 +9585,20 @@
                                         <h3 className="text-base font-bold text-white font-sans">Division Rosters</h3>
                                     </div>
                                     <div className="flex flex-wrap gap-1.5 text-xs font-bold font-sans">
-                                        <button onClick={handleExportRostersOnly} className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Export Templates</button>
-                                        <label className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Import Templates<input type="file" accept=".json" onChange={handleImportRostersOnly} className="hidden" /></label>
+                                        {isLoggedIn && <button onClick={handleExportRostersOnly} className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Export Templates</button>}
+                                        {isLoggedIn && <label className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Import Templates<input type="file" accept=".json" onChange={handleImportRostersOnly} className="hidden" /></label>}
                                         
                                         {/* SMART CSV ROSTER IMPORTER DOCK BUTTON */}
-                                        <label className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded cursor-pointer transition-colors">
-                                            Import CSV Roster (Sheets)
-                                            <input type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
-                                        </label>
+                                        {isLoggedIn && (
+                                            <label className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded cursor-pointer transition-colors">
+                                                Import CSV Roster (Sheets)
+                                                <input type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
+                                            </label>
+                                        )}
 
-                                        <button onClick={handleExportData} className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Export DB</button>
-                                        <label className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Restore DB<input type="file" accept=".json" onChange={handleImportData} className="hidden" /></label>
-                                        <label className="bg-slate-900 px-3 py-1.5 rounded border border-slate-855 text-emerald-400 cursor-pointer font-bold">Merge Matches<input type="file" accept=".json" onChange={handleMergeData} className="hidden" /></label>
+                                        {isLoggedIn && <button onClick={handleExportData} className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Export DB</button>}
+                                        {isLoggedIn && <label className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Restore DB<input type="file" accept=".json" onChange={handleImportData} className="hidden" /></label>}
+                                        {isLoggedIn && <label className="bg-slate-900 px-3 py-1.5 rounded border border-slate-855 text-emerald-400 cursor-pointer font-bold">Merge Matches<input type="file" accept=".json" onChange={handleMergeData} className="hidden" /></label>}
                                     </div>
                                 </div>
 
@@ -6263,8 +9620,8 @@
                                     </div>
 
                                     <div className="flex gap-2 self-stretch sm:self-auto justify-end">
-                                        <button onClick={() => setShowNewTeamModal(true)} className="bg-slate-900 hover:bg-slate-855 text-white px-3 py-2 rounded-xl border border-slate-800 cursor-pointer">Create Team</button>
-                                        {canEditPlayers && <button onClick={() => { if (teams.length === 0) return; setSelectedTeamIdForPlayer(teams[0].id); setShowNewPlayerModal(true); }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl cursor-pointer">Add Player</button>}
+                                        {isLoggedIn && <button onClick={() => setShowNewTeamModal(true)} className="bg-slate-900 hover:bg-slate-855 text-white px-3 py-2 rounded-xl border border-slate-800 cursor-pointer">Create Team</button>}
+                                        {isLoggedIn && canEditPlayers && <button onClick={() => { if (teams.length === 0) return; setSelectedTeamIdForPlayer(teams[0].id); setShowNewPlayerModal(true); }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl cursor-pointer">Add Player</button>}
                                     </div>
                                 </div>
 
@@ -6275,7 +9632,7 @@
                                             <div key={team.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-md">
                                                 <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
                                                     <span className="font-extrabold text-xs text-white flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: team.color }} /> {team.name}</span>
-                                                    <button onClick={() => handleDeleteTeam(team.id)} className="text-slate-500 hover:text-red-400 cursor-pointer"><Icons.Trash /></button>
+                                                    {isLoggedIn && <button onClick={() => handleDeleteTeam(team.id)} className="text-slate-500 hover:text-red-400 cursor-pointer"><Icons.Trash /></button>}
                                                 </div>
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-left text-[11px] min-w-[950px]">
@@ -6288,8 +9645,8 @@
                                                                         <th className="py-2 px-4">Name</th>
                                                                         <th className="py-2 px-2 text-center">GP</th>
                                                                         <th className="py-2 px-2 text-center text-orange-400">PPG</th>
-                                                                        <th className="py-2 px-2 text-center text-emerald-400 font-bold">FG%</th>
-                                                                        <th className="py-2 px-2 text-center text-cyan-400 font-bold">3P%</th>
+                                                                        <th className="py-2 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
+                                                                        <th className="py-2 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
                                                                         <th className="py-2 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                         <th className="py-2 px-2 text-center text-emerald-400">RPG</th>
                                                                         <th className="py-2 px-2 text-center text-blue-400">APG</th>
@@ -6339,8 +9696,8 @@
                                                                                 </td>
                                                                                 <td className="py-2.5 px-2 text-center">{gp}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-orange-400">{avgs.pts}</td>
-                                                                                <td className="py-2.5 px-2 text-center font-bold text-emerald-400">{avgs.fgPct}</td>
-                                                                                <td className="py-2.5 px-2 text-center font-bold text-cyan-400">{avgs.fg3Pct}</td>
+                                                                                <td className="py-2.5 px-2 text-center font-bold text-emerald-400">{`${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0)}/${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg2m_miss || 0) + Number(p.totalStats?.fg3m_miss || 0)}`}</td>
+                                                                                <td className="py-2.5 px-2 text-center font-bold text-cyan-400">{`${Number(p.totalStats?.fg3m || 0)}/${Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg3m_miss || 0)}`}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-pink-400">{avgs.ftPct}</td>
                                                                                 <td className="py-2.5 px-2 text-center text-emerald-300">{avgs.reb}</td>
                                                                                 <td className="py-2.5 px-2 text-center text-blue-300">{avgs.ast}</td>
@@ -6377,8 +9734,8 @@
                                                                         <td className="py-3 px-4 text-amber-400 tracking-wider font-extrabold text-[12px] uppercase">Team Averages</td>
                                                                         <td className="py-3 px-2 text-center font-mono">{teamStats.totals.gp}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-orange-400">{teamStats.avgs.pts}</td>
-                                                                        <td className="py-3 px-2 text-center font-mono text-emerald-400">{teamStats.shooters.fgPct}</td>
-                                                                        <td className="py-3 px-2 text-center font-mono text-cyan-400">{teamStats.shooters.fg3Pct}</td>
+                                                                        <td className="py-3 px-2 text-center font-mono text-emerald-400">{teamStats.shooters.fgMadeAtt}</td>
+                                                                        <td className="py-3 px-2 text-center font-mono text-cyan-400">{teamStats.shooters.fg3MadeAtt}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-pink-400">{teamStats.shooters.ftPct}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-emerald-300">{teamStats.avgs.reb}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-blue-300">{teamStats.avgs.ast}</td>
@@ -6594,30 +9951,50 @@
                                             <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/80">
                                                 <h4 className="text-[11px] font-extrabold uppercase tracking-widest text-slate-300">Stat Leaders By Team</h4>
                                             </div>
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full min-w-[760px] text-xs font-mono">
-                                                    <thead>
-                                                        <tr className="bg-slate-950/60 text-slate-400 border-b border-slate-800">
-                                                            <th className="py-2.5 px-3 text-left">Stat</th>
-                                                            <th className="py-2.5 px-3 text-left">Leading Team</th>
-                                                            <th className="py-2.5 px-3 text-right">{standingsStatMode === 'perGame' ? 'Per Game' : 'Total'}</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-slate-800/60 bg-slate-950/20 text-slate-200">
-                                                        {statCategoryLeaders.map((row) => (
-                                                            <tr key={`category-team-leader-${row.id}`} className="hover:bg-slate-855/20">
-                                                                <td className="py-2.5 px-3 font-black text-orange-300">{row.label}</td>
-                                                                <td className="py-2.5 px-3 font-bold whitespace-nowrap">
-                                                                    <span className="inline-flex items-center gap-2">
-                                                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: row.teamColor }} />
-                                                                        {row.teamName}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="py-2.5 px-3 text-right font-black text-cyan-300">{row.value.toFixed(1)}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
+                                            <div className="p-3 space-y-3">
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {standingsLeaderDefs.map((def) => (
+                                                        <button
+                                                            key={`standings-leader-tab-${def.id}`}
+                                                            onClick={() => setSelectedStandingsLeaderStat(def.id)}
+                                                            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer border ${selectedStandingsLeaderStat === def.id ? 'bg-orange-500 text-white border-orange-400 shadow' : 'bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200'}`}
+                                                        >
+                                                            {def.tabLabel || def.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                <div className="rounded-xl border border-slate-800 bg-slate-950/20 p-3">
+                                                    {selectedStandingsLeader ? (
+                                                        <div className="space-y-3">
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <span className="text-sm font-black text-orange-300 tracking-wide">{selectedStandingsLeader.label}</span>
+                                                                <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{standingsStatMode === 'perGame' ? 'Per Game' : 'Accumulated'}</span>
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                {selectedStandingsLeader.bars.length > 0 ? selectedStandingsLeader.bars.map((team, index) => (
+                                                                    <div key={`leader-bar-${selectedStandingsLeader.id}-${team.id}-${standingsBarsCycle}`} className="grid grid-cols-[1fr_auto] items-center gap-2">
+                                                                        <div className="h-3 overflow-hidden rounded-full border border-slate-800 bg-slate-950/80">
+                                                                            <span
+                                                                                className="block h-full rounded-full transition-[width] duration-700 ease-out"
+                                                                                style={{
+                                                                                    width: standingsBarsVisible ? `${team.width}%` : '0%',
+                                                                                    backgroundColor: team.color,
+                                                                                    opacity: team.id === selectedStandingsLeader.teamId ? 1 : 0.74,
+                                                                                    transitionDelay: `${index * 70}ms`
+                                                                                }}
+                                                                                title={`${team.name}: ${team.value.toFixed(1)}`}
+                                                                            />
+                                                                        </div>
+                                                                        <span className="text-right text-[10px] font-black text-slate-300">{team.value.toFixed(1)}</span>
+                                                                    </div>
+                                                                )) : <div className="h-3 w-full rounded-full bg-slate-800/80" />}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-slate-500 italic">No stat leaders available.</p>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -6639,7 +10016,7 @@
                                         <h4 className="text-sm font-extrabold text-white uppercase tracking-wide">History</h4>
                                         <div className="flex items-center gap-2">
                                             <span className="text-[10px] text-slate-400 font-mono">{homepageGameSummaries.length} game(s)</span>
-                                            <button onClick={handleExportGamesCSV} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer">Export CSV</button>
+                                            {isLoggedIn && <button onClick={handleExportGamesCSV} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer">Export CSV</button>}
                                         </div>
                                     </div>
 
@@ -6703,7 +10080,9 @@
                                         >
                                             Back to Game List
                                         </button>
-                                        <span className="text-[10px] text-slate-400 font-mono">Detail mode</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] text-slate-400 font-mono">Detail mode</span>
+                                        </div>
                                     </div>
                                 )}
 
@@ -6719,7 +10098,33 @@
                                         const teamBObj = teams.find(t => t.id === game.teamBId);
                                         const teamATotals = summarizeGameTeamStats(teamAObj, game);
                                         const teamBTotals = summarizeGameTeamStats(teamBObj, game);
-                                        const quarterStats = computeQuarterTeamStatsFromLog(game.gameLog || []);
+                                        const hasFrozenQuarterSnapshots = Array.isArray(game.periodSnapshots) && game.periodSnapshots.length > 0;
+                                        const historyFrozenQuarterStatsByQuarter = new Map((game.periodSnapshots || []).map((snapshot) => [Number(snapshot?.quarter || 0), snapshot]));
+                                        const historyLogQuarterStats = computeQuarterTeamStatsFromLog(game.gameLog || []);
+                                        const historyMaxQuarter = Math.max(
+                                            4,
+                                            ...historyLogQuarterStats.map((row) => Number(row?.quarter || 0)),
+                                            ...Array.from(historyFrozenQuarterStatsByQuarter.keys())
+                                        );
+                                        const quarterStats = Array.from({ length: historyMaxQuarter }, (_, idx) => idx + 1).map((quarter) => {
+                                            const frozen = historyFrozenQuarterStatsByQuarter.get(quarter) || null;
+                                            if (frozen?.quarterStats) {
+                                                return {
+                                                    quarter,
+                                                    teamA: cloneQuarterStats(frozen.quarterStats.teamA),
+                                                    teamB: cloneQuarterStats(frozen.quarterStats.teamB)
+                                                };
+                                            }
+
+                                            const logRow = historyLogQuarterStats.find((row) => Number(row.quarter) === quarter) || null;
+                                            const baseTeamA = cloneQuarterStats(logRow?.teamA || createEmptyQuarterStats());
+                                            const baseTeamB = cloneQuarterStats(logRow?.teamB || createEmptyQuarterStats());
+                                            return {
+                                                quarter,
+                                                teamA: baseTeamA,
+                                                teamB: baseTeamB
+                                            };
+                                        });
                                         const playerOfTheGame = getPlayerOfTheGame(game, teamAObj, teamBObj);
                                         const topTeamAPerformers = getTopTeamPerformers(teamAObj, game, 3);
                                         const topTeamBPerformers = getTopTeamPerformers(teamBObj, game, 3);
@@ -6750,68 +10155,164 @@
                                                     </div>
                                                     <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
                                                         <span className="font-mono text-xs font-bold text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">{game.date}</span>
-                                                        
-                                                        {/* EDIT SYSTEM INITIATOR TRIGGER BUTTON */}
-                                                        <button 
-                                                            onClick={() => {
-                                                                setEditingGame(game);
-                                                                setEditStatsTemp(JSON.parse(JSON.stringify(game.playerStats)));
-                                                                setExpandedEditPlayerId(null);
-                                                            }}
-                                                            className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
-                                                        >
-                                                            Edit Box Score
-                                                        </button>
+                                                        {isLoggedIn && (
+                                                            <>
+                                                                {/* EDIT SYSTEM INITIATOR TRIGGER BUTTON */}
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        setEditingGame(game);
+                                                                        setEditStatsTemp(JSON.parse(JSON.stringify(game.playerStats)));
+                                                                        setExpandedEditPlayerId(null);
+                                                                    }}
+                                                                    className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
+                                                                >
+                                                                    Edit Box Score
+                                                                </button>
 
-                                                        {/* DELETE GAME RECORD BUTTON */}
-                                                        <button 
-                                                            onClick={() => handleDeleteGame(game.id)}
-                                                            className="p-2 bg-red-650/10 hover:bg-red-650/20 border border-red-500/30 text-red-400 rounded-lg cursor-pointer transition-all duration-200"
-                                                            title="Delete Game Record"
-                                                        >
-                                                            <Icons.Trash />
-                                                        </button>
+                                                                {/* DELETE GAME RECORD BUTTON */}
+                                                                <button 
+                                                                    onClick={() => handleDeleteGame(game.id)}
+                                                                    className="p-2 bg-red-650/10 hover:bg-red-650/20 border border-red-500/30 text-red-400 rounded-lg cursor-pointer transition-all duration-200"
+                                                                    title="Delete Game Record"
+                                                                >
+                                                                    <Icons.Trash />
+                                                                </button>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 </div>
 
+                                                {/* SHARE & PUBLISH — collapsible panel */}
                                                 {(canOperateLive || String(game.gameWriteup || '').trim()) && (
-                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-2">
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <h5 className="text-[11px] font-bold uppercase tracking-wider text-slate-300">Game Recap</h5>
-                                                            <span className="text-[10px] text-slate-500">Recap and key moments</span>
-                                                        </div>
+                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl overflow-hidden">
+                                                        {/* Collapsible header */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowShareTools((v) => !v)}
+                                                            className="w-full flex items-center justify-between px-3 py-2.5 text-left select-none cursor-pointer hover:bg-slate-900/60 transition-colors"
+                                                        >
+                                                            <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                                                                <Icons.Share />
+                                                                Share &amp; Publish
+                                                            </span>
+                                                            <span className={`text-slate-500 transition-transform duration-200 ${showShareTools ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
+                                                        </button>
 
-                                                        {canOperateLive ? (
-                                                            <>
-                                                                <textarea
-                                                                    value={historyWriteupInput}
-                                                                    onChange={(e) => setHistoryWriteupInput(e.target.value)}
-                                                                    placeholder="Add a quick game recap..."
-                                                                    rows={4}
-                                                                    className="w-full resize-y bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
-                                                                />
-                                                                <div className="flex justify-end gap-2">
+                                                        {showShareTools && (
+                                                            <div className="px-3 pb-3 space-y-3 border-t border-slate-800 pt-3">
+
+                                                                {/* Share link row */}
+                                                                <div className="flex items-center gap-2">
+                                                                    <input
+                                                                        readOnly
+                                                                        value={buildShareableGameLogUrl(game.id)}
+                                                                        className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none truncate"
+                                                                    />
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => handleGenerateGameWriteup({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers })}
-                                                                        disabled={generatingWriteupGameId === game.id}
-                                                                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                                                        onClick={() => handleCopyGameLogShareLink(game.id)}
+                                                                        className="shrink-0 px-2.5 py-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 text-sky-200 text-[10px] font-bold hover:bg-sky-500/20 cursor-pointer"
                                                                     >
-                                                                        {generatingWriteupGameId === game.id ? 'Generating...' : 'Generate Recap'}
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleSaveGameWriteup(game.id)}
-                                                                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
-                                                                    >
-                                                                        Save Recap
+                                                                        Copy Link
                                                                     </button>
                                                                 </div>
-                                                            </>
-                                                        ) : (
-                                                            <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
-                                                                {game.gameWriteup}
-                                                            </p>
+
+                                                                {/* Social cover image */}
+                                                                <div className="flex items-start gap-3 bg-slate-900/60 border border-slate-800 rounded-xl p-3">
+                                                                    {/* Mini preview */}
+                                                                    <div className="shrink-0 w-[120px] h-[63px] rounded-lg overflow-hidden border border-slate-700 bg-slate-950">
+                                                                        {game.socialCoverDataUrl ? (
+                                                                            <img src={game.socialCoverDataUrl} alt="Custom social cover preview" className="w-full h-full object-cover" />
+                                                                        ) : (
+                                                                            <div className="w-full h-full flex flex-col justify-between p-1.5" style={{ background: 'linear-gradient(135deg,#0f172a 60%,#1e293b)' }}>
+                                                                                <div className="flex justify-between items-center">
+                                                                                    <span className="text-[6px] font-black uppercase" style={{ color: teamAObj?.color || '#10b981' }}>{(game.teamAName || '').slice(0, 6)}</span>
+                                                                                    <span className="text-[6px] text-slate-500">vs</span>
+                                                                                    <span className="text-[6px] font-black uppercase" style={{ color: teamBObj?.color || '#ef4444' }}>{(game.teamBName || '').slice(0, 6)}</span>
+                                                                                </div>
+                                                                                <div className="flex justify-between items-end px-1">
+                                                                                    <span className="text-[18px] font-black leading-none text-white">{game.teamAScore}</span>
+                                                                                    <span className="text-[18px] font-black leading-none text-white">{game.teamBScore}</span>
+                                                                                </div>
+                                                                                <div className="flex">
+                                                                                    <div className="h-0.5 flex-1 rounded-l" style={{ background: teamAObj?.color || '#10b981' }} />
+                                                                                    <div className="h-0.5 flex-1 rounded-r" style={{ background: teamBObj?.color || '#ef4444' }} />
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-[10px] font-bold text-slate-200 mb-0.5">Social Cover Image</p>
+                                                                        <p className="text-[9px] text-slate-500 leading-snug mb-2">1200 × 630 PNG — ready for Twitter/X, Facebook, and WhatsApp link previews. Uses blended 2D player art automatically when generated.</p>
+                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                            <label className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-[10px] font-bold cursor-pointer hover:bg-slate-900">
+                                                                                <Icons.Image />
+                                                                                Upload Custom Cover
+                                                                                <input type="file" accept="image/*" onChange={(event) => handleCustomCoverUpload(game.id, event)} className="hidden" />
+                                                                            </label>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleDownloadCoverImage({ game, teamAObj, teamBObj, playerOfTheGame, generatedPlayerArtDataUrl: playerArtOutputDataUrl })}
+                                                                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/25 cursor-pointer"
+                                                                            >
+                                                                                <Icons.Image />
+                                                                                Download Cover
+                                                                            </button>
+                                                                            {game.socialCoverDataUrl && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleClearCustomCover(game.id)}
+                                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-500/40 bg-red-500/15 text-red-300 text-[10px] font-bold hover:bg-red-500/25 cursor-pointer"
+                                                                                >
+                                                                                    <Icons.Trash />
+                                                                                    Remove Custom Cover
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Game Recap */}
+                                                                <div className="space-y-2">
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Game Recap</span>
+                                                                        <span className="text-[9px] text-slate-600">Included in cover image if saved</span>
+                                                                    </div>
+                                                                    {canOperateLive ? (
+                                                                        <>
+                                                                            <textarea
+                                                                                value={historyWriteupInput}
+                                                                                onChange={(e) => setHistoryWriteupInput(e.target.value)}
+                                                                                placeholder="Add a quick game recap..."
+                                                                                rows={4}
+                                                                                className="w-full resize-y bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                                                                            />
+                                                                            <div className="flex justify-end gap-2">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleGenerateGameWriteup({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers })}
+                                                                                    disabled={generatingWriteupGameId === game.id}
+                                                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                                                                >
+                                                                                    {generatingWriteupGameId === game.id ? 'Generating...' : 'Generate Recap'}
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleSaveGameWriteup(game.id)}
+                                                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                                                                                >
+                                                                                    Save Recap
+                                                                                </button>
+                                                                            </div>
+                                                                        </>
+                                                                    ) : (
+                                                                        <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
+                                                                            {game.gameWriteup}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+
+                                                            </div>
                                                         )}
                                                     </div>
                                                 )}
@@ -6873,7 +10374,7 @@
                                                 {historyDetailTab === 'potg' && playerOfTheGame && (
                                                     <div className="space-y-3">
                                                         <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                                            <div>
+                                                            <div className="min-w-0 flex-1 max-w-full sm:max-w-[68%]">
                                                                 <div className="text-[10px] uppercase tracking-widest text-amber-400 font-bold mb-1">Player of the Game</div>
                                                                 <div className="flex items-center gap-3">
                                                                     <div className="w-11 h-11 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0">
@@ -6890,9 +10391,30 @@
                                                                         </span>
                                                                     </div>
                                                                 </div>
-                                                                <div className="text-[11px] text-slate-400 mt-1">PER-style game rating {Number(playerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.</div>
+                                                                <div className="text-[11px] text-slate-400 mt-1 whitespace-pre-wrap break-words overflow-hidden">
+                                                                    {String(game.potgWriteup || '').trim()
+                                                                        ? game.potgWriteup
+                                                                        : (generatingPotgWriteupGameId === game.id
+                                                                            ? 'Generating player spotlight...'
+                                                                            : `PER-style game rating ${Number(playerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.`)}
+                                                                </div>
+                                                                {isLoggedIn && !String(game.potgWriteup || '').trim() && (
+                                                                    <div className="mt-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleGeneratePotgWriteup({ game, playerOfTheGame })}
+                                                                            disabled={generatingPotgWriteupGameId === game.id}
+                                                                            title="Generate or regenerate POTG writeup"
+                                                                            className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-bold border border-cyan-500/40 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                                                        >
+                                                                            {generatingPotgWriteupGameId === game.id
+                                                                                ? 'Generating POTG Writeup...'
+                                                                                : (String(game.potgWriteup || '').trim() ? 'Regenerate POTG Writeup' : 'Generate POTG Writeup')}
+                                                                        </button>
+                                                                    </div>
+                                                                )}
                                                             </div>
-                                                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 font-mono text-slate-300">
+                                                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 font-mono text-slate-300 shrink-0">
                                                                 <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
                                                                     <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">PTS</div>
                                                                     <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{playerOfTheGame.stats.pts || 0}</div>
@@ -6933,20 +10455,19 @@
                                                                             ? (teamAObj?.color || '#10b981')
                                                                             : (teamBObj?.color || '#ef4444')
                                                                     }))
-                                                                    .sort((a, b) => Number(b.perScore || 0) - Number(a.perScore || 0) || Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0));
+                                                                    .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0));
 
                                                                 return (
                                                                     <div className="overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20">
                                                                         <div className="overflow-x-auto">
-                                                                            <table className="w-full text-left text-xs min-w-[980px]">
+                                                                            <table className="w-full text-left text-xs min-w-[920px]">
                                                                                 <thead>
                                                                                     <tr className="bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800">
                                                                                         <th className="py-2.5 px-2 text-center">#</th>
                                                                                         <th className="py-2.5 px-3">Player</th>
-                                                                                        <th className="py-2.5 px-2 text-center">Team</th>
                                                                                         <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
-                                                                                        <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG%</th>
-                                                                                        <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3P%</th>
+                                                                                        <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
+                                                                                        <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
                                                                                         <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                                         <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
                                                                                         <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
@@ -6968,17 +10489,17 @@
                                                                                             <tr key={`potg-top-merged-${entry.id}`} className="hover:bg-slate-855/20">
                                                                                                 <td className="py-2 px-2 text-center font-bold text-slate-500">#{idx + 1}</td>
                                                                                                 <td className="py-2 px-3 text-white font-bold font-sans">
-                                                                                                    <span className="text-slate-500 font-mono mr-1.5 text-[10px]">#{entry.number}</span>
-                                                                                                    {entry.name}
-                                                                                                </td>
-                                                                                                <td className="py-2 px-2 text-center">
-                                                                                                    <span className="inline-flex px-1.5 py-0.5 rounded border text-[10px] font-black uppercase tracking-wide" style={{ color: entry.teamColor, borderColor: `${entry.teamColor}66`, backgroundColor: `${entry.teamColor}12` }}>
-                                                                                                        {entry.teamName}
+                                                                                                    <span className="inline-flex items-center gap-2">
+                                                                                                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: entry.teamColor || '#94a3b8' }} />
+                                                                                                        <span>
+                                                                                                            <span className="text-slate-500 font-mono mr-1.5 text-[10px]">#{entry.number}</span>
+                                                                                                            {entry.name}
+                                                                                                        </span>
                                                                                                     </span>
                                                                                                 </td>
                                                                                                 <td className="py-2 px-2 text-center text-orange-400 font-black">{entry.stats?.pts || 0}</td>
-                                                                                                <td className="py-2 px-2 text-center text-emerald-400 font-bold">{shooting.fgPct}</td>
-                                                                                                <td className="py-2 px-2 text-center text-cyan-400 font-bold">{shooting.fg3Pct}</td>
+                                                                                                <td className="py-2 px-2 text-center text-emerald-400 font-bold">{shooting.fgMadeAtt}</td>
+                                                                                                <td className="py-2 px-2 text-center text-cyan-400 font-bold">{shooting.fg3MadeAtt}</td>
                                                                                                 <td className="py-2 px-2 text-center text-pink-400 font-bold">{shooting.ftPct}</td>
                                                                                                 <td className="py-2 px-2 text-center text-emerald-400">{entry.stats?.reb || 0}</td>
                                                                                                 <td className="py-2 px-2 text-center text-blue-400">{entry.stats?.ast || 0}</td>
@@ -7032,40 +10553,28 @@
                                                                 const aWidth = `${Math.min(100, (aValue / totalValue) * 100)}%`;
                                                                 const bWidth = `${Math.min(100, (bValue / totalValue) * 100)}%`;
                                                                 return (
-                                                                    <div key={label} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
+                                                                    <div key={`history-leader-${label}`} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
                                                                         <div className="relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2">
                                                                             <div className="pointer-events-none absolute inset-0 flex justify-end">
                                                                                 <div className="h-full leader-bg-fill leader-bg-fill-left border-b" style={{ width: aWidth, backgroundColor: `${teamAObj?.color || '#10b981'}0c`, borderBottomColor: `${teamAObj?.color || '#10b981'}aa` }} />
                                                                             </div>
-                                                                            <div className="relative z-10 grid grid-cols-[1fr_auto] items-center gap-3">
-                                                                                <div className="min-w-0 text-right">
-                                                                                    <div className="hidden lg:flex mt-1 flex-wrap justify-end gap-x-1.5 gap-y-0.5 leading-tight">
-                                                                                        {hasALeader ? aLeaders.map((leader, index) => (
-                                                                                            <React.Fragment key={`leader-a-name-${label}-${leader.id}`}>
-                                                                                                {index > 0 ? <span className="text-[10px] font-bold text-slate-600">/</span> : null}
-                                                                                                <span className="text-[10px] font-bold text-slate-400">{`#${leader.number} ${leader.name}`}</span>
-                                                                                            </React.Fragment>
-                                                                                        )) : null}
+                                                                            <div className="relative z-10 text-right">
+                                                                                <div className="flex items-center justify-end gap-2">
+                                                                                    <div className="flex flex-col items-end">
+                                                                                        <div className="flex items-center -space-x-2">
+                                                                                            {hasALeader ? aLeaders.slice(0, 2).map((leader) => (
+                                                                                                <span key={`history-leader-a-avatar-${label}-${leader.id}`} className="w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center">
+                                                                                                    {leader.pictureUrl ? (
+                                                                                                        <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
+                                                                                                    ) : (
+                                                                                                        <span className="text-[10px] font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                                    )}
+                                                                                                </span>
+                                                                                            )) : null}
+                                                                                        </div>
+                                                                                        <div className="mt-1 text-[10px] text-slate-400 truncate max-w-[170px]">{hasALeader ? aLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(' / ') : '-'}</div>
                                                                                     </div>
-                                                                                </div>
-                                                                                <div className="shrink-0 flex items-center justify-end gap-2">
-                                                                                    <div className="flex items-center -space-x-2">
-                                                                                        {hasALeader ? aLeaders.slice(0, 2).map((leader) => (
-                                                                                            <span key={`leader-a-${label}-${leader.id}`} className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center">
-                                                                                                {leader.pictureUrl ? (
-                                                                                                    <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
-                                                                                                ) : (
-                                                                                                    <span className="text-xs font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
-                                                                                                )}
-                                                                                            </span>
-                                                                                        )) : (
-                                                                                            <span className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center text-xs font-black text-slate-500">-</span>
-                                                                                        )}
-                                                                                        {hasALeader && aLeaders.length > 2 ? (
-                                                                                            <span className="w-6 h-6 rounded-full border border-slate-600 bg-slate-900 text-[9px] font-black text-slate-200 flex items-center justify-center">+{aLeaders.length - 2}</span>
-                                                                                        ) : null}
-                                                                                    </div>
-                                                                                    <span className="w-11 h-11 rounded-full border-2 border-slate-400 bg-slate-900/90 text-slate-100 text-base md:text-lg leading-none font-black flex items-center justify-center shadow-[0_0_18px_rgba(15,23,42,0.55)]">{hasALeader ? teamALeader.value : '-'}</span>
+                                                                                    <div className="text-base font-black text-slate-100">{hasALeader ? teamALeader.value : '-'}</div>
                                                                                 </div>
                                                                             </div>
                                                                         </div>
@@ -7078,34 +10587,22 @@
                                                                             <div className="pointer-events-none absolute inset-0">
                                                                                 <div className="h-full leader-bg-fill leader-bg-fill-right border-b" style={{ width: bWidth, backgroundColor: `${teamBObj?.color || '#ef4444'}0c`, borderBottomColor: `${teamBObj?.color || '#ef4444'}aa` }} />
                                                                             </div>
-                                                                            <div className="relative z-10 grid grid-cols-[auto_1fr] items-center gap-3">
-                                                                                <div className="shrink-0 flex items-center justify-start gap-2">
-                                                                                    <span className="w-11 h-11 rounded-full border-2 border-slate-400 bg-slate-900/90 text-slate-100 text-base md:text-lg leading-none font-black flex items-center justify-center shadow-[0_0_18px_rgba(15,23,42,0.55)]">{hasBLeader ? teamBLeader.value : '-'}</span>
-                                                                                    <div className="flex items-center -space-x-2">
-                                                                                        {hasBLeader ? bLeaders.slice(0, 2).map((leader) => (
-                                                                                            <span key={`leader-b-${label}-${leader.id}`} className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center">
-                                                                                                {leader.pictureUrl ? (
-                                                                                                    <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
-                                                                                                ) : (
-                                                                                                    <span className="text-xs font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
-                                                                                                )}
-                                                                                            </span>
-                                                                                        )) : (
-                                                                                            <span className="w-11 h-11 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_18px_rgba(15,23,42,0.65)] flex items-center justify-center text-xs font-black text-slate-500">-</span>
-                                                                                        )}
-                                                                                        {hasBLeader && bLeaders.length > 2 ? (
-                                                                                            <span className="w-6 h-6 rounded-full border border-slate-600 bg-slate-900 text-[9px] font-black text-slate-200 flex items-center justify-center">+{bLeaders.length - 2}</span>
-                                                                                        ) : null}
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="min-w-0 text-left">
-                                                                                    <div className="hidden lg:flex mt-1 flex-wrap justify-start gap-x-1.5 gap-y-0.5 leading-tight">
-                                                                                        {hasBLeader ? bLeaders.map((leader, index) => (
-                                                                                            <React.Fragment key={`leader-b-name-${label}-${leader.id}`}>
-                                                                                                {index > 0 ? <span className="text-[10px] font-bold text-slate-600">/</span> : null}
-                                                                                                <span className="text-[10px] font-bold text-slate-400">{`#${leader.number} ${leader.name}`}</span>
-                                                                                            </React.Fragment>
-                                                                                        )) : null}
+                                                                            <div className="relative z-10 text-left">
+                                                                                <div className="flex items-center justify-start gap-2">
+                                                                                    <div className="text-base font-black text-slate-100">{hasBLeader ? teamBLeader.value : '-'}</div>
+                                                                                    <div className="flex flex-col items-start">
+                                                                                        <div className="flex items-center -space-x-2">
+                                                                                            {hasBLeader ? bLeaders.slice(0, 2).map((leader) => (
+                                                                                                <span key={`history-leader-b-avatar-${label}-${leader.id}`} className="w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center">
+                                                                                                    {leader.pictureUrl ? (
+                                                                                                        <img src={leader.pictureUrl} alt={leader.name} className="w-full h-full object-cover" />
+                                                                                                    ) : (
+                                                                                                        <span className="text-[10px] font-black text-slate-200">{(leader.name || '?').slice(0, 1).toUpperCase()}</span>
+                                                                                                    )}
+                                                                                                </span>
+                                                                                            )) : null}
+                                                                                        </div>
+                                                                                        <div className="mt-1 text-[10px] text-slate-400 truncate max-w-[170px]">{hasBLeader ? bLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(' / ') : '-'}</div>
                                                                                     </div>
                                                                                 </div>
                                                                             </div>
@@ -7225,9 +10722,10 @@
                                                                 <tr className="bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800">
                                                                     <th className="py-2.5 px-3">Player</th>
                                                                     <th className="py-2.5 px-2 text-center text-rose-300">Status</th>
+                                                                    <th className="py-2.5 px-2 text-center text-emerald-300">MIN</th>
                                                                     <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
-                                                                    <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG%</th>
-                                                                    <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3P%</th>
+                                                                    <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
+                                                                    <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
                                                                     <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
@@ -7244,30 +10742,52 @@
                                                                         const pPct = computeShootingPercentages(pstats);
                                                                         const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
                                                                         const hasSavedRow = Boolean(game.playerStats?.[player.id]);
+                                                                        const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(pstats[field] || 0) > 0);
                                                                         const isDnp = isExplicitDnp || !hasSavedRow;
+                                                                        return { player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp };
+                                                                    })
+                                                                    .sort((a, b) => {
+                                                                        if (a.isDnp !== b.isDnp) return Number(a.isDnp) - Number(b.isDnp);
+                                                                        return Number(a.player.number || 0) - Number(b.player.number || 0);
+                                                                    })
+                                                                    .map(({ player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp }) => {
+                                                                        const canSetDnp = !isExplicitDnp && !hasTrackedStats;
                                                                         return (
-                                                                            <tr key={player.id} className="hover:bg-slate-855/20">
+                                                                            <tr key={player.id} className={`hover:bg-slate-855/20 ${isDnp ? 'opacity-70' : ''}`}>
                                                                                 <td className="py-2 px-3 text-white font-bold font-sans">
                                                                                     <span className="text-slate-500 font-mono mr-1.5 text-[10px]">#{player.number}</span>
                                                                                     {player.name}
                                                                                 </td>
                                                                                 <td className="py-2 px-2 text-center">
-                                                                                    {isDnp ? (
-                                                                                        <span className="inline-flex px-1.5 py-0.5 rounded border border-rose-500/60 bg-rose-500/15 text-rose-300 text-[10px] font-black uppercase tracking-wide">DNP</span>
-                                                                                    ) : (
-                                                                                        <span className="inline-flex px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px] font-black uppercase tracking-wide">Played</span>
-                                                                                    )}
+                                                                                    <div className="inline-flex items-center gap-1.5">
+                                                                                        {isDnp ? (
+                                                                                            <span className="inline-flex px-1.5 py-0.5 rounded border border-rose-500/60 bg-rose-500/15 text-rose-300 text-[10px] font-black uppercase tracking-wide">DNP</span>
+                                                                                        ) : (
+                                                                                            <span className="inline-flex px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px] font-black uppercase tracking-wide">Played</span>
+                                                                                        )}
+                                                                                        {isLoggedIn && hasSavedRow && canSetDnp && (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => handleToggleHistoricDnp(game.id, player.id)}
+                                                                                                className="inline-flex px-1.5 py-0.5 rounded border text-[10px] font-black uppercase tracking-wide transition-colors border-rose-500/45 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 cursor-pointer"
+                                                                                                title="Set this player to DNP for this game"
+                                                                                            >
+                                                                                                Set DNP
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </td>
-                                                                                <td className="py-2 px-2 text-center text-orange-400 font-black">{pstats.pts}</td>
-                                                                                <td className="py-2 px-2 text-center text-emerald-400 font-bold">{pPct.fgPct}</td>
-                                                                                <td className="py-2 px-2 text-center text-cyan-400 font-bold">{pPct.fg3Pct}</td>
-                                                                                <td className="py-2 px-2 text-center text-pink-400 font-bold">{pPct.ftPct}</td>
-                                                                                <td className="py-2 px-2 text-center text-emerald-400">{pstats.reb}</td>
-                                                                                <td className="py-2 px-2 text-center text-blue-400">{pstats.ast}</td>
-                                                                                <td className="py-2 px-2 text-center text-teal-400 font-mono">{(pstats.stl || 0)}</td>
-                                                                                <td className="py-2 px-2 text-center text-violet-400 font-mono">{(pstats.blk || 0)}</td>
-                                                                                <td className="py-2 px-2 text-center text-amber-500 font-mono">{pstats.to || 0}</td>
-                                                                                <td className="py-2 px-2 text-center text-red-400 font-mono">{pstats.pf}</td>
+                                                                                <td className="py-2 px-2 text-center text-emerald-300 font-bold">{isDnp ? '-' : (String(pstats.min || '').trim() || '-')}</td>
+                                                                                <td className="py-2 px-2 text-center text-orange-400 font-black">{isDnp ? '—' : pstats.pts}</td>
+                                                                                <td className="py-2 px-2 text-center text-emerald-400 font-bold">{isDnp ? '—' : pPct.fgMadeAtt}</td>
+                                                                                <td className="py-2 px-2 text-center text-cyan-400 font-bold">{isDnp ? '—' : pPct.fg3MadeAtt}</td>
+                                                                                <td className="py-2 px-2 text-center text-pink-400 font-bold">{isDnp ? '—' : pPct.ftPct}</td>
+                                                                                <td className="py-2 px-2 text-center text-emerald-400">{isDnp ? '—' : pstats.reb}</td>
+                                                                                <td className="py-2 px-2 text-center text-blue-400">{isDnp ? '—' : pstats.ast}</td>
+                                                                                <td className="py-2 px-2 text-center text-teal-400 font-mono">{isDnp ? '—' : (pstats.stl || 0)}</td>
+                                                                                <td className="py-2 px-2 text-center text-violet-400 font-mono">{isDnp ? '—' : (pstats.blk || 0)}</td>
+                                                                                <td className="py-2 px-2 text-center text-amber-500 font-mono">{isDnp ? '—' : (pstats.to || 0)}</td>
+                                                                                <td className="py-2 px-2 text-center text-red-400 font-mono">{isDnp ? '—' : pstats.pf}</td>
                                                                             </tr>
                                                                         );
                                                                     })}
@@ -7290,9 +10810,10 @@
                                                                 <tr className="bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800">
                                                                     <th className="py-2.5 px-3">Player</th>
                                                                     <th className="py-2.5 px-2 text-center text-rose-300">Status</th>
+                                                                    <th className="py-2.5 px-2 text-center text-emerald-300">MIN</th>
                                                                     <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
-                                                                    <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG%</th>
-                                                                    <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3P%</th>
+                                                                    <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
+                                                                    <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
                                                                     <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
@@ -7309,30 +10830,52 @@
                                                                         const pPct = computeShootingPercentages(pstats);
                                                                         const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
                                                                         const hasSavedRow = Boolean(game.playerStats?.[player.id]);
+                                                                        const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(pstats[field] || 0) > 0);
                                                                         const isDnp = isExplicitDnp || !hasSavedRow;
+                                                                        return { player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp };
+                                                                    })
+                                                                    .sort((a, b) => {
+                                                                        if (a.isDnp !== b.isDnp) return Number(a.isDnp) - Number(b.isDnp);
+                                                                        return Number(a.player.number || 0) - Number(b.player.number || 0);
+                                                                    })
+                                                                    .map(({ player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp }) => {
+                                                                        const canSetDnp = !isExplicitDnp && !hasTrackedStats;
                                                                         return (
-                                                                            <tr key={player.id} className="hover:bg-slate-855/20">
+                                                                            <tr key={player.id} className={`hover:bg-slate-855/20 ${isDnp ? 'opacity-70' : ''}`}>
                                                                                 <td className="py-2 px-3 text-white font-bold font-sans">
                                                                                     <span className="text-slate-500 font-mono mr-1.5 text-[10px]">#{player.number}</span>
                                                                                     {player.name}
                                                                                 </td>
                                                                                 <td className="py-2 px-2 text-center">
-                                                                                    {isDnp ? (
-                                                                                        <span className="inline-flex px-1.5 py-0.5 rounded border border-rose-500/60 bg-rose-500/15 text-rose-300 text-[10px] font-black uppercase tracking-wide">DNP</span>
-                                                                                    ) : (
-                                                                                        <span className="inline-flex px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px] font-black uppercase tracking-wide">Played</span>
-                                                                                    )}
+                                                                                    <div className="inline-flex items-center gap-1.5">
+                                                                                        {isDnp ? (
+                                                                                            <span className="inline-flex px-1.5 py-0.5 rounded border border-rose-500/60 bg-rose-500/15 text-rose-300 text-[10px] font-black uppercase tracking-wide">DNP</span>
+                                                                                        ) : (
+                                                                                            <span className="inline-flex px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px] font-black uppercase tracking-wide">Played</span>
+                                                                                        )}
+                                                                                        {isLoggedIn && hasSavedRow && canSetDnp && (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => handleToggleHistoricDnp(game.id, player.id)}
+                                                                                                className="inline-flex px-1.5 py-0.5 rounded border text-[10px] font-black uppercase tracking-wide transition-colors border-rose-500/45 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 cursor-pointer"
+                                                                                                title="Set this player to DNP for this game"
+                                                                                            >
+                                                                                                Set DNP
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </td>
-                                                                                <td className="py-2 px-2 text-center text-orange-400 font-black">{pstats.pts}</td>
-                                                                                <td className="py-2 px-2 text-center text-emerald-400 font-bold">{pPct.fgPct}</td>
-                                                                                <td className="py-2 px-2 text-center text-cyan-400 font-bold">{pPct.fg3Pct}</td>
-                                                                                <td className="py-2 px-2 text-center text-pink-400 font-bold">{pPct.ftPct}</td>
-                                                                                <td className="py-2 px-2 text-center text-emerald-400">{pstats.reb}</td>
-                                                                                <td className="py-2 px-2 text-center text-blue-400">{pstats.ast}</td>
-                                                                                <td className="py-2 px-2 text-center text-teal-400">{(pstats.stl || 0)}</td>
-                                                                                <td className="py-2 px-2 text-center text-violet-400">{(pstats.blk || 0)}</td>
-                                                                                <td className="py-2 px-2 text-center text-amber-500">{pstats.to}</td>
-                                                                                <td className="py-2 px-2 text-center text-red-400">{pstats.pf}</td>
+                                                                                <td className="py-2 px-2 text-center text-emerald-300 font-bold">{isDnp ? '-' : (String(pstats.min || '').trim() || '-')}</td>
+                                                                                <td className="py-2 px-2 text-center text-orange-400 font-black">{isDnp ? '—' : pstats.pts}</td>
+                                                                                <td className="py-2 px-2 text-center text-emerald-400 font-bold">{isDnp ? '—' : pPct.fgMadeAtt}</td>
+                                                                                <td className="py-2 px-2 text-center text-cyan-400 font-bold">{isDnp ? '—' : pPct.fg3MadeAtt}</td>
+                                                                                <td className="py-2 px-2 text-center text-pink-400 font-bold">{isDnp ? '—' : pPct.ftPct}</td>
+                                                                                <td className="py-2 px-2 text-center text-emerald-400">{isDnp ? '—' : pstats.reb}</td>
+                                                                                <td className="py-2 px-2 text-center text-blue-400">{isDnp ? '—' : pstats.ast}</td>
+                                                                                <td className="py-2 px-2 text-center text-teal-400">{isDnp ? '—' : (pstats.stl || 0)}</td>
+                                                                                <td className="py-2 px-2 text-center text-violet-400">{isDnp ? '—' : (pstats.blk || 0)}</td>
+                                                                                <td className="py-2 px-2 text-center text-amber-500">{isDnp ? '—' : (pstats.to || 0)}</td>
+                                                                                <td className="py-2 px-2 text-center text-red-400">{isDnp ? '—' : pstats.pf}</td>
                                                                             </tr>
                                                                         );
                                                                     })}
@@ -7352,7 +10895,7 @@
 
                                                         {Array.isArray(game.gameLog) && game.gameLog.length > 0 ? (
                                                             <div className="space-y-1.5 text-xs md:text-sm max-h-72 overflow-auto pr-1">
-                                                                {game.gameLog.map((log, idx) => {
+                                                                {(game.gameLog || []).filter((log) => !log?.hiddenFromLog).map((log, idx) => {
                                                                     const isSubEvent = typeof log.text === 'string' && log.text.includes('SUB:');
                                                                     const isHomeEvent = log.isTeamA === true;
                                                                     const isAwayEvent = log.isTeamA === false;
@@ -7871,10 +11414,29 @@
                                 <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-1"><Icons.ArrowRightLeft /> Substitute Athlete</h3>
                                 <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
                                     {(() => {
-                                        const benchIds = subTargetPlayer.team === 'A' ? teamABench : teamBBench;
+                                        const benchIds = (subTargetPlayer.team === 'A' ? teamABench : teamBBench)
+                                            .filter((benchId) => !dnpPlayers.includes(benchId));
                                         const teamObj = subTargetPlayer.team === 'A' ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
-                                        return benchIds.map(benchId => {
-                                            const p = teamObj?.players.find(x => x.id === benchId);
+                                        const targetPlayer = teamObj?.players.find((x) => x.id === subTargetPlayer.id);
+                                        const targetPositions = normalizePlayerPositions(targetPlayer);
+
+                                        const benchEntries = benchIds.map((benchId) => {
+                                            const p = teamObj?.players.find((x) => x.id === benchId);
+                                            const playerPositions = normalizePlayerPositions(p);
+                                            const positionMatch = targetPositions.length > 0
+                                                && playerPositions.some((pos) => targetPositions.includes(pos));
+                                            return { benchId, p, positionMatch };
+                                        });
+
+                                        const hasAnyPositionMatch = benchEntries.some((entry) => entry.positionMatch);
+                                        const orderedBenchEntries = hasAnyPositionMatch
+                                            ? [
+                                                ...benchEntries.filter((entry) => entry.positionMatch),
+                                                ...benchEntries.filter((entry) => !entry.positionMatch)
+                                            ]
+                                            : benchEntries;
+
+                                        return orderedBenchEntries.map(({ benchId, p }) => {
                                             const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
                                             const initials = (p?.name || '?')
                                                 .split(/[\s,]+/)
@@ -7908,7 +11470,7 @@
                                         });
                                     })()}
                                 </div>
-                                <button onClick={() => setShowSubstitutionModal(false)} className="w-full mt-3 py-2 bg-slate-950 text-slate-400 border border-slate-855 text-xs rounded-xl cursor-pointer">Cancel</button>
+                                <button onClick={handleCancelSubstitutionModal} className="w-full mt-3 py-2 bg-slate-950 text-slate-400 border border-slate-855 text-xs rounded-xl cursor-pointer">Cancel</button>
                             </div>
                         </div>
                     )}
@@ -7924,8 +11486,9 @@
                                         const benchIds = isTeamA ? teamABench : teamBBench;
                                         const teamObj = isTeamA ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
                                         const rosterIds = (teamObj?.players || []).map((p) => p.id);
-                                        const fallbackCandidates = rosterIds.filter((id) => !lineupIds.includes(id));
-                                        const candidateIds = benchIds.length > 0 ? benchIds : fallbackCandidates;
+                                        const fallbackCandidates = rosterIds.filter((id) => !lineupIds.includes(id) && !dnpPlayers.includes(id));
+                                        const candidateIds = (benchIds.length > 0 ? benchIds : fallbackCandidates)
+                                            .filter((id) => !dnpPlayers.includes(id));
                                         const availableSlots = Math.max(0, 5 - lineupIds.length);
                                         return candidateIds.map((benchId) => {
                                             const p = teamObj?.players.find((x) => x.id === benchId);
@@ -7980,11 +11543,7 @@
                                 <div className="mt-3 grid grid-cols-2 gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            setShowAddFromBenchModal(false);
-                                            setAddFromBenchTeam(null);
-                                            setAddFromBenchSelection([]);
-                                        }}
+                                        onClick={handleCancelAddFromBenchModal}
                                         className="py-2 bg-slate-950 text-slate-400 border border-slate-855 text-xs rounded-xl cursor-pointer"
                                     >
                                         Cancel
@@ -8039,6 +11598,52 @@
                         </div>
                     )}
 
+                    {isLoggedIn && canOperateLive && liveLogEditTarget && (
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-5 shadow-2xl relative my-auto space-y-3">
+                                <div>
+                                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Edit Live Log Action</h3>
+                                    <p className="mt-1 text-[11px] text-slate-400">Current-period entries only. Prior periods remain locked.</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 text-[11px] text-slate-300">
+                                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Selected Log</div>
+                                    <div className="break-words">{String(liveLogEditTarget.text || '').replace(/^\[(HOME|AWAY)\]\s*/, '')}</div>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Action</label>
+                                    <select
+                                        value={editingLiveLogActionId}
+                                        onChange={(e) => setEditingLiveLogActionId(e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-white text-xs"
+                                    >
+                                        {editableLiveStatActions.map((action) => (
+                                            <option key={`live-edit-action-${action.id}`} value={action.id}>
+                                                {action.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 pt-1">
+                                    <button
+                                        type="button"
+                                        onClick={handleCloseLiveLogEdit}
+                                        className="py-2 bg-slate-950 text-slate-400 border border-slate-800 text-xs rounded-xl cursor-pointer"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleApplyLiveLogEdit}
+                                        disabled={!editingLiveLogActionId}
+                                        className="py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                                    >
+                                        Apply Edit
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* FOUL WARNING MODAL OVERLAY */}
                     {foulAlert && (
                         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
@@ -8069,14 +11674,29 @@
                         </div>
                     )}
 
+                    {periodEndAlert && (
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+                            <div className="bg-slate-900 border border-orange-500/60 p-6 rounded-2xl w-full max-w-md shadow-2xl relative text-center my-auto">
+                                <h3 className="text-lg font-black text-white uppercase tracking-wider mb-2">{periodEndAlert.title}</h3>
+                                <p className="text-sm text-slate-200 leading-relaxed mb-4">{periodEndAlert.text}</p>
+                                <button
+                                    onClick={() => setPeriodEndAlert(null)}
+                                    className="w-full py-2.5 rounded-xl text-xs font-bold text-white bg-orange-600 hover:bg-orange-500 transition-colors cursor-pointer"
+                                >
+                                    Acknowledge
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {confirmDialog && (
                         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
                             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative">
                                 <h3 className="text-md font-extrabold text-white mb-2">{confirmDialog.title}</h3>
                                 <p className="text-xs text-slate-400 mb-4">{confirmDialog.text}</p>
                                 <div className="flex gap-3 text-xs font-bold">
-                                    <button onClick={() => setConfirmDialog(null)} className="flex-1 py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer">Cancel</button>
-                                    <button onClick={confirmDialog.onConfirm} className="flex-1 py-2 bg-red-600 text-white rounded-xl cursor-pointer">Confirm</button>
+                                    <button onClick={() => setConfirmDialog(null)} className="flex-1 py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer">{confirmDialog.cancelLabel || 'Cancel'}</button>
+                                    <button onClick={confirmDialog.onConfirm} className="flex-1 py-2 bg-red-600 text-white rounded-xl cursor-pointer">{confirmDialog.confirmLabel || 'Confirm'}</button>
                                 </div>
                             </div>
                         </div>

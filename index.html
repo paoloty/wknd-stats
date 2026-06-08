@@ -65,7 +65,203 @@
     <div id="root"></div>
     <!-- Persistence now handled by Node + SQLite backend APIs -->
 
-        <script src="/app.bundle.js"></script>
+        <script src="app.bundle.js?v=20260609-potg-btn-1"></script>
+        <script>
+            (function () {
+                function parseStatsFromPotgCard(card) {
+                    var stats = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0 };
+                    var labels = card.querySelectorAll('div.text-\[9px\].uppercase');
+                    labels.forEach(function (labelNode) {
+                        var label = (labelNode.textContent || '').trim().toUpperCase();
+                        var valueNode = labelNode.parentElement ? labelNode.parentElement.querySelector('div.mt-1') : null;
+                        var value = Number.parseInt(((valueNode && valueNode.textContent) || '0').replace(/[^0-9-]/g, ''), 10);
+                        if (!Number.isFinite(value)) value = 0;
+                        if (label === 'PTS') stats.pts = value;
+                        if (label === 'REB') stats.reb = value;
+                        if (label === 'AST') stats.ast = value;
+                        if (label === 'STL') stats.stl = value;
+                        if (label === 'BLK') stats.blk = value;
+                        if (label === 'TO') stats.to = value;
+                    });
+                    return stats;
+                }
+
+                function normalizeName(value) {
+                    return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+                }
+
+                function findPlayerByPotgLine(teamA, teamB, potgLine, teamNameHint) {
+                    var line = String((potgLine && potgLine.textContent) || '').trim();
+                    var numberMatch = line.match(/^#\s*([^\s]+)/);
+                    var jersey = numberMatch ? String(numberMatch[1]).trim() : '';
+                    var playerName = line.replace(/^#\s*[^\s]+\s*/, '').trim();
+                    var badge = potgLine.querySelector('span');
+                    if (badge && badge.textContent) {
+                        playerName = playerName.replace(badge.textContent.trim(), '').trim();
+                    }
+
+                    var teams = [teamA, teamB].filter(Boolean);
+                    if (teamNameHint) {
+                        teams.sort(function (a, b) {
+                            var am = String((a && a.name) || '').trim().toLowerCase() === teamNameHint ? 1 : 0;
+                            var bm = String((b && b.name) || '').trim().toLowerCase() === teamNameHint ? 1 : 0;
+                            return bm - am;
+                        });
+                    }
+
+                    var wanted = normalizeName(playerName);
+                    for (var t = 0; t < teams.length; t += 1) {
+                        var team = teams[t];
+                        var players = Array.isArray(team.players) ? team.players : [];
+                        for (var i = 0; i < players.length; i += 1) {
+                            var p = players[i];
+                            var jerseyOk = !jersey || String(p.number || '').trim() === jersey;
+                            if (!jerseyOk) continue;
+                            if (!wanted) return { player: p, team: team };
+                            if (normalizeName(p.name) === wanted || normalizeName(p.name).indexOf(wanted) >= 0 || wanted.indexOf(normalizeName(p.name)) >= 0) {
+                                return { player: p, team: team };
+                            }
+                        }
+                    }
+                    return null;
+                }
+
+                async function generatePotgWriteup(button, potgCard, textNode) {
+                    var gameCard = button.closest('div.bg-slate-900.border.border-slate-800.rounded-2xl');
+                    if (!gameCard) return;
+
+                    var matchIdNode = Array.from(gameCard.querySelectorAll('span')).find(function (node) {
+                        return (node.textContent || '').indexOf('Match ID:') >= 0;
+                    });
+                    var gameId = matchIdNode ? String(matchIdNode.textContent).replace('Match ID:', '').trim() : '';
+                    if (!gameId) {
+                        alert('Could not find Match ID for this game card.');
+                        return;
+                    }
+
+                    var role = String(localStorage.getItem('wknd_access_role') || 'viewer');
+                    if (role === 'viewer') {
+                        alert('Login as operator/admin first to regenerate POTG writeup.');
+                        return;
+                    }
+
+                    button.disabled = true;
+                    var oldLabel = button.textContent;
+                    button.textContent = 'Generating POTG Writeup...';
+
+                    try {
+                        var stateRes = await fetch('/api/state', { cache: 'no-store' });
+                        var state = await stateRes.json();
+                        var games = Array.isArray(state.games) ? state.games : [];
+                        var teams = Array.isArray(state.teams) ? state.teams : [];
+                        var game = games.find(function (g) { return String(g.id) === gameId; });
+                        if (!game) throw new Error('Game not found in server state.');
+
+                        var teamA = teams.find(function (t) { return String(t.id) === String(game.teamAId); });
+                        var teamB = teams.find(function (t) { return String(t.id) === String(game.teamBId); });
+
+                        var potgLine = potgCard.querySelector('div.text-sm.font-extrabold.text-white');
+                        var badge = potgLine ? potgLine.querySelector('span') : null;
+                        var teamNameHint = badge ? String(badge.textContent || '').trim().toLowerCase() : '';
+                        var resolved = findPlayerByPotgLine(teamA, teamB, potgLine, teamNameHint);
+                        if (!resolved || !resolved.player) throw new Error('Could not resolve POTG player from card.');
+
+                        var stats = parseStatsFromPotgCard(potgCard);
+                        var payload = {
+                            game: {
+                                id: game.id,
+                                date: game.date,
+                                teamAId: game.teamAId,
+                                teamBId: game.teamBId,
+                                teamAName: game.teamAName,
+                                teamBName: game.teamBName,
+                                teamAScore: Number(game.teamAScore || 0),
+                                teamBScore: Number(game.teamBScore || 0)
+                            },
+                            playerOfTheGame: {
+                                id: resolved.player.id,
+                                name: resolved.player.name,
+                                number: resolved.player.number,
+                                teamId: resolved.team.id,
+                                teamName: resolved.team.name,
+                                stats: stats
+                            }
+                        };
+
+                        var writeupRes = await fetch('/api/generate-potg-writeup', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        var writeupJson = await writeupRes.json();
+                        if (!writeupRes.ok) throw new Error(writeupJson.error || 'Failed to generate POTG writeup.');
+                        var writeup = String(writeupJson.writeup || '').trim();
+                        if (!writeup) throw new Error('Generated POTG writeup is empty.');
+
+                        textNode.textContent = writeup;
+
+                        var updatedGames = games.map(function (g) {
+                            if (String(g.id) !== String(game.id)) return g;
+                            var next = Object.assign({}, g);
+                            next.potgWriteup = writeup;
+                            return next;
+                        });
+
+                        await fetch('/api/state', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ teams: teams, games: updatedGames })
+                        });
+
+                        button.textContent = 'Regenerate POTG Writeup';
+                    } catch (err) {
+                        alert((err && err.message) ? err.message : 'Failed to regenerate POTG writeup.');
+                        button.textContent = oldLabel;
+                    } finally {
+                        button.disabled = false;
+                    }
+                }
+
+                function injectPotgButtons() {
+                    var potgCards = Array.from(document.querySelectorAll('div.bg-slate-950\/70.border.border-slate-800.rounded-xl.p-4'));
+                    potgCards.forEach(function (card) {
+                        var title = card.querySelector('div.text-\[10px\].uppercase');
+                        if (!title || String(title.textContent || '').trim().toLowerCase() !== 'player of the game') return;
+
+                        var textNode = card.querySelector('div.text-\[11px\].text-slate-400.mt-1');
+                        if (!textNode) return;
+                        if (card.querySelector('[data-potg-fallback-btn="1"]')) return;
+
+                        var role = String(localStorage.getItem('wknd_access_role') || 'viewer');
+                        var hasWriteup = String(textNode.textContent || '').trim() && String(textNode.textContent || '').toLowerCase().indexOf('per-style game rating') < 0;
+
+                        var wrap = document.createElement('div');
+                        wrap.className = 'mt-2';
+
+                        var button = document.createElement('button');
+                        button.type = 'button';
+                        button.setAttribute('data-potg-fallback-btn', '1');
+                        button.className = 'w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-bold border border-cyan-500/40 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed';
+                        button.textContent = role === 'viewer'
+                            ? 'Login to Generate POTG Writeup'
+                            : (hasWriteup ? 'Regenerate POTG Writeup' : 'Generate POTG Writeup');
+
+                        button.addEventListener('click', function () {
+                            generatePotgWriteup(button, card, textNode);
+                        });
+
+                        wrap.appendChild(button);
+                        textNode.insertAdjacentElement('afterend', wrap);
+                    });
+                }
+
+                var observer = new MutationObserver(function () { injectPotgButtons(); });
+                observer.observe(document.documentElement, { childList: true, subtree: true });
+                document.addEventListener('DOMContentLoaded', injectPotgButtons);
+                window.addEventListener('load', injectPotgButtons);
+                setInterval(injectPotgButtons, 1200);
+            })();
+        </script>
 
 </body>
 </html>
