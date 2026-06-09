@@ -841,6 +841,35 @@
                 return Number.isFinite(q) && q >= 1 ? q : 1;
             };
 
+            const getEffectiveQuarterFromLogEntry = (entry, logs = gameLog) => {
+                const explicitQuarter = Number.parseInt(entry?.quarter, 10);
+                if (Number.isFinite(explicitQuarter) && explicitQuarter >= 1) return explicitQuarter;
+
+                const targetId = entry?.id;
+                if (!targetId || !Array.isArray(logs) || logs.length === 0) return 1;
+
+                let inferredQuarter = 1;
+                for (let idx = logs.length - 1; idx >= 0; idx -= 1) {
+                    const candidate = logs[idx];
+                    const candidateExplicitQuarter = Number.parseInt(candidate?.quarter, 10);
+                    const candidateQuarter = (Number.isFinite(candidateExplicitQuarter) && candidateExplicitQuarter >= 1)
+                        ? candidateExplicitQuarter
+                        : inferredQuarter;
+
+                    if (candidate?.id === targetId) {
+                        return candidateQuarter;
+                    }
+
+                    if (candidate?.kind === 'meta' && candidate?.metaType === 'quarterEnd') {
+                        inferredQuarter = Math.max(inferredQuarter, candidateQuarter) + 1;
+                    } else {
+                        inferredQuarter = Math.max(inferredQuarter, candidateQuarter);
+                    }
+                }
+
+                return 1;
+            };
+
             const getPeriodLabel = (quarter) => {
                 const q = Number.parseInt(quarter, 10) || 1;
                 return q <= 4 ? `Q${q}` : `OT${q - 4}`;
@@ -851,6 +880,15 @@
                 return q > 4 ? OVERTIME_PERIOD_SECONDS : REGULATION_PERIOD_SECONDS;
             };
 
+            const toPercent = (made, attempts) => {
+                const safeAttempts = Number(attempts) || 0;
+                if (safeAttempts <= 0) return 0;
+                return ((Number(made) || 0) / safeAttempts) * 100;
+            };
+
+            const formatPercent = (made, attempts) => `${toPercent(made, attempts).toFixed(1)}%`;
+            const formatMadeAttempts = (made, attempts) => `${Number(made) || 0}/${Number(attempts) || 0}`;
+
             const getLogLockReason = (entry, ordinal) => {
                 const isPeriodEnd = entry?.kind === 'meta' && entry?.metaType === 'quarterEnd';
                 const isCheckpoint = Number(ordinal) > 0 && Number(ordinal) % 10 === 0;
@@ -860,12 +898,17 @@
                 return '';
             };
 
-            const isProtectedLogEntry = (entry, finalizedPeriods = null) => {
+            const isProtectedLogEntry = (entry, finalizedPeriods = null, logs = gameLog) => {
                 if (!entry || typeof entry !== 'object') return false;
-                if (entry.lockProtected === true) return true;
+                if (entry.lockProtected === true) {
+                    const reason = String(entry.lockReason || '');
+                    if (reason && !reason.includes('checkpoint10')) {
+                        return true;
+                    }
+                }
                 if (entry.kind === 'meta' && entry.metaType === 'quarterEnd') return true;
                 if (finalizedPeriods instanceof Set && finalizedPeriods.size > 0) {
-                    return finalizedPeriods.has(getQuarterFromEvent(entry));
+                    return finalizedPeriods.has(getEffectiveQuarterFromLogEntry(entry, logs));
                 }
                 return false;
             };
@@ -4583,7 +4626,7 @@
                 const entry = gameLog.find(log => log.id === logId);
                 if (!entry) return;
 
-                const entryQuarter = Number(getQuarterFromEvent(entry));
+                const entryQuarter = Number(getEffectiveQuarterFromLogEntry(entry, gameLog));
                 const isCurrentPeriodEntry = entryQuarter === Number(currentQuarter);
                 if (!isCurrentPeriodEntry) {
                     showToast('Delete is only allowed for the current period.', 'info');
@@ -4686,7 +4729,7 @@
                     return;
                 }
 
-                if (Number(getQuarterFromEvent(targetEntry)) !== Number(currentQuarter)) {
+                if (Number(getEffectiveQuarterFromLogEntry(targetEntry, gameLog)) !== Number(currentQuarter)) {
                     showToast('Edit is only allowed for the current period.', 'info');
                     return;
                 }
@@ -4724,7 +4767,7 @@
                     return;
                 }
 
-                if (Number(getQuarterFromEvent(liveLogEditTarget)) !== Number(currentQuarter)) {
+                if (Number(getEffectiveQuarterFromLogEntry(liveLogEditTarget, gameLog)) !== Number(currentQuarter)) {
                     showToast('Edit is only allowed for the current period.', 'info');
                     handleCloseLiveLogEdit();
                     return;
@@ -5816,37 +5859,7 @@
                 await saveNewGameState(newGame, updatedTeams);
 
                 // End the active live session immediately when a game is finalized.
-                localStorage.removeItem('active_live_session');
-                hadLiveSessionRef.current = false;
-                queueActiveSessionSync('delete');
-                flushPendingActiveSessionSync();
-
-                setIsGameLive(false);
-                setTeamAId("");
-                setTeamBId("");
-                setTeamAScore(0);
-                setTeamBScore(0);
-                setCurrentQuarter(1);
-                setIsPlayPaused(false);
-                setPeriodClockSeconds(getPeriodDurationSeconds(1));
-                setIsPeriodClockRunning(false);
-                setPendingPeriodActionMode(null);
-                setAwaitingOvertimeDecision(false);
-                setAwaitingPeriodStart(false);
-                setTeamALineup([]);
-                setTeamABench([]);
-                setTeamBLineup([]);
-                setTeamBBench([]);
-                setLiveStats({});
-                setLivePlayerSeconds({});
-                setLiveGameSnapshot(null);
-                setPeriodSnapshots([]);
-                setGameLog([]);
-                setLoggedHistory([]);
-                setPlayedPlayers([]);
-                setDnpPlayers([]);
-                setLineupRevision(0);
-                lineupRevisionRef.current = 0;
+                await clearLiveSessionEverywhere({ keepTeamSelection: false });
 
                 setActiveTab('history');
                 setSelectedHistoryGameId(newGame.id);
@@ -8609,7 +8622,7 @@
                                                         const isSubEvent = log?.kind === 'sub' || (typeof log.text === 'string' && log.text.includes('SUB:'));
                                                         const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
                                                         const isConvertBlocked = isProtectedLogEntry(log, finalizedPeriods);
-                                                        const isCurrentPeriodLog = Number(getQuarterFromEvent(log)) === Number(currentQuarter);
+                                                        const isCurrentPeriodLog = Number(getEffectiveQuarterFromLogEntry(log, gameLog)) === Number(currentQuarter);
                                                         const isStatLog = isEditableStatLogEntry(log);
                                                         const canDeleteLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
                                                         const canEditLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
@@ -8984,6 +8997,38 @@
                                                         };
                                                         const liveTeamATotals = summarizeGameTeamStats(liveHomeTeam, livePseudoGame);
                                                         const liveTeamBTotals = summarizeGameTeamStats(liveAwayTeam, livePseudoGame);
+                                                        const liveTeamAFgMade = (Number(liveTeamATotals.fg2m) || 0) + (Number(liveTeamATotals.fg3m) || 0);
+                                                        const liveTeamBFgMade = (Number(liveTeamBTotals.fg2m) || 0) + (Number(liveTeamBTotals.fg3m) || 0);
+                                                        const liveTeamAFgMiss = (Number(liveTeamATotals.fg2m_miss) || 0) + (Number(liveTeamATotals.fg3m_miss) || 0);
+                                                        const liveTeamBFgMiss = (Number(liveTeamBTotals.fg2m_miss) || 0) + (Number(liveTeamBTotals.fg3m_miss) || 0);
+                                                        const liveTeamAFgAtt = liveTeamAFgMade + liveTeamAFgMiss;
+                                                        const liveTeamBFgAtt = liveTeamBFgMade + liveTeamBFgMiss;
+                                                        const liveTeamA3PMade = Number(liveTeamATotals.fg3m) || 0;
+                                                        const liveTeamB3PMade = Number(liveTeamBTotals.fg3m) || 0;
+                                                        const liveTeamA3PMiss = Number(liveTeamATotals.fg3m_miss) || 0;
+                                                        const liveTeamB3PMiss = Number(liveTeamBTotals.fg3m_miss) || 0;
+                                                        const liveTeamA3PAtt = liveTeamA3PMade + liveTeamA3PMiss;
+                                                        const liveTeamB3PAtt = liveTeamB3PMade + liveTeamB3PMiss;
+                                                        const liveTeamAFtMade = Number(liveTeamATotals.ftm) || 0;
+                                                        const liveTeamBFtMade = Number(liveTeamBTotals.ftm) || 0;
+                                                        const liveTeamAFtMiss = Number(liveTeamATotals.ft_miss) || 0;
+                                                        const liveTeamBFtMiss = Number(liveTeamBTotals.ft_miss) || 0;
+                                                        const liveTeamAFtAtt = liveTeamAFtMade + liveTeamAFtMiss;
+                                                        const liveTeamBFtAtt = liveTeamBFtMade + liveTeamBFtMiss;
+                                                        const liveComparisonRows = [
+                                                            { label: 'PTS', teamAValue: Math.round(Number(liveTeamATotals.pts) || 0), teamBValue: Math.round(Number(liveTeamBTotals.pts) || 0), teamACompare: Number(liveTeamATotals.pts) || 0, teamBCompare: Number(liveTeamBTotals.pts) || 0 },
+                                                            { label: 'FG', teamAValue: formatMadeAttempts(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatMadeAttempts(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: liveTeamAFgMade, teamBCompare: liveTeamBFgMade },
+                                                            { label: 'FG%', teamAValue: formatPercent(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatPercent(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: toPercent(liveTeamAFgMade, liveTeamAFgAtt), teamBCompare: toPercent(liveTeamBFgMade, liveTeamBFgAtt) },
+                                                            { label: '3PT', teamAValue: formatMadeAttempts(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatMadeAttempts(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: liveTeamA3PMade, teamBCompare: liveTeamB3PMade },
+                                                            { label: '3P%', teamAValue: formatPercent(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatPercent(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: toPercent(liveTeamA3PMade, liveTeamA3PAtt), teamBCompare: toPercent(liveTeamB3PMade, liveTeamB3PAtt) },
+                                                            { label: 'FT', teamAValue: formatMadeAttempts(liveTeamAFtMade, liveTeamAFtAtt), teamBValue: formatMadeAttempts(liveTeamBFtMade, liveTeamBFtAtt), teamACompare: liveTeamAFtMade, teamBCompare: liveTeamBFtMade },
+                                                            { label: 'REB', teamAValue: Math.round(Number(liveTeamATotals.reb) || 0), teamBValue: Math.round(Number(liveTeamBTotals.reb) || 0), teamACompare: Number(liveTeamATotals.reb) || 0, teamBCompare: Number(liveTeamBTotals.reb) || 0 },
+                                                            { label: 'AST', teamAValue: Math.round(Number(liveTeamATotals.ast) || 0), teamBValue: Math.round(Number(liveTeamBTotals.ast) || 0), teamACompare: Number(liveTeamATotals.ast) || 0, teamBCompare: Number(liveTeamBTotals.ast) || 0 },
+                                                            { label: 'STL', teamAValue: Math.round(Number(liveTeamATotals.stl) || 0), teamBValue: Math.round(Number(liveTeamBTotals.stl) || 0), teamACompare: Number(liveTeamATotals.stl) || 0, teamBCompare: Number(liveTeamBTotals.stl) || 0 },
+                                                            { label: 'BLK', teamAValue: Math.round(Number(liveTeamATotals.blk) || 0), teamBValue: Math.round(Number(liveTeamBTotals.blk) || 0), teamACompare: Number(liveTeamATotals.blk) || 0, teamBCompare: Number(liveTeamBTotals.blk) || 0 },
+                                                            { label: 'TO', teamAValue: Math.round(Number(liveTeamATotals.to) || 0), teamBValue: Math.round(Number(liveTeamBTotals.to) || 0), teamACompare: Number(liveTeamATotals.to) || 0, teamBCompare: Number(liveTeamBTotals.to) || 0 },
+                                                            { label: 'PF', teamAValue: Math.round(Number(liveTeamATotals.pf) || 0), teamBValue: Math.round(Number(liveTeamBTotals.pf) || 0), teamACompare: Number(liveTeamATotals.pf) || 0, teamBCompare: Number(liveTeamBTotals.pf) || 0 }
+                                                        ];
 
                                                         return (
                                                             <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3">
@@ -8999,40 +9044,29 @@
                                                                     </div>
 
                                                                     <div className="rounded-xl border border-slate-800/70 overflow-hidden">
-                                                                    {[
-                                                                        ['PTS', liveTeamATotals.pts, liveTeamBTotals.pts],
-                                                                        ['REB', liveTeamATotals.reb, liveTeamBTotals.reb],
-                                                                        ['AST', liveTeamATotals.ast, liveTeamBTotals.ast],
-                                                                        ['STL', liveTeamATotals.stl, liveTeamBTotals.stl],
-                                                                        ['BLK', liveTeamATotals.blk, liveTeamBTotals.blk],
-                                                                        ['TO', liveTeamATotals.to, liveTeamBTotals.to],
-                                                                        ['PF', liveTeamATotals.pf, liveTeamBTotals.pf],
-                                                                        ['FG', liveTeamATotals.fg2m + liveTeamATotals.fg3m, liveTeamBTotals.fg2m + liveTeamBTotals.fg3m],
-                                                                        ['3PT', liveTeamATotals.fg3m, liveTeamBTotals.fg3m],
-                                                                        ['FT', liveTeamATotals.ftm, liveTeamBTotals.ftm]
-                                                                    ].map(([label, teamAValue, teamBValue]) => {
-                                                                        const aNum = Number(teamAValue) || 0;
-                                                                        const bNum = Number(teamBValue) || 0;
+                                                                    {liveComparisonRows.map((row) => {
+                                                                        const aNum = Number(row.teamACompare) || 0;
+                                                                        const bNum = Number(row.teamBCompare) || 0;
                                                                         const totalValue = Math.max(aNum + bNum, 1);
                                                                         const aWidth = `${Math.min(100, (aNum / totalValue) * 100)}%`;
                                                                         const bWidth = `${Math.min(100, (bNum / totalValue) * 100)}%`;
 
                                                                         return (
-                                                                            <div key={`live-compare-${label}`} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
+                                                                            <div key={`live-compare-${row.label}`} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
                                                                                 <div className="relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2">
                                                                                     <div className="pointer-events-none absolute inset-0 flex justify-end">
                                                                                         <div className="h-full leader-bg-fill leader-bg-fill-left border-b" style={{ width: aWidth, backgroundColor: `${liveHomeTeam?.color || '#10b981'}0c`, borderBottomColor: `${liveHomeTeam?.color || '#10b981'}aa` }} />
                                                                                     </div>
-                                                                                    <span className="relative z-10 block text-right text-xl leading-none font-black text-slate-100">{Math.round(aNum)}</span>
+                                                                                    <span className="relative z-10 block text-right text-xl leading-none font-black text-slate-100">{row.teamAValue}</span>
                                                                                 </div>
                                                                                 <span className="inline-flex h-full items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5">
-                                                                                    <span className="inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100">{label}</span>
+                                                                                    <span className="inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100">{row.label}</span>
                                                                                 </span>
                                                                                 <div className="relative min-w-0 overflow-hidden px-3 py-2">
                                                                                     <div className="pointer-events-none absolute inset-0">
                                                                                         <div className="h-full leader-bg-fill leader-bg-fill-right border-b" style={{ width: bWidth, backgroundColor: `${liveAwayTeam?.color || '#ef4444'}0c`, borderBottomColor: `${liveAwayTeam?.color || '#ef4444'}aa` }} />
                                                                                     </div>
-                                                                                    <span className="relative z-10 block text-left text-xl leading-none font-black text-slate-100">{Math.round(bNum)}</span>
+                                                                                    <span className="relative z-10 block text-left text-xl leading-none font-black text-slate-100">{row.teamBValue}</span>
                                                                                 </div>
                                                                             </div>
                                                                         );
@@ -10098,6 +10132,38 @@
                                         const teamBObj = teams.find(t => t.id === game.teamBId);
                                         const teamATotals = summarizeGameTeamStats(teamAObj, game);
                                         const teamBTotals = summarizeGameTeamStats(teamBObj, game);
+                                        const teamAFgMade = (Number(teamATotals.fg2m) || 0) + (Number(teamATotals.fg3m) || 0);
+                                        const teamBFgMade = (Number(teamBTotals.fg2m) || 0) + (Number(teamBTotals.fg3m) || 0);
+                                        const teamAFgMiss = (Number(teamATotals.fg2m_miss) || 0) + (Number(teamATotals.fg3m_miss) || 0);
+                                        const teamBFgMiss = (Number(teamBTotals.fg2m_miss) || 0) + (Number(teamBTotals.fg3m_miss) || 0);
+                                        const teamAFgAtt = teamAFgMade + teamAFgMiss;
+                                        const teamBFgAtt = teamBFgMade + teamBFgMiss;
+                                        const teamA3PMade = Number(teamATotals.fg3m) || 0;
+                                        const teamB3PMade = Number(teamBTotals.fg3m) || 0;
+                                        const teamA3PMiss = Number(teamATotals.fg3m_miss) || 0;
+                                        const teamB3PMiss = Number(teamBTotals.fg3m_miss) || 0;
+                                        const teamA3PAtt = teamA3PMade + teamA3PMiss;
+                                        const teamB3PAtt = teamB3PMade + teamB3PMiss;
+                                        const teamAFtMade = Number(teamATotals.ftm) || 0;
+                                        const teamBFtMade = Number(teamBTotals.ftm) || 0;
+                                        const teamAFtMiss = Number(teamATotals.ft_miss) || 0;
+                                        const teamBFtMiss = Number(teamBTotals.ft_miss) || 0;
+                                        const teamAFtAtt = teamAFtMade + teamAFtMiss;
+                                        const teamBFtAtt = teamBFtMade + teamBFtMiss;
+                                        const historyComparisonRows = [
+                                            { label: 'PTS', teamAValue: Math.round(Number(teamATotals.pts) || 0), teamBValue: Math.round(Number(teamBTotals.pts) || 0), teamACompare: Number(teamATotals.pts) || 0, teamBCompare: Number(teamBTotals.pts) || 0 },
+                                            { label: 'FG', teamAValue: formatMadeAttempts(teamAFgMade, teamAFgAtt), teamBValue: formatMadeAttempts(teamBFgMade, teamBFgAtt), teamACompare: teamAFgMade, teamBCompare: teamBFgMade },
+                                            { label: 'FG%', teamAValue: formatPercent(teamAFgMade, teamAFgAtt), teamBValue: formatPercent(teamBFgMade, teamBFgAtt), teamACompare: toPercent(teamAFgMade, teamAFgAtt), teamBCompare: toPercent(teamBFgMade, teamBFgAtt) },
+                                            { label: '3PT', teamAValue: formatMadeAttempts(teamA3PMade, teamA3PAtt), teamBValue: formatMadeAttempts(teamB3PMade, teamB3PAtt), teamACompare: teamA3PMade, teamBCompare: teamB3PMade },
+                                            { label: '3P%', teamAValue: formatPercent(teamA3PMade, teamA3PAtt), teamBValue: formatPercent(teamB3PMade, teamB3PAtt), teamACompare: toPercent(teamA3PMade, teamA3PAtt), teamBCompare: toPercent(teamB3PMade, teamB3PAtt) },
+                                            { label: 'FT', teamAValue: formatMadeAttempts(teamAFtMade, teamAFtAtt), teamBValue: formatMadeAttempts(teamBFtMade, teamBFtAtt), teamACompare: teamAFtMade, teamBCompare: teamBFtMade },
+                                            { label: 'REB', teamAValue: Math.round(Number(teamATotals.reb) || 0), teamBValue: Math.round(Number(teamBTotals.reb) || 0), teamACompare: Number(teamATotals.reb) || 0, teamBCompare: Number(teamBTotals.reb) || 0 },
+                                            { label: 'AST', teamAValue: Math.round(Number(teamATotals.ast) || 0), teamBValue: Math.round(Number(teamBTotals.ast) || 0), teamACompare: Number(teamATotals.ast) || 0, teamBCompare: Number(teamBTotals.ast) || 0 },
+                                            { label: 'STL', teamAValue: Math.round(Number(teamATotals.stl) || 0), teamBValue: Math.round(Number(teamBTotals.stl) || 0), teamACompare: Number(teamATotals.stl) || 0, teamBCompare: Number(teamBTotals.stl) || 0 },
+                                            { label: 'BLK', teamAValue: Math.round(Number(teamATotals.blk) || 0), teamBValue: Math.round(Number(teamBTotals.blk) || 0), teamACompare: Number(teamATotals.blk) || 0, teamBCompare: Number(teamBTotals.blk) || 0 },
+                                            { label: 'TO', teamAValue: Math.round(Number(teamATotals.to) || 0), teamBValue: Math.round(Number(teamBTotals.to) || 0), teamACompare: Number(teamATotals.to) || 0, teamBCompare: Number(teamBTotals.to) || 0 },
+                                            { label: 'PF', teamAValue: Math.round(Number(teamATotals.pf) || 0), teamBValue: Math.round(Number(teamBTotals.pf) || 0), teamACompare: Number(teamATotals.pf) || 0, teamBCompare: Number(teamBTotals.pf) || 0 }
+                                        ];
                                         const hasFrozenQuarterSnapshots = Array.isArray(game.periodSnapshots) && game.periodSnapshots.length > 0;
                                         const historyFrozenQuarterStatsByQuarter = new Map((game.periodSnapshots || []).map((snapshot) => [Number(snapshot?.quarter || 0), snapshot]));
                                         const historyLogQuarterStats = computeQuarterTeamStatsFromLog(game.gameLog || []);
@@ -10398,7 +10464,7 @@
                                                                             ? 'Generating player spotlight...'
                                                                             : `PER-style game rating ${Number(playerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.`)}
                                                                 </div>
-                                                                {isLoggedIn && !String(game.potgWriteup || '').trim() && (
+                                                                {isLoggedIn && (
                                                                     <div className="mt-2">
                                                                         <button
                                                                             type="button"
@@ -10666,40 +10732,29 @@
                                                         </div>
 
                                                         <div className="rounded-xl border border-slate-800/70 overflow-hidden">
-                                                        {[
-                                                            ['PTS', teamATotals.pts, teamBTotals.pts],
-                                                            ['REB', teamATotals.reb, teamBTotals.reb],
-                                                            ['AST', teamATotals.ast, teamBTotals.ast],
-                                                            ['STL', teamATotals.stl, teamBTotals.stl],
-                                                            ['BLK', teamATotals.blk, teamBTotals.blk],
-                                                            ['TO', teamATotals.to, teamBTotals.to],
-                                                            ['PF', teamATotals.pf, teamBTotals.pf],
-                                                            ['FG', teamATotals.fg2m + teamATotals.fg3m, teamBTotals.fg2m + teamBTotals.fg3m],
-                                                            ['3PT', teamATotals.fg3m, teamBTotals.fg3m],
-                                                            ['FT', teamATotals.ftm, teamBTotals.ftm]
-                                                        ].map(([label, teamAValue, teamBValue]) => {
-                                                            const aNum = Number(teamAValue) || 0;
-                                                            const bNum = Number(teamBValue) || 0;
+                                                        {historyComparisonRows.map((row) => {
+                                                            const aNum = Number(row.teamACompare) || 0;
+                                                            const bNum = Number(row.teamBCompare) || 0;
                                                             const totalValue = Math.max(aNum + bNum, 1);
                                                             const aWidth = `${Math.min(100, (aNum / totalValue) * 100)}%`;
                                                             const bWidth = `${Math.min(100, (bNum / totalValue) * 100)}%`;
 
                                                             return (
-                                                                <div key={label} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
+                                                                <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45">
                                                                     <div className="relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2">
                                                                         <div className="pointer-events-none absolute inset-0 flex justify-end">
                                                                             <div className="h-full leader-bg-fill leader-bg-fill-left border-b" style={{ width: aWidth, backgroundColor: `${teamAObj?.color || '#10b981'}0c`, borderBottomColor: `${teamAObj?.color || '#10b981'}aa` }} />
                                                                         </div>
-                                                                        <span className="relative z-10 block text-right text-xl leading-none font-black text-slate-100">{Math.round(aNum)}</span>
+                                                                        <span className="relative z-10 block text-right text-xl leading-none font-black text-slate-100">{row.teamAValue}</span>
                                                                     </div>
                                                                     <span className="inline-flex h-full items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5">
-                                                                        <span className="inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100">{label}</span>
+                                                                        <span className="inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100">{row.label}</span>
                                                                     </span>
                                                                     <div className="relative min-w-0 overflow-hidden px-3 py-2">
                                                                         <div className="pointer-events-none absolute inset-0">
                                                                             <div className="h-full leader-bg-fill leader-bg-fill-right border-b" style={{ width: bWidth, backgroundColor: `${teamBObj?.color || '#ef4444'}0c`, borderBottomColor: `${teamBObj?.color || '#ef4444'}aa` }} />
                                                                         </div>
-                                                                        <span className="relative z-10 block text-left text-xl leading-none font-black text-slate-100">{Math.round(bNum)}</span>
+                                                                        <span className="relative z-10 block text-left text-xl leading-none font-black text-slate-100">{row.teamBValue}</span>
                                                                     </div>
                                                                 </div>
                                                             );
