@@ -11,6 +11,30 @@
     <!-- React and ReactDOM CDN -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script>
+        (function () {
+            try {
+                var rawHost = String(window.location.hostname || '').toLowerCase();
+                var normalizedHost = rawHost.replace(/\.$/, '').replace(/^www\./, '');
+                if (normalizedHost !== 'wkndbasketball.com') return;
+
+                var measurementId = 'G-LB3E9R6KV2';
+                window.__WKND_GA_MEASUREMENT_ID = measurementId;
+
+                window.dataLayer = window.dataLayer || [];
+                window.gtag = window.gtag || function gtag() { window.dataLayer.push(arguments); };
+
+                var script = document.createElement('script');
+                script.async = true;
+                script.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(measurementId);
+                script.setAttribute('data-ga-script', '1');
+                document.head.appendChild(script);
+
+                window.gtag('js', new Date());
+                window.gtag('config', measurementId, { send_page_view: false });
+            } catch (e) {}
+        })();
+    </script>
     <!-- Google Fonts: Inter & JetBrains Mono -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     

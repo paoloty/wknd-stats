@@ -56,6 +56,13 @@
         async function initGoogleAnalytics() {
             if (gaInitialized) return true;
 
+            const prebootMeasurementId = String(window.__WKND_GA_MEASUREMENT_ID || '').trim();
+            if (prebootMeasurementId && typeof window.gtag === 'function') {
+                gaMeasurementId = prebootMeasurementId;
+                gaInitialized = true;
+                return true;
+            }
+
             try {
                 const config = await apiRequest('/api/client-config');
                 const enabled = Boolean(config?.gaEnabled);
