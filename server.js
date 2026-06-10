@@ -56,7 +56,9 @@ const OPENAI_FALLBACK_MODELS = [
   'gpt-4o-mini'
 ];
 const GA_MEASUREMENT_ID = String(process.env.GA_MEASUREMENT_ID || '').trim();
-const GA_ENABLE_IN_DEV = String(process.env.WKND_ENABLE_GA_DEV || '').trim() === '1';
+const GA_ENABLE_IN_DEV = ['1', 'true', 'yes'].includes(
+  String(process.env.WKND_ENABLE_GA_DEV || process.env.GA_ENABLE_IN_DEV || '').trim().toLowerCase()
+);
 const AI_PRIMARY_PROVIDER = String(process.env.AI_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase();
 const SOCIAL_COVER_LOGO_PATHS = [
   path.join(__dirname, 'wknd-s3-logo.png'),
@@ -2074,6 +2076,27 @@ migrateLegacyIfNeeded();
 
 app.use(express.json({ limit: '12mb' }));
 
+app.use((req, res, next) => {
+  const rawForwardedHost = String(req.headers['x-forwarded-host'] || '').trim().toLowerCase();
+  const rawHost = String(req.get('host') || '').trim().toLowerCase();
+  const canonicalHost = (rawForwardedHost || rawHost).split(',')[0].trim();
+  const hostParts = canonicalHost.split(':');
+  const hostname = String(hostParts[0] || '').replace(/\.$/, '');
+
+  if (hostname !== 'www.wkndbasketball.com') {
+    next();
+    return;
+  }
+
+  const port = hostParts[1] || '';
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const protocol = forwardedProto || String(req.protocol || 'https').toLowerCase();
+  const includePort = port && port !== '80' && port !== '443';
+  const targetHost = includePort ? `wkndbasketball.com:${port}` : 'wkndbasketball.com';
+
+  res.redirect(308, `${protocol}://${targetHost}${req.originalUrl || '/'}`);
+});
+
 app.get('/', (req, res) => {
   try {
     const gameId = String(req.query.gameId || '').trim();
@@ -2109,8 +2132,13 @@ app.get('/api/bootstrap', (_req, res) => {
 });
 
 app.get('/api/client-config', (req, res) => {
-  const requestHost = String(req.get('host') || '').trim().toLowerCase();
-  const requestHostname = requestHost.split(':')[0];
+  const rawForwardedHost = String(req.headers['x-forwarded-host'] || '').trim().toLowerCase();
+  const rawHost = String(req.get('host') || '').trim().toLowerCase();
+  const canonicalHost = (rawForwardedHost || rawHost).split(',')[0].trim();
+  const requestHostname = canonicalHost
+    .split(':')[0]
+    .replace(/\.$/, '')
+    .replace(/^www\./, '');
   const isAllowedGaDomain = requestHostname === 'wkndbasketball.com';
   const gaEnabled = Boolean(
     GA_MEASUREMENT_ID
