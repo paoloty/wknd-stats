@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const crypto = require('crypto');
 const express = require('express');
 const Database = require('better-sqlite3');
 const { WebSocketServer } = require('ws');
@@ -250,6 +251,10 @@ const DEFAULT_STAT_ACTIONS = readJsonFileSafe(path.join(defaultsDir, 'statAction
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
+}
+const playerImagesDir = path.join(dataDir, 'player-images');
+if (!fs.existsSync(playerImagesDir)) {
+  fs.mkdirSync(playerImagesDir, { recursive: true });
 }
 const dbPath = path.join(dataDir, 'wknd-stats.db');
 const db = new Database(dbPath);
@@ -783,6 +788,125 @@ function parseImageDataUrl(dataUrl) {
   const buffer = Buffer.from(base64, 'base64');
   if (!buffer || !buffer.length) return null;
   return { mimeType, buffer };
+}
+
+function getImageExtFromMimeType(mimeType) {
+  const value = String(mimeType || '').toLowerCase();
+  if (value.includes('png')) return 'png';
+  if (value.includes('webp')) return 'webp';
+  if (value.includes('jpg') || value.includes('jpeg')) return 'jpg';
+  return '';
+}
+
+function getImageExtFromPathname(pathname) {
+  const lower = String(pathname || '').toLowerCase();
+  if (lower.endsWith('.png')) return 'png';
+  if (lower.endsWith('.webp')) return 'webp';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpg';
+  return '';
+}
+
+function sanitizeForFileName(value, fallback = 'player') {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+
+function isLocallyHostedPlayerImageUrl(urlValue) {
+  const value = String(urlValue || '').trim();
+  if (!value) return false;
+  if (value.startsWith('/data/player-images/')) return true;
+  try {
+    const url = new URL(value, 'http://localhost');
+    return String(url.pathname || '').startsWith('/data/player-images/');
+  } catch {
+    return false;
+  }
+}
+
+async function cacheRemotePlayerImage(profileImageUrl, playerIdentityHint = 'player') {
+  const value = String(profileImageUrl || '').trim();
+  if (!value) return '';
+  if (value.startsWith('data:image/')) return value;
+  if (isLocallyHostedPlayerImageUrl(value)) return value;
+
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return value;
+  }
+
+  try {
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'image/*,*/*;q=0.8',
+        'User-Agent': 'wknd-stats/profile-image-cache'
+      }
+    });
+    if (!response.ok) {
+      return value;
+    }
+
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      return value;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    if (!buffer.length || buffer.length > (8 * 1024 * 1024)) {
+      return value;
+    }
+
+    if (sharp) {
+      const meta = await sharp(buffer).metadata();
+      if (!meta?.width || !meta?.height) {
+        return value;
+      }
+    }
+
+    const extension = getImageExtFromMimeType(contentType) || getImageExtFromPathname(url.pathname) || 'jpg';
+    const hash = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 12);
+    const safeIdentity = sanitizeForFileName(playerIdentityHint, 'player');
+    const fileName = `${safeIdentity}-${hash}.${extension}`;
+    const absolutePath = path.join(playerImagesDir, fileName);
+    fs.writeFileSync(absolutePath, buffer);
+    return `/data/player-images/${fileName}`;
+  } catch {
+    return value;
+  }
+}
+
+async function persistPlayerImagesForTeams(nextTeams) {
+  const safeTeams = Array.isArray(nextTeams) ? nextTeams : [];
+  const hydrated = [];
+
+  for (const team of safeTeams) {
+    const safePlayers = Array.isArray(team?.players) ? team.players : [];
+    const playersWithCachedImages = [];
+
+    for (const player of safePlayers) {
+      const currentPictureUrl = String(player?.pictureUrl || '').trim();
+      const pictureUrl = currentPictureUrl
+        ? await cacheRemotePlayerImage(currentPictureUrl, player?.id || player?.name || 'player')
+        : '';
+      playersWithCachedImages.push({
+        ...player,
+        pictureUrl
+      });
+    }
+
+    hydrated.push({
+      ...team,
+      players: playersWithCachedImages
+    });
+  }
+
+  return hydrated;
 }
 
 function escapeHtml(value) {
@@ -2439,27 +2563,37 @@ app.post('/api/auth/login', (req, res) => {
   res.json({ ok: true, role });
 });
 
-app.put('/api/state', (req, res) => {
+app.put('/api/state', async (req, res) => {
   const { teams, games } = req.body || {};
   if (!Array.isArray(teams) || !Array.isArray(games)) {
     res.status(400).json({ error: 'Body must include teams[] and games[]' });
     return;
   }
 
-  writeState(teams, games);
-  res.json({ ok: true });
+  try {
+    const teamsWithCachedImages = await persistPlayerImagesForTeams(teams);
+    writeState(teamsWithCachedImages, games);
+    res.json({ ok: true, teams: teamsWithCachedImages, games });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to persist state.' });
+  }
 });
 
-app.put('/api/teams', (req, res) => {
+app.put('/api/teams', async (req, res) => {
   const { teams } = req.body || {};
   if (!Array.isArray(teams)) {
     res.status(400).json({ error: 'Body must include teams[]' });
     return;
   }
 
-  const state = readState();
-  writeState(teams, state.games);
-  res.json({ ok: true });
+  try {
+    const teamsWithCachedImages = await persistPlayerImagesForTeams(teams);
+    const state = readState();
+    writeState(teamsWithCachedImages, state.games);
+    res.json({ ok: true, teams: teamsWithCachedImages });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to persist teams.' });
+  }
 });
 
 app.delete('/api/teams/:teamId', (req, res) => {

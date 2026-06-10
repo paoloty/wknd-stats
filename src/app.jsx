@@ -3497,11 +3497,19 @@
                 writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: true });
                 try {
                     if (navigator.onLine !== false) {
-                        await apiRequest('/api/state', {
+                        const payload = await apiRequest('/api/state', {
                             method: 'PUT',
                             body: JSON.stringify({ teams: normalizedTeams, games: updatedGames })
                         });
-                        writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: false });
+                        const persistedTeams = Array.isArray(payload?.teams)
+                            ? normalizeTeamsForStorage(payload.teams)
+                            : normalizedTeams;
+                        const persistedGames = Array.isArray(payload?.games)
+                            ? payload.games
+                            : updatedGames;
+                        setTeams(persistedTeams);
+                        setGames(persistedGames);
+                        writeCachedAppState(persistedTeams, persistedGames, statActions, { dirty: false });
                     }
                     return true;
                 } catch (error) {
@@ -3675,11 +3683,15 @@
                 writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
                 try {
                     if (navigator.onLine !== false) {
-                        await apiRequest('/api/teams', {
+                        const payload = await apiRequest('/api/teams', {
                             method: 'PUT',
                             body: JSON.stringify({ teams: normalizedTeams })
                         });
-                        writeCachedAppState(normalizedTeams, games, statActions, { dirty: false });
+                        const persistedTeams = Array.isArray(payload?.teams)
+                            ? normalizeTeamsForStorage(payload.teams)
+                            : normalizedTeams;
+                        setTeams(persistedTeams);
+                        writeCachedAppState(persistedTeams, games, statActions, { dirty: false });
                     }
                     return true;
                 } catch (error) {
@@ -11672,6 +11684,9 @@
                                         placeholder="Picture URL"
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
                                     />
+                                    <p className="text-[10px] text-slate-500 -mt-1">
+                                        External image URLs are downloaded and stored locally on save.
+                                    </p>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         <input
                                             type="date"

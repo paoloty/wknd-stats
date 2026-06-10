@@ -2,7 +2,11 @@ node_modules/
 .env
 data/*.db
 data/*.db-*
+data/player-images/
 .DS_Store
 Thumbs.db
 hetzner
 hetzner.pub
+
+
+167.233.110.72
