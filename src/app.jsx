@@ -293,6 +293,8 @@
             const liveGameplayControlSnapshotRef = useRef(null);
             const attemptedAutoPotgWriteupRef = useRef(new Set());
             const pendingYoutubeSaveRef = useRef({});
+            const suppressNextNavHistoryPushRef = useRef(false);
+            const lastNavUrlRef = useRef('');
 
             // Modal Alert System for 4th and 5th personal fouls
             const [foulAlert, setFoulAlert] = useState(null);
@@ -410,6 +412,35 @@
                         setPendingSharedGameId(sharedGameId);
                     }
                 } catch (e) {}
+            }, []);
+
+            useEffect(() => {
+                try {
+                    const url = new URL(window.location.href);
+                    const initialState = {
+                        __wkndNav: true,
+                        activeTab,
+                        selectedHistoryGameId: selectedHistoryGameId || null
+                    };
+                    window.history.replaceState(initialState, '', url.toString());
+                    lastNavUrlRef.current = url.toString();
+                } catch (e) {}
+            }, []);
+
+            useEffect(() => {
+                const onPopState = (event) => {
+                    const state = event?.state;
+                    if (!state || !state.__wkndNav) return;
+
+                    suppressNextNavHistoryPushRef.current = true;
+                    setActiveTab(state.activeTab || 'live');
+                    setSelectedHistoryGameId(state.selectedHistoryGameId || null);
+                };
+
+                window.addEventListener('popstate', onPopState);
+                return () => {
+                    window.removeEventListener('popstate', onPopState);
+                };
             }, []);
 
             const handleAuthLogin = async (e) => {
@@ -7954,7 +7985,7 @@
                 showToast('Cover image downloaded.', 'success');
             };
 
-            const syncHistoryShareUrl = (gameId) => {
+            const syncHistoryShareUrl = (gameId, mode = 'replace') => {
                 try {
                     const url = new URL(window.location.href);
                     if (activeTab === 'history' && gameId) {
@@ -7964,7 +7995,20 @@
                         url.searchParams.delete('view');
                         url.searchParams.delete('gameId');
                     }
-                    window.history.replaceState({}, '', url.toString());
+                    const nextUrl = url.toString();
+                    const nextState = {
+                        __wkndNav: true,
+                        activeTab,
+                        selectedHistoryGameId: gameId || null
+                    };
+
+                    if (mode === 'push') {
+                        window.history.pushState(nextState, '', nextUrl);
+                    } else {
+                        window.history.replaceState(nextState, '', nextUrl);
+                    }
+
+                    lastNavUrlRef.current = nextUrl;
                 } catch (e) {}
             };
 
@@ -7983,7 +8027,44 @@
             }, [pendingSharedGameId, games]);
 
             useEffect(() => {
-                syncHistoryShareUrl(selectedHistoryGameId);
+                if (suppressNextNavHistoryPushRef.current) {
+                    suppressNextNavHistoryPushRef.current = false;
+                    syncHistoryShareUrl(selectedHistoryGameId, 'replace');
+                    return;
+                }
+
+                const nextGameId = (activeTab === 'history') ? selectedHistoryGameId : null;
+                let nextUrl = '';
+                try {
+                    const url = new URL(window.location.href);
+                    if (activeTab === 'history' && nextGameId) {
+                        url.searchParams.set('view', 'game');
+                        url.searchParams.set('gameId', nextGameId);
+                    } else {
+                        url.searchParams.delete('view');
+                        url.searchParams.delete('gameId');
+                    }
+                    nextUrl = url.toString();
+                } catch (e) {}
+
+                const currentState = window.history.state;
+                const currentTab = currentState?.__wkndNav ? String(currentState.activeTab || 'live') : null;
+                const currentGameId = currentState?.__wkndNav ? (currentState.selectedHistoryGameId || null) : null;
+                const stateMatches = currentTab === activeTab && currentGameId === nextGameId;
+                const currentUrl = (() => {
+                    try {
+                        return new URL(window.location.href).toString();
+                    } catch (e) {
+                        return '';
+                    }
+                })();
+                const urlMatches = !nextUrl || (nextUrl === currentUrl);
+
+                if (stateMatches && urlMatches) {
+                    return;
+                }
+
+                syncHistoryShareUrl(nextGameId, 'push');
             }, [activeTab, selectedHistoryGameId]);
 
             const getTopTeamPerformers = (team, game, limit = 3) => {

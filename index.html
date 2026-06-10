@@ -16,22 +16,38 @@
             try {
                 var rawHost = String(window.location.hostname || '').toLowerCase();
                 var normalizedHost = rawHost.replace(/\.$/, '').replace(/^www\./, '');
-                if (normalizedHost !== 'wkndbasketball.com') return;
+                var isLocalLike = (
+                    normalizedHost === 'localhost'
+                    || normalizedHost === '127.0.0.1'
+                    || normalizedHost === '::1'
+                    || normalizedHost.endsWith('.local')
+                );
+                if (isLocalLike) return;
 
-                var measurementId = 'G-LB3E9R6KV2';
-                window.__WKND_GA_MEASUREMENT_ID = measurementId;
+                fetch('/api/client-config', { cache: 'no-store' })
+                    .then(function (res) { return res.ok ? res.json() : null; })
+                    .then(function (config) {
+                        var enabled = !!(config && config.gaEnabled);
+                        var measurementId = String((config && config.gaMeasurementId) || '').trim();
+                        if (!enabled || !measurementId) return;
 
-                window.dataLayer = window.dataLayer || [];
-                window.gtag = window.gtag || function gtag() { window.dataLayer.push(arguments); };
+                        window.__WKND_GA_MEASUREMENT_ID = measurementId;
+                        window.dataLayer = window.dataLayer || [];
+                        window.gtag = window.gtag || function gtag() { window.dataLayer.push(arguments); };
 
-                var script = document.createElement('script');
-                script.async = true;
-                script.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(measurementId);
-                script.setAttribute('data-ga-script', '1');
-                document.head.appendChild(script);
+                        var existing = document.querySelector('script[data-ga-script="1"]');
+                        if (!existing) {
+                            var script = document.createElement('script');
+                            script.async = true;
+                            script.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(measurementId);
+                            script.setAttribute('data-ga-script', '1');
+                            document.head.appendChild(script);
+                        }
 
-                window.gtag('js', new Date());
-                window.gtag('config', measurementId, { send_page_view: false });
+                        window.gtag('js', new Date());
+                        window.gtag('config', measurementId, { send_page_view: false });
+                    })
+                    .catch(function () {});
             } catch (e) {}
         })();
     </script>
