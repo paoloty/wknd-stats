@@ -272,7 +272,10 @@
                 }
 
                 function injectPotgButtons() {
-                    var potgCards = Array.from(document.querySelectorAll('div.bg-slate-950\/70.border.border-slate-800.rounded-xl.p-4'));
+                    var potgCards = Array.from(document.querySelectorAll('div.rounded-xl.p-4.border.border-slate-800'))
+                        .filter(function (node) {
+                            return node.classList && node.classList.contains('bg-slate-950/70');
+                        });
                     potgCards.forEach(function (card) {
                         var title = card.querySelector('div.text-\[10px\].uppercase');
                         if (!title || String(title.textContent || '').trim().toLowerCase() !== 'player of the game') return;

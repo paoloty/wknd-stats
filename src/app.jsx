@@ -179,6 +179,9 @@
             const [activeAction, setActiveAction] = useState(null); 
             const [correctionMode, setCorrectionMode] = useState(false); 
             const [showLoggingModal, setShowLoggingModal] = useState(false);
+            const [recentActionIds, setRecentActionIds] = useState([]);
+            const showRecentActionsUi = false;
+            const showStickyMobileActionsUi = false;
 
             const [activeMobileConsoleTab, setActiveMobileConsoleTab] = useState('home');
             const [showHomeBenchAdder, setShowHomeBenchAdder] = useState(false);
@@ -275,6 +278,8 @@
             const teamABenchRef = useRef(teamABench);
             const teamBLineupRef = useRef(teamBLineup);
             const teamBBenchRef = useRef(teamBBench);
+            const bodyScrollLockYRef = useRef(0);
+            const bodyScrollLockedRef = useRef(false);
             const gameLogRef = useRef(gameLog);
             const liveGameSnapshotRef = useRef(liveGameSnapshot);
             const loggedHistoryRef = useRef(loggedHistory);
@@ -548,6 +553,9 @@
                 }
 
                 setActiveAction(action);
+                if (action?.id) {
+                    setRecentActionIds((prev) => [action.id, ...prev.filter((id) => id !== action.id)].slice(0, 6));
+                }
                 setShowLoggingModal(true);
             };
 
@@ -560,6 +568,38 @@
             const showHomeLivePanel = !canOperateLive || operatorFocus !== 'away';
             const showAwayLivePanel = !canOperateLive || operatorFocus !== 'home';
             const isCompactRecordActionModal = canOperateLive && operatorFocus === 'both' && showHomeLivePanel && showAwayLivePanel;
+            const resolveActionToneClasses = (action) => {
+                const source = String(action?.colorClass || '');
+                const actionId = String(action?.id || '');
+                const shouldForceRed = new Set(['fg2m_miss', 'fg3m_miss', 'pf', 'to', 'pf_offensive']).has(actionId);
+                if (shouldForceRed || /\bred-|\brose-/.test(source)) {
+                    return {
+                        textClass: 'text-red-200',
+                        surfaceStyle: { backgroundColor: 'rgba(239, 68, 68, 0.22)', borderColor: 'rgba(248, 113, 113, 0.55)' },
+                        badgeStyle: { backgroundColor: 'rgba(239, 68, 68, 0.22)', borderColor: 'rgba(248, 113, 113, 0.55)' }
+                    };
+                }
+                if (/\bamber-|\borange-|\byellow-/.test(source)) {
+                    return {
+                        textClass: 'text-amber-200',
+                        surfaceStyle: { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'rgba(251, 191, 36, 0.5)' },
+                        badgeStyle: { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'rgba(251, 191, 36, 0.5)' }
+                    };
+                }
+                if (/\bsky-|\bblue-|\bcyan-|\bteal-/.test(source)) {
+                    return {
+                        textClass: 'text-cyan-200',
+                        surfaceStyle: { backgroundColor: 'rgba(6, 182, 212, 0.2)', borderColor: 'rgba(34, 211, 238, 0.5)' },
+                        badgeStyle: { backgroundColor: 'rgba(6, 182, 212, 0.2)', borderColor: 'rgba(34, 211, 238, 0.5)' }
+                    };
+                }
+                return {
+                    textClass: 'text-emerald-200',
+                    surfaceStyle: { backgroundColor: 'rgba(16, 185, 129, 0.2)', borderColor: 'rgba(52, 211, 153, 0.5)' },
+                    badgeStyle: { backgroundColor: 'rgba(16, 185, 129, 0.2)', borderColor: 'rgba(52, 211, 153, 0.5)' }
+                };
+            };
+            const activeActionTone = resolveActionToneClasses(activeAction);
 
             const cloneStatsMap = (source = {}) => {
                 const cloned = {};
@@ -2087,6 +2127,7 @@
             });
 
             const liveActionPool = [...statActions, ...availableCustomFoulActions];
+            const liveActionById = new Map(liveActionPool.map((action) => [action.id, action]));
 
             const getActionsByOrder = (orderedIds) => {
                 const orderMap = new Map(orderedIds.map((id, idx) => [id, idx]));
@@ -3007,18 +3048,39 @@
             useEffect(() => {
                 const isAnyModalOpen = showNewTeamModal || showNewPlayerModal || showSubstitutionModal || showAddFromBenchModal || showLoggingModal || !!advancedEditingPlayer || !!confirmDialog || !!foulAlert || showAuthModal || !!liveLogEditTarget;
                 if (isAnyModalOpen) {
+                    if (!bodyScrollLockedRef.current) {
+                        bodyScrollLockYRef.current = window.scrollY || window.pageYOffset || 0;
+                        bodyScrollLockedRef.current = true;
+                    }
                     document.body.style.overflow = 'hidden';
                     document.body.style.position = 'fixed';
                     document.body.style.width = '100%';
+                    document.body.style.top = `-${bodyScrollLockYRef.current}px`;
+                    document.body.style.left = '0';
+                    document.body.style.right = '0';
                 } else {
                     document.body.style.overflow = '';
                     document.body.style.position = '';
                     document.body.style.width = '';
+                    document.body.style.top = '';
+                    document.body.style.left = '';
+                    document.body.style.right = '';
+                    if (bodyScrollLockedRef.current) {
+                        window.scrollTo(0, bodyScrollLockYRef.current || 0);
+                        bodyScrollLockedRef.current = false;
+                    }
                 }
                 return () => {
                     document.body.style.overflow = '';
                     document.body.style.position = '';
                     document.body.style.width = '';
+                    document.body.style.top = '';
+                    document.body.style.left = '';
+                    document.body.style.right = '';
+                    if (bodyScrollLockedRef.current) {
+                        window.scrollTo(0, bodyScrollLockYRef.current || 0);
+                        bodyScrollLockedRef.current = false;
+                    }
                 };
             }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, showLoggingModal, advancedEditingPlayer, confirmDialog, foulAlert, showAuthModal, liveLogEditTarget]);
 
@@ -6219,6 +6281,173 @@
                 showToast(`${selectedToAdd.length} player${selectedToAdd.length > 1 ? 's' : ''} added on-court.`, 'success');
             };
 
+            const handleWaveSubstitution = (isTeamA) => {
+                if (!canOperateLive) return;
+                if (!isGameLive) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'run wave substitution for this team')) return;
+
+                const teamId = isTeamA ? teamAId : teamBId;
+                const teamObj = teams.find((t) => t.id === teamId);
+                const currentLineup = isTeamA ? teamALineup : teamBLineup;
+                const currentBench = isTeamA ? teamABench : teamBBench;
+                if (!teamId || !teamObj) return;
+
+                const rosterIds = (teamObj.players || []).map((p) => p.id);
+                const eligibleSet = new Set(
+                    rosterIds.filter((id) => !dnpPlayers.includes(id) && (liveStats[id]?.pf || 0) < 5)
+                );
+                const eligibleRosterCount = eligibleSet.size;
+                const allowRepeaters = eligibleRosterCount < 10;
+
+                const poolFromBench = Array.from(new Set([
+                    ...currentBench,
+                    ...rosterIds.filter((id) => !currentLineup.includes(id) && !currentBench.includes(id))
+                ])).filter((id) => eligibleSet.has(id));
+
+                const sortedByMinutesAsc = (ids) => [...ids].sort((a, b) => {
+                    const secDiff = Number(livePlayerSeconds[a] || 0) - Number(livePlayerSeconds[b] || 0);
+                    if (secDiff !== 0) return secDiff;
+                    const aNumber = teamObj.players.find((p) => p.id === a)?.number || '';
+                    const bNumber = teamObj.players.find((p) => p.id === b)?.number || '';
+                    return String(aNumber).localeCompare(String(bNumber));
+                });
+
+                let targetLineup = sortedByMinutesAsc(poolFromBench).slice(0, 5);
+                const neededRepeaters = Math.max(0, 5 - targetLineup.length);
+                if (neededRepeaters > 0 && allowRepeaters) {
+                    const repeaterPool = sortedByMinutesAsc(
+                        currentLineup.filter((id) => eligibleSet.has(id) && !targetLineup.includes(id))
+                    );
+                    targetLineup = [...targetLineup, ...repeaterPool.slice(0, neededRepeaters)];
+                }
+
+                if (neededRepeaters > 0 && !allowRepeaters) {
+                    showToast('Wave Sub requires a full second unit when 10+ eligible players are available. No repeats allowed.', 'info');
+                    return;
+                }
+
+                if (targetLineup.length === 0) {
+                    showToast('No eligible players available for wave substitution.', 'info');
+                    return;
+                }
+
+                const nextBenchSeed = Array.from(new Set([...currentBench, ...currentLineup, ...rosterIds]))
+                    .filter((id) => !targetLineup.includes(id));
+                const sanitized = sanitizeTeamRotation(teamId, targetLineup, nextBenchSeed, { fillToFive: false });
+
+                const sameLineup = sanitized.lineup.length === currentLineup.length
+                    && sanitized.lineup.every((id) => currentLineup.includes(id));
+                if (sameLineup) {
+                    showToast('Wave substitution has no changes to apply.', 'info');
+                    return;
+                }
+
+                markLocalSessionUpdated();
+                if (isTeamA) {
+                    setTeamALineup(sanitized.lineup);
+                    setTeamABench(sanitized.bench);
+                } else {
+                    setTeamBLineup(sanitized.lineup);
+                    setTeamBBench(sanitized.bench);
+                }
+
+                const playersIn = sanitized.lineup.filter((id) => !currentLineup.includes(id));
+                const playersOut = currentLineup.filter((id) => !sanitized.lineup.includes(id));
+                const repeatedCount = sanitized.lineup.filter((id) => currentLineup.includes(id)).length;
+
+                if (playersIn.length > 0) {
+                    setPlayedPlayers((prev) => {
+                        const next = new Set(prev);
+                        playersIn.forEach((id) => next.add(id));
+                        return Array.from(next);
+                    });
+                }
+                if (dnpPlayers.some((id) => playersIn.includes(id))) {
+                    lastLocalDnpUpdatedAtRef.current = Date.now();
+                    setDnpPlayers((prev) => prev.filter((id) => !playersIn.includes(id)));
+                }
+
+                [...playersOut, ...playersIn].forEach((id) => {
+                    triggerPlayerFlash(id);
+                    flashPlayerElements(id);
+                });
+
+                const baseEventId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const clearEvent = {
+                    id: `${baseEventId}_clr`,
+                    time: getWallClockTime(),
+                    text: `Wave substitution (${isTeamA ? 'HOME' : 'AWAY'})`,
+                    kind: 'meta',
+                    metaType: 'onCourtClear',
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                    isTeamA
+                };
+                const addEvents = sanitized.lineup.map((playerId, idx) => {
+                    const playerObj = teamObj.players.find((p) => p.id === playerId);
+                    return {
+                        id: `${baseEventId}_add_${idx}`,
+                        time: getWallClockTime(),
+                        text: `Added on-court: ${playerObj ? `${playerObj.name} (#${playerObj.number})` : playerId}`,
+                        kind: 'meta',
+                        metaType: 'onCourtAdd',
+                        quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                        isTeamA,
+                        playerId
+                    };
+                });
+                const events = [clearEvent, ...addEvents];
+                events.forEach((event) => {
+                    processedGameLogIdsRef.current.add(event.id);
+                    enqueueLiveEvent(event);
+                });
+                const waveMaxRevision = events.reduce((maxRevision, event) => {
+                    const rev = getLineupRevisionFromEventId(event.id);
+                    return rev > maxRevision ? rev : maxRevision;
+                }, 0);
+                if (waveMaxRevision > 0) {
+                    setLineupRevision((prev) => {
+                        const next = Math.max(prev, waveMaxRevision);
+                        lineupRevisionRef.current = next;
+                        return next;
+                    });
+                }
+                setGameLog((prev) => [...events, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+
+                const rosterHint = sanitized.lineup.length < 5 ? ` (${sanitized.lineup.length}/5 available)` : '';
+                const repeatHint = repeatedCount > 0 ? ` ${repeatedCount} repeater${repeatedCount > 1 ? 's' : ''} kept.` : '';
+                showToast(`Wave substitution applied.${repeatHint}${rosterHint}`, 'success');
+            };
+
+            const openClearOnCourtConfirm = (isTeamA) => {
+                const teamLabel = isTeamA ? (liveHomeTeam?.name || 'Home') : (liveAwayTeam?.name || 'Away');
+                setConfirmDialog({
+                    title: `Clear ${teamLabel} On-Court?`,
+                    text: 'This removes all current on-court players for this team so you can rebuild the lineup.',
+                    cancelLabel: 'Cancel',
+                    confirmLabel: 'Clear On-Court',
+                    onConfirm: () => {
+                        setConfirmDialog(null);
+                        handleClearOnCourtPlayers(isTeamA);
+                    }
+                });
+            };
+
+            const openWaveSubConfirm = (isTeamA) => {
+                const teamLabel = isTeamA ? (liveHomeTeam?.name || 'Home') : (liveAwayTeam?.name || 'Away');
+                setConfirmDialog({
+                    title: `${teamLabel} Wave Sub?`,
+                    text: 'Apply one-tap wave substitution for this team now?',
+                    cancelLabel: 'Cancel',
+                    confirmLabel: 'Run Wave Sub',
+                    onConfirm: () => {
+                        setConfirmDialog(null);
+                        handleWaveSubstitution(isTeamA);
+                    }
+                });
+            };
+
             const handleEndGame = async (options = {}) => {
                 if (!canOperateLive) return;
                 if (!teamAId || !teamBId) return;
@@ -8430,8 +8659,8 @@
                     )}
 
                     {showAuthModal && (
-                        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
-                            <form onSubmit={handleAuthLogin} className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-950 p-5 space-y-3">
+                        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <form onSubmit={handleAuthLogin} className="w-full max-w-sm rounded-t-2xl md:rounded-2xl border border-slate-700 bg-slate-950 p-5 space-y-3 max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">Operator/Admin Login</h3>
                                 <div>
                                     <label className="block text-[11px] text-slate-400 font-bold mb-1 uppercase">Role</label>
@@ -8756,7 +8985,7 @@
                                                     >
                                                         <span className="inline-flex items-center justify-center gap-1">
                                                             <Icons.Timer />
-                                                            {`${(liveHomeTeam?.name || 'Home').toUpperCase()} TIMEOUT (${teamATimeoutUsed}/${timeoutLimit})`}
+                                                            {`${(liveHomeTeam?.name || 'Home').toUpperCase()} TIMEOUT`}
                                                         </span>
                                                     </button>
                                                     <button
@@ -8786,7 +9015,7 @@
                                                     >
                                                         <span className="inline-flex items-center justify-center gap-1">
                                                             <Icons.Timer />
-                                                            {`${(liveAwayTeam?.name || 'Away').toUpperCase()} TIMEOUT (${teamBTimeoutUsed}/${timeoutLimit})`}
+                                                            {`${(liveAwayTeam?.name || 'Away').toUpperCase()} TIMEOUT`}
                                                         </span>
                                                     </button>
                                                 </div>
@@ -8928,6 +9157,27 @@
                                             <div className="flex items-center border-b border-slate-800 pb-1.5">
                                                 <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1"><Icons.Zap /> Tap action first, then select player on court</span>
                                             </div>
+                                            {showRecentActionsUi && recentActionIds.length > 0 && (
+                                                <div className="md:hidden">
+                                                    <div className="text-[9px] text-slate-500 font-extrabold uppercase tracking-widest mb-1.5">Recent Actions</div>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {recentActionIds
+                                                            .map((id) => liveActionById.get(id))
+                                                            .filter(Boolean)
+                                                            .map((act) => (
+                                                                <button
+                                                                    key={`recent-action-${act.id}`}
+                                                                    type="button"
+                                                                    disabled={!canUseActionTrigger(act)}
+                                                                    onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
+                                                                    className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-[10px] font-black uppercase tracking-wide text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                >
+                                                                    {act.label}
+                                                                </button>
+                                                            ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                             {canBackfillEndedPeriodStats && (
                                                 <div className="text-[10px] font-bold text-sky-200 bg-sky-500/10 border border-sky-500/30 rounded-lg px-2.5 py-2 inline-flex items-center gap-1.5">
                                                     <Icons.Edit />
@@ -9005,10 +9255,12 @@
                                         </div>}
 
                                         {/* Mobile Tab Toggles */}
-                                        <div className="col-span-12 md:hidden flex bg-slate-955 p-1 rounded-xl border border-slate-855 gap-1">
-                                            <button onClick={() => setActiveMobileConsoleTab('home')} className={`flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'home' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🏠 Home lineup</button>
-                                            <button onClick={() => setActiveMobileConsoleTab('away')} className={`flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'away' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🚌 Away lineup</button>
-                                        </div>
+                                        {showHomeLivePanel && showAwayLivePanel && (
+                                            <div className="col-span-12 md:hidden flex bg-slate-955 p-1 rounded-xl border border-slate-855 gap-1">
+                                                <button onClick={() => setActiveMobileConsoleTab('home')} className={`flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'home' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🏠 Home lineup</button>
+                                                <button onClick={() => setActiveMobileConsoleTab('away')} className={`flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'away' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🚌 Away lineup</button>
+                                            </div>
+                                        )}
 
                                         {/* Main Courtside tracking zones */}
                                         <div className={`col-span-12 ${canOperateLive ? `lg:col-span-9 grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'}` : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]'} gap-4`}>
@@ -9030,13 +9282,22 @@
                                                             {homeCanClearOnCourt && (
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => handleClearOnCourtPlayers(true)}
+                                                                    onClick={() => openClearOnCourtConfirm(true)}
                                                                     disabled={!canOperateTeam(true)}
                                                                     className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer"
                                                                 >
                                                                     Clear
                                                                 </button>
                                                             )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openWaveSubConfirm(true)}
+                                                                disabled={!canOperateTeam(true)}
+                                                                className="px-2 py-0.5 rounded-md border border-sky-500/35 bg-sky-500/10 text-[9px] font-black uppercase tracking-wide text-sky-300 hover:bg-sky-500/20 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                title="One-tap lineup wave switch. Repeats are only allowed when fewer than 10 eligible players are available."
+                                                            >
+                                                                Wave Sub
+                                                            </button>
                                                         </div>
                                                     )}
                                                 </div>
@@ -9150,13 +9411,22 @@
                                                             {awayCanClearOnCourt && (
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => handleClearOnCourtPlayers(false)}
+                                                                    onClick={() => openClearOnCourtConfirm(false)}
                                                                     disabled={!canOperateTeam(false)}
                                                                     className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer"
                                                                 >
                                                                     Clear
                                                                 </button>
                                                             )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openWaveSubConfirm(false)}
+                                                                disabled={!canOperateTeam(false)}
+                                                                className="px-2 py-0.5 rounded-md border border-sky-500/35 bg-sky-500/10 text-[9px] font-black uppercase tracking-wide text-sky-300 hover:bg-sky-500/20 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                title="One-tap lineup wave switch. Repeats are only allowed when fewer than 10 eligible players are available."
+                                                            >
+                                                                Wave Sub
+                                                            </button>
                                                         </div>
                                                     )}
                                                 </div>
@@ -9317,11 +9587,11 @@
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-xs bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-500/30">LIVE</span>
                                                     <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                                                        📊 Active Running Game Boxscore (All Rostered Players)
+                                                        📊 Live Boxscore
                                                     </h3>
                                                 </div>
                                                 <span className="text-xs font-extrabold text-orange-400 hover:text-orange-300">
-                                                    {showLiveRunningBoxscore ? "Hide Boxscore ▲" : "Show Running Boxscore ▼"}
+                                                    {showLiveRunningBoxscore ? "▲" : "Show Boxscore ▼"}
                                                 </span>
                                             </div>
 
@@ -11860,11 +12130,54 @@
                         <p>© 2021-2026 WKND Basketaball.</p>
                     </footer>
 
+                    {showStickyMobileActionsUi && activeTab === 'live' && canOperateLive && isGameLive && (
+                        <div className="md:hidden fixed bottom-3 left-3 right-3 z-40">
+                            <div className="rounded-2xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl p-2.5">
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleUndo}
+                                        disabled={!canUndoLatest}
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 py-2 text-[10px] font-black uppercase tracking-wide text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        <Icons.Undo />
+                                        Undo
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (recentActionIds.length > 0) {
+                                                const recentAction = liveActionById.get(recentActionIds[0]);
+                                                if (recentAction) {
+                                                    openActionForTeam(recentAction, operatorFocus === 'away' ? false : true);
+                                                }
+                                            }
+                                        }}
+                                        disabled={recentActionIds.length === 0}
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        <Icons.Zap />
+                                        {recentActionIds.length > 0 ? 'Repeat' : 'Action'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={canFinalizeGame ? openEndGameConfirm : openFinalizePeriodConfirm}
+                                        disabled={canFinalizeGame ? false : !canEndCurrentPeriod}
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-orange-500/45 bg-orange-500/15 py-2 text-[10px] font-black uppercase tracking-wide text-orange-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        <Icons.Stop />
+                                        {canFinalizeGame ? 'End Match' : 'End Period'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {}
                     {/* HISTORIC BOX SCORE EDITOR MODAL */}
                     {editingGame && (
-                        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-3xl shadow-2xl relative my-auto flex flex-col max-h-[90vh]">
+                        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-3xl shadow-2xl relative my-0 md:my-auto flex flex-col max-h-[85vh]">
                                 <div className="border-b border-slate-800 pb-3 mb-4 flex-shrink-0">
                                     <h3 className="text-lg font-black text-white">Edit Game Box Score</h3>
                                     <p className="text-xs text-slate-400">Match Date: {editingGame.date} • ID: {editingGame.id}</p>
@@ -12066,8 +12379,8 @@
 
                     {/* MODAL WRAPPERS */}
                     {showNewTeamModal && (
-                        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative">
+                        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-sm font-bold text-white mb-3">Create League Franchise</h3>
                                 <form onSubmit={handleCreateTeam} className="space-y-3 text-xs">
                                     <input type="text" value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="Team Name" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" required />
@@ -12082,8 +12395,8 @@
                     )}
 
                     {showNewPlayerModal && (
-                        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative">
+                        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-sm font-bold text-white mb-3">Register Roster Entry</h3>
                                 <form onSubmit={handleCreatePlayer} className="space-y-3 text-xs">
                                     <select value={selectedTeamIdForPlayer} onChange={(e) => setSelectedTeamIdForPlayer(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
@@ -12101,8 +12414,8 @@
                     )}
 
                     {advancedEditingPlayer && (
-                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-lg relative">
+                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-lg relative max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-sm font-bold text-white mb-1">Advanced Player Profile</h3>
                                 <p className="text-[11px] text-slate-400 mb-3">#{advancedEditingPlayer.number} {advancedEditingPlayer.name}</p>
                                 <form onSubmit={handleSaveAdvancedPlayerProfile} className="space-y-3 text-xs">
@@ -12186,8 +12499,8 @@
                     )}
 
                     {showSubstitutionModal && subTargetPlayer && (
-                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative font-sans">
+                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-1"><Icons.ArrowRightLeft /> Substitute Athlete</h3>
                                 <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
                                     {(() => {
@@ -12253,8 +12566,8 @@
                     )}
 
                     {showAddFromBenchModal && addFromBenchTeam && (
-                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative font-sans">
+                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-sm font-bold text-white mb-3">Add Player To On-Court</h3>
                                 <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
                                     {(() => {
@@ -12340,14 +12653,14 @@
 
                     {/* RECONFIGURED SINGLE TAP WORKFLOW MODAL DIALOG CONTAINER */}
                     {showLoggingModal && activeAction && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className={`bg-slate-900 border border-slate-800 rounded-2xl w-full shadow-2xl relative my-auto ${isCompactRecordActionModal ? 'max-w-xl p-4' : 'max-w-2xl p-5'}`}>
-                                <div className={`rounded-xl border border-emerald-400/45 bg-gradient-to-r from-emerald-500/20 via-emerald-400/10 to-cyan-500/15 ${isCompactRecordActionModal ? 'p-2 mb-2' : 'p-3 mb-3'}`}>
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className={`bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full shadow-2xl relative my-0 md:my-auto max-h-[85vh] overflow-y-auto ${isCompactRecordActionModal ? 'max-w-xl p-4' : 'max-w-2xl p-5'}`}>
+                                <div className={`rounded-xl border ${isCompactRecordActionModal ? 'p-2 mb-2' : 'p-3 mb-3'}`} style={activeActionTone.surfaceStyle}>
                                     <div className="text-center">
-                                        <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">Armed Stat Action</div>
+                                        <div className={`text-[10px] font-black uppercase tracking-[0.2em] ${activeActionTone.textClass}`}>Armed Stat Action</div>
                                         <h3 className={`${isCompactRecordActionModal ? 'text-base mt-1' : 'text-xl mt-1'} font-black text-white leading-tight`}>
                                             Record Action:
-                                            <span className="ml-2 inline-flex items-center rounded-md border border-emerald-300/60 bg-emerald-400/20 px-2 py-0.5 text-emerald-100 font-mono tracking-wide">
+                                            <span className={`ml-2 inline-flex items-center rounded-md border px-2 py-0.5 font-mono tracking-wide ${activeActionTone.textClass}`} style={activeActionTone.badgeStyle}>
                                                 {activeAction.label}
                                             </span>
                                         </h3>
@@ -12384,8 +12697,8 @@
                     )}
 
                     {isLoggedIn && canOperateLive && liveLogEditTarget && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-5 shadow-2xl relative my-auto space-y-3">
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 shadow-2xl relative my-0 md:my-auto space-y-3 max-h-[85vh] overflow-y-auto">
                                 <div>
                                     <h3 className="text-sm font-black text-white uppercase tracking-wider">Edit Live Log Action</h3>
                                     <p className="mt-1 text-[11px] text-slate-400">Current-period entries only. Prior periods remain locked.</p>
@@ -12431,8 +12744,8 @@
 
                     {/* FOUL WARNING MODAL OVERLAY */}
                     {foulAlert && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-                            <div className={`border p-6 rounded-2xl w-full max-w-sm shadow-2xl relative text-center my-auto ${
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className={`border p-6 rounded-t-2xl md:rounded-2xl w-full max-w-sm shadow-2xl relative text-center my-0 md:my-auto max-h-[85vh] overflow-y-auto ${
                                 foulAlert.type === 'disqualified' ? 'bg-red-955/90 border-red-500' : 'bg-amber-955 border-amber-700'
                             }`}>
                                 <div className="text-4xl mb-3">
@@ -12460,8 +12773,8 @@
                     )}
 
                     {periodEndAlert && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-orange-500/60 p-6 rounded-2xl w-full max-w-md shadow-2xl relative text-center my-auto">
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-orange-500/60 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-md shadow-2xl relative text-center my-0 md:my-auto max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-lg font-black text-white uppercase tracking-wider mb-2">{periodEndAlert.title}</h3>
                                 <p className="text-sm text-slate-200 leading-relaxed mb-4">{periodEndAlert.text}</p>
                                 <button
@@ -12475,8 +12788,8 @@
                     )}
 
                     {confirmDialog && (
-                        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-sm relative">
+                        <div className="fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto">
                                 <h3 className="text-md font-extrabold text-white mb-2">{confirmDialog.title}</h3>
                                 <p className="text-xs text-slate-400 mb-4">{confirmDialog.text}</p>
                                 <div className="flex gap-3 text-xs font-bold">
