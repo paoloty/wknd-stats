@@ -56,6 +56,7 @@ const OPENAI_FALLBACK_MODELS = [
   'gpt-4o-mini'
 ];
 const AI_PRIMARY_PROVIDER = String(process.env.AI_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase();
+const SOCIAL_COVER_LOGO_PATH = path.join(__dirname, 'src', 'wknd-s3-logo.png');
 
 function getAiProviderOrder() {
   if (AI_PRIMARY_PROVIDER === 'openai') {
@@ -918,16 +919,79 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeSocialCoverText(value) {
+  const raw = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+
+  const normalized = raw
+    .replace(/[•·]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, '-')
+    .replace(/[^\x20-\x7E]/g, '');
+
+  return normalized.replace(/\s+/g, ' ').trim();
+}
+
+function trimForMeta(text, limit) {
+  const value = String(text || '').trim();
+  if (!value) return '';
+  if (!limit || value.length <= limit) return value;
+  return `${value.slice(0, Math.max(0, limit - 3)).trim()}...`;
+}
+
+function getRecapFirstLine(game) {
+  const rawWriteup = String(game?.gameWriteup || '');
+  if (!rawWriteup) return '';
+  const lines = rawWriteup
+    .split(/\r?\n/)
+    .map((line) => normalizeSocialCoverText(line))
+    .filter(Boolean);
+  return lines[0] || '';
+}
+
+function getRecapFirstParagraph(game) {
+  const rawWriteup = String(game?.gameWriteup || '');
+  if (!rawWriteup) return '';
+  const firstParagraph = rawWriteup
+    .split(/\r?\n\s*\r?\n/)
+    .map((part) => part.trim())
+    .find(Boolean) || '';
+  return normalizeSocialCoverText(firstParagraph);
+}
+
+function getSocialImageVersion(game) {
+  if (!game) return 'default';
+  const source = [
+    String(game.id || ''),
+    String(game.date || ''),
+    String(game.teamAName || ''),
+    String(game.teamBName || ''),
+    String(game.teamAScore || ''),
+    String(game.teamBScore || ''),
+    String(game.gameWriteup || ''),
+    String(game.potgWriteup || ''),
+    String(game.socialCoverDataUrl || '')
+  ].join('|');
+  return crypto.createHash('sha1').update(source).digest('hex').slice(0, 12);
+}
+
 function buildRecapTitle(game) {
   if (!game) return 'WKND League Stats';
-  return `Game Recap: ${game.teamAName} ${game.teamAScore} - ${game.teamBScore} ${game.teamBName}`;
+  const recapFirstLine = getRecapFirstLine(game);
+  if (recapFirstLine) {
+    return trimForMeta(recapFirstLine, 110);
+  }
+  const teamAName = normalizeSocialCoverText(game.teamAName) || 'Team A';
+  const teamBName = normalizeSocialCoverText(game.teamBName) || 'Team B';
+  return `Game Recap: ${teamAName} ${game.teamAScore} - ${game.teamBScore} ${teamBName}`;
 }
 
 function buildRecapDescription(game) {
   const fallback = 'Live scores, game recap, and player performances from WKND League.';
-  const writeup = String(game?.gameWriteup || '').replace(/\s+/g, ' ').trim();
-  if (!writeup) return fallback;
-  return writeup.length > 220 ? `${writeup.slice(0, 217)}...` : writeup;
+  const firstParagraph = getRecapFirstParagraph(game);
+  if (!firstParagraph) return fallback;
+  return trimForMeta(firstParagraph, 190);
 }
 
 function buildSocialMetaTags({ req, game }) {
@@ -936,9 +1000,10 @@ function buildSocialMetaTags({ req, game }) {
   const canonicalUrl = `${origin}${canonicalPath}`;
   const title = buildRecapTitle(game);
   const description = buildRecapDescription(game);
+  const imageVersion = getSocialImageVersion(game);
   const imageUrl = game
-    ? `${origin}/api/social-cover/${encodeURIComponent(game.id)}.png`
-    : `${origin}/api/social-cover/default.png`;
+    ? `${origin}/api/social-cover/${encodeURIComponent(game.id)}.png?v=${encodeURIComponent(imageVersion)}`
+    : `${origin}/api/social-cover/default.png?v=${encodeURIComponent(imageVersion)}`;
 
   return [
     `<title>${escapeHtml(title)}</title>`,
@@ -959,7 +1024,7 @@ function buildSocialMetaTags({ req, game }) {
   ].join('\n    ');
 }
 
-async function buildSocialCoverPng(game) {
+async function buildSocialCoverPng(game, teams = []) {
   requireSharp();
   const W = 1200;
   const H = 630;
@@ -970,6 +1035,29 @@ async function buildSocialCoverPng(game) {
   const teamAScore = Number(game?.teamAScore || 0);
   const teamBScore = Number(game?.teamBScore || 0);
   const dateText = String(game?.date || '').trim();
+  const potg = game ? derivePlayerOfTheGameFromState(game, teams) : null;
+  const potgName = normalizeSocialCoverText(potg?.name || '');
+  const potgStats = normalizeSocialCoverText(potg?.statsLine || '');
+  const potgInitial = getInitials(potgName || '?');
+  const potgTeamColor = String(potg?.teamColor || '#f97316');
+
+  const writeupY = potg ? 430 : 458;
+  const avatarCx = 72;
+  const avatarCy = 528;
+  const avatarR = 30;
+  const potgTextX = avatarCx + avatarR + 30;
+  let logoOverlay = null;
+
+  if (fs.existsSync(SOCIAL_COVER_LOGO_PATH)) {
+    try {
+      logoOverlay = await sharp(SOCIAL_COVER_LOGO_PATH)
+        .resize({ width: 220, height: 44, fit: 'contain', withoutEnlargement: true })
+        .png()
+        .toBuffer();
+    } catch (_) {
+      logoOverlay = null;
+    }
+  }
 
   const svg = Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -985,7 +1073,6 @@ async function buildSocialCoverPng(game) {
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
   <rect width="${W}" height="${H}" fill="url(#diag)"/>
 
-  <text x="44" y="56" fill="#f97316" font-size="32" font-family="Arial, sans-serif" font-weight="700">WKND GLEAGUE SEASON 3</text>
   <text x="${W - 44}" y="56" fill="#94a3b8" text-anchor="end" font-size="24" font-family="Arial, sans-serif">${escapeHtml(dateText)}</text>
 
   <text x="80" y="140" fill="#ef4444" font-size="44" font-family="Arial, sans-serif" font-weight="700">${escapeHtml(teamAName)}</text>
@@ -998,11 +1085,25 @@ async function buildSocialCoverPng(game) {
   <line x1="64" y1="352" x2="1136" y2="352" stroke="#334155" stroke-width="3"/>
 
   <text x="64" y="408" fill="#e2e8f0" font-size="46" font-family="Arial, sans-serif" font-weight="700">${escapeHtml(title)}</text>
-  <text x="64" y="458" fill="#94a3b8" font-size="30" font-family="Arial, sans-serif">${escapeHtml(writeup)}</text>
+  <text x="64" y="${writeupY}" fill="#94a3b8" font-size="30" font-family="Arial, sans-serif">${escapeHtml(writeup)}</text>
+
+  ${potg ? `
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 4}" fill="${escapeHtml(potgTeamColor)}66"/>
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR}" fill="#0b1220"/>
+  <text x="${avatarCx}" y="${avatarCy + 11}" text-anchor="middle" fill="#f8fafc" font-size="30" font-family="Arial, sans-serif" font-weight="800">${escapeHtml(potgInitial)}</text>
+
+  <text x="${potgTextX}" y="495" fill="#f97316" font-size="16" font-family="Arial, sans-serif" font-weight="700">PLAYER OF THE GAME</text>
+  <text x="${potgTextX}" y="533" fill="#ffffff" font-size="34" font-family="Arial, sans-serif" font-weight="800">${escapeHtml(potgName)}</text>
+  <text x="${potgTextX}" y="563" fill="#e2e8f0" font-size="22" font-family="Arial, sans-serif" font-weight="700">${escapeHtml(potgStats)}</text>
+  ` : ''}
 </svg>
   `);
 
-  return sharp(svg).png({ compressionLevel: 9 }).toBuffer();
+  const render = sharp(svg).png({ compressionLevel: 9 });
+  if (logoOverlay) {
+    render.composite([{ input: logoOverlay, left: 40, top: 28 }]);
+  }
+  return render.toBuffer();
 }
 
 function derivePlayerOfTheGameFromState(game, teams) {
@@ -1075,7 +1176,7 @@ function derivePlayerOfTheGameFromState(game, teams) {
   const team = teamsList.find((item) => (Array.isArray(item?.players) ? item.players : []).some((p) => p.id === best.playerId));
   return {
     name: String(player?.name || 'PLAYER').toUpperCase(),
-    statsLine: `${best.pts} PTS  ·  ${best.reb} REB  ·  ${best.ast} AST`,
+    statsLine: `${best.pts} PTS - ${best.reb} REB - ${best.ast} AST`,
     teamColor: String(team?.color || '#f97316'),
     number: String(player?.number || ''),
     teamName: String(team?.name || ''),
@@ -1953,7 +2054,7 @@ app.get('/api/social-cover/default.png', async (_req, res) => {
       res.status(501).json({ error: 'Social cover generation is disabled in this build because sharp is not installed.' });
       return;
     }
-    const png = await buildSocialCoverPng(null);
+    const png = await buildSocialCoverPng(null, []);
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.send(png);
@@ -1978,7 +2079,7 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
     if (parsedCustom) {
       png = await buildCustomSocialCoverPng(game, state.teams || [], parsedCustom.buffer, baseOrigin);
     } else {
-      png = await buildSocialCoverPng(game);
+      png = await buildSocialCoverPng(game, state.teams || []);
     }
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');

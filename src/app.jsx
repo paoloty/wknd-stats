@@ -235,6 +235,7 @@
             const canOperateLive = authRole === 'operator' || authRole === 'admin';
             const canEditPlayers = authRole === 'operator' || authRole === 'admin';
             const isLoggedIn = authRole !== 'viewer';
+            const showOperatorFocusControls = canOperateLive && activeTab === 'live' && isGameLive;
             const editableLiveStatActions = (statActions || []).filter((action) => {
                 if (!action || !action.id || !action.label || !action.stat) return false;
                 return Number(action.val || 0) !== 0;
@@ -7378,6 +7379,33 @@
                     img.src = src;
                 });
 
+                let socialCoverLogo = null;
+                try {
+                    socialCoverLogo = await loadImage('/src/wknd-s3-logo.png');
+                } catch (_) {
+                    socialCoverLogo = null;
+                }
+
+                const drawTopLeftCoverLogo = () => {
+                    if (!socialCoverLogo) return;
+                    const maxW = 220;
+                    const maxH = 44;
+                    const srcW = Number(socialCoverLogo.naturalWidth || socialCoverLogo.width || 0);
+                    const srcH = Number(socialCoverLogo.naturalHeight || socialCoverLogo.height || 0);
+                    if (!srcW || !srcH) return;
+                    const scale = Math.min(maxW / srcW, maxH / srcH);
+                    const drawW = Math.max(1, Math.round(srcW * scale));
+                    const drawH = Math.max(1, Math.round(srcH * scale));
+                    const badgeX = 32;
+                    const badgeY = 18;
+                    const badgeW = 236;
+                    const badgeH = 52;
+                    const imageX = badgeX + Math.round((badgeW - drawW) / 2);
+                    const imageY = badgeY + Math.round((badgeH - drawH) / 2);
+
+                    ctx.drawImage(socialCoverLogo, imageX, imageY, drawW, drawH);
+                };
+
                 const drawPOTGAvatar = async ({ avatarSource, avatarX, avatarY, avatarR, fallbackName, ringColor }) => {
                     ctx.beginPath();
                     ctx.arc(avatarX, avatarY, avatarR + 5, 0, Math.PI * 2);
@@ -7464,6 +7492,8 @@
                     bottomFade.addColorStop(1, 'rgba(2, 6, 23, 0.94)');
                     ctx.fillStyle = bottomFade;
                     ctx.fillRect(0, H * 0.75, W, H * 0.25);
+
+                    drawTopLeftCoverLogo();
 
                     const colorA = teamAObj?.color || '#10b981';
                     const colorB = teamBObj?.color || '#ef4444';
@@ -7593,15 +7623,8 @@
                 ctx.fillStyle = colorB;
                 ctx.fillRect(W / 2, H - 6, W / 2, 6);
 
-                // League badge area (top-left)
-                ctx.fillStyle = '#1e293b';
-                ctx.beginPath();
-                ctx.roundRect(40, 28, 160, 32, 8);
-                ctx.fill();
-                ctx.fillStyle = '#f97316';
-                ctx.font = 'bold 13px system-ui, sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText('WKND GLEAGUE SEASON 3', 120, 49);
+                // Top-left season logo
+                drawTopLeftCoverLogo();
 
                 // Date badge (top-right)
                 ctx.fillStyle = '#1e293b';
@@ -7654,7 +7677,7 @@
                     ctx.fillStyle = '#f97316';
                     ctx.font = 'bold 13px system-ui, sans-serif';
                     ctx.textAlign = 'center';
-                    ctx.fillText('PLAYER OF THE GAME', W / 2, 380);
+                    ctx.fillText('PLAYER OF THE GAME', W / 2, 368);
 
                     // Avatar frame
                     const avatarX = W / 2;
@@ -7680,11 +7703,11 @@
 
                     ctx.fillStyle = '#94a3b8';
                     ctx.font = 'bold 14px system-ui, sans-serif';
-                    ctx.fillText(`#${playerOfTheGame.number || '-'} • ${playerOfTheGame.teamName || ''}`, W / 2, 490);
+                    ctx.fillText(`#${playerOfTheGame.number || '-'} • ${playerOfTheGame.teamName || ''}`, W / 2, 514);
 
                     ctx.fillStyle = '#ffffff';
                     ctx.font = 'bold 34px system-ui, sans-serif';
-                    ctx.fillText(playerOfTheGame.name || '', W / 2, 528);
+                    ctx.fillText(playerOfTheGame.name || '', W / 2, 554);
 
                     const potgStats = playerOfTheGame.stats || {};
                     const potgLine = [
@@ -7694,7 +7717,7 @@
                     ].filter(Boolean).join('  ·  ');
                     ctx.fillStyle = '#e2e8f0';
                     ctx.font = 'bold 22px system-ui, sans-serif';
-                    ctx.fillText(potgLine, W / 2, 560);
+                    ctx.fillText(potgLine, W / 2, 584);
                 }
 
                 // Recap snippet (up to 120 chars)
@@ -7703,7 +7726,7 @@
                     ctx.fillStyle = '#475569';
                     ctx.font = 'italic 14px system-ui, sans-serif';
                     ctx.textAlign = 'center';
-                    const lineY = playerOfTheGame ? 592 : 395;
+                    const lineY = playerOfTheGame ? 610 : 395;
                     ctx.fillText(`"${snippet}${snippet.length === 120 ? '…' : ''}"`, W / 2, lineY);
                 }
 
@@ -8113,19 +8136,21 @@
                                     {canOperateLive && (
                                         <div className="border-t border-slate-800/70 px-3 py-2.5 space-y-2">
                                             <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Current Account: <span className="text-orange-300">{authRole.toUpperCase()}</span></div>
-                                            <div className="grid grid-cols-3 gap-1.5">
-                                                {operatorFocusOptions.map((option) => (
-                                                    <button
-                                                        key={`focus-mobile-${option.id}`}
-                                                        type="button"
-                                                        onClick={() => setOperatorFocus(option.id)}
-                                                        className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
-                                                        style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
-                                                    >
-                                                        {getFocusOptionLabel(option.id)}
-                                                    </button>
-                                                ))}
-                                            </div>
+                                            {showOperatorFocusControls && (
+                                                <div className="grid grid-cols-3 gap-1.5">
+                                                    {operatorFocusOptions.map((option) => (
+                                                        <button
+                                                            key={`focus-mobile-${option.id}`}
+                                                            type="button"
+                                                            onClick={() => setOperatorFocus(option.id)}
+                                                            className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
+                                                            style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
+                                                        >
+                                                            {getFocusOptionLabel(option.id)}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
 
@@ -8174,20 +8199,24 @@
                                     <div className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl p-3 z-50">
                                         <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Current Account</div>
                                         <div className="text-xs font-bold text-orange-300 mt-0.5">{authRole.toUpperCase()}</div>
-                                        <div className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Operator Focus</div>
-                                        <div className="grid grid-cols-3 gap-1.5 mt-1.5">
-                                            {operatorFocusOptions.map((option) => (
-                                                <button
-                                                    key={`focus-account-${option.id}`}
-                                                    type="button"
-                                                    onClick={() => setOperatorFocus(option.id)}
-                                                    className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
-                                                    style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
-                                                >
-                                                    {getFocusOptionLabel(option.id)}
-                                                </button>
-                                            ))}
-                                        </div>
+                                        {showOperatorFocusControls && (
+                                            <>
+                                                <div className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Operator Focus</div>
+                                                <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                                                    {operatorFocusOptions.map((option) => (
+                                                        <button
+                                                            key={`focus-account-${option.id}`}
+                                                            type="button"
+                                                            onClick={() => setOperatorFocus(option.id)}
+                                                            className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
+                                                            style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
+                                                        >
+                                                            {getFocusOptionLabel(option.id)}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => {
