@@ -1052,12 +1052,14 @@ function buildSocialMetaTags({ req, game }) {
   ].join('\n    ');
 }
 
-async function buildSocialCoverPng(game, teams = []) {
+async function buildSocialCoverPng(game, teams = [], baseOrigin = '') {
   requireSharp();
   const W = 1200;
   const H = 630;
-  const title = buildRecapTitle(game);
-  const writeup = buildRecapDescription(game);
+  const teamA = (Array.isArray(teams) ? teams : []).find((team) => team.id === game?.teamAId) || null;
+  const teamB = (Array.isArray(teams) ? teams : []).find((team) => team.id === game?.teamBId) || null;
+  const colorA = String(teamA?.color || '#10b981');
+  const colorB = String(teamB?.color || '#3b82f6');
   const teamAName = String(game?.teamAName || 'HOME').toUpperCase();
   const teamBName = String(game?.teamBName || 'AWAY').toUpperCase();
   const teamAScore = Number(game?.teamAScore || 0);
@@ -1066,15 +1068,22 @@ async function buildSocialCoverPng(game, teams = []) {
   const potg = game ? derivePlayerOfTheGameFromState(game, teams) : null;
   const potgName = normalizeSocialCoverText(potg?.name || '');
   const potgStats = normalizeSocialCoverText(potg?.statsLine || '');
+  const potgMeta = normalizeSocialCoverText(`#${potg?.number || '-'} • ${potg?.teamName || ''}`);
   const potgInitial = getInitials(potgName || '?');
   const potgTeamColor = String(potg?.teamColor || '#f97316');
+  const winner = teamAScore > teamBScore ? teamAName : (teamBScore > teamAScore ? teamBName : null);
+  const resultText = winner ? `${winner} WINS` : 'FINAL SCORE';
+  const snippet = normalizeSocialCoverText(String(game?.gameWriteup || '').trim()).slice(0, 120);
+  const snippetText = snippet ? `"${snippet}${snippet.length === 120 ? '...' : ''}"` : '';
 
-  const writeupY = potg ? 430 : 458;
-  const avatarCx = 72;
-  const avatarCy = 528;
-  const avatarR = 30;
-  const potgTextX = avatarCx + avatarR + 30;
+  const avatarCx = W / 2;
+  const avatarCy = 432;
+  const avatarR = 44;
+  const avatarSize = avatarR * 2;
+  const avatarLeft = avatarCx - avatarR;
+  const avatarTop = avatarCy - avatarR;
   let logoOverlay = null;
+  let avatarOverlay = null;
   const logoPath = resolveSocialCoverLogoPath();
 
   if (logoPath) {
@@ -1085,6 +1094,23 @@ async function buildSocialCoverPng(game, teams = []) {
         .toBuffer();
     } catch (_) {
       logoOverlay = null;
+    }
+  }
+
+  if (potg?.pictureUrl) {
+    try {
+      const avatarSource = await readImageBufferFromSource(potg.pictureUrl, baseOrigin);
+      if (avatarSource) {
+        const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarR}" cy="${avatarR}" r="${avatarR}" fill="#fff"/></svg>`);
+        avatarOverlay = await sharp(avatarSource)
+          .rotate()
+          .resize(avatarSize, avatarSize, { fit: 'cover', position: 'centre' })
+          .composite([{ input: mask, blend: 'dest-in' }])
+          .png({ compressionLevel: 9 })
+          .toBuffer();
+      }
+    } catch (_) {
+      avatarOverlay = null;
     }
   }
 
@@ -1102,37 +1128,50 @@ async function buildSocialCoverPng(game, teams = []) {
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
   <rect width="${W}" height="${H}" fill="url(#diag)"/>
 
+  <rect x="0" y="0" width="${W / 2}" height="6" fill="${escapeHtml(colorA)}"/>
+  <rect x="${W / 2}" y="0" width="${W / 2}" height="6" fill="${escapeHtml(colorB)}"/>
+  <rect x="0" y="${H - 6}" width="${W / 2}" height="6" fill="${escapeHtml(colorA)}"/>
+  <rect x="${W / 2}" y="${H - 6}" width="${W / 2}" height="6" fill="${escapeHtml(colorB)}"/>
+
+  <rect x="1000" y="28" width="160" height="32" rx="8" fill="#1e293b"/>
+
   <text x="${W - 44}" y="56" fill="#94a3b8" text-anchor="end" font-size="24" font-family="${SVG_FONT_STACK}">${escapeHtml(dateText)}</text>
 
-  <text x="80" y="140" fill="#ef4444" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamAName)}</text>
+  <text x="80" y="140" fill="${escapeHtml(colorA)}" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamAName)}</text>
   <text x="80" y="300" fill="#ffffff" font-size="170" font-family="${SVG_FONT_STACK}" font-weight="800">${teamAScore}</text>
 
-  <text x="${W - 80}" y="140" fill="#64748b" text-anchor="end" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamBName)}</text>
+  <text x="${W - 80}" y="140" fill="${escapeHtml(colorB)}" text-anchor="end" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamBName)}</text>
   <text x="${W - 80}" y="300" fill="#ffffff" text-anchor="end" font-size="170" font-family="${SVG_FONT_STACK}" font-weight="800">${teamBScore}</text>
 
   <text x="${W / 2}" y="238" fill="#334155" text-anchor="middle" font-size="56" font-family="${SVG_FONT_STACK}" font-weight="700">VS</text>
+  <text x="${W / 2}" y="310" fill="#64748b" text-anchor="middle" font-size="40" font-family="${SVG_FONT_STACK}">${escapeHtml(resultText)}</text>
   <line x1="64" y1="352" x2="1136" y2="352" stroke="#334155" stroke-width="3"/>
 
-  <text x="64" y="408" fill="#e2e8f0" font-size="46" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(title)}</text>
-  <text x="64" y="${writeupY}" fill="#94a3b8" font-size="30" font-family="${SVG_FONT_STACK}">${escapeHtml(writeup)}</text>
-
   ${potg ? `
+  <text x="${W / 2}" y="368" fill="#f97316" text-anchor="middle" font-size="24" font-family="${SVG_FONT_STACK}" font-weight="700">PLAYER OF THE GAME</text>
   <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 4}" fill="${escapeHtml(potgTeamColor)}66"/>
-  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR}" fill="#0b1220"/>
-  <text x="${avatarCx}" y="${avatarCy + 11}" text-anchor="middle" fill="#f8fafc" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgInitial)}</text>
-
-  <text x="${potgTextX}" y="495" fill="#f97316" font-size="16" font-family="${SVG_FONT_STACK}" font-weight="700">PLAYER OF THE GAME</text>
-  <text x="${potgTextX}" y="533" fill="#ffffff" font-size="34" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgName)}</text>
-  <text x="${potgTextX}" y="563" fill="#e2e8f0" font-size="22" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(potgStats)}</text>
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 1}" fill="#0b1220"/>
+  ${avatarOverlay ? '' : `<text x="${avatarCx}" y="${avatarCy + 12}" text-anchor="middle" fill="#f8fafc" font-size="36" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgInitial)}</text>`}
+  <text x="${W / 2}" y="514" fill="#94a3b8" text-anchor="middle" font-size="24" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(potgMeta)}</text>
+  <text x="${W / 2}" y="554" fill="#ffffff" text-anchor="middle" font-size="56" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgName)}</text>
+  <text x="${W / 2}" y="584" fill="#e2e8f0" text-anchor="middle" font-size="36" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(potgStats)}</text>
   ` : ''}
+
+  ${snippetText ? `<text x="${W / 2}" y="610" fill="#475569" text-anchor="middle" font-size="20" font-style="italic" font-family="${SVG_FONT_STACK}">${escapeHtml(snippetText)}</text>` : ''}
 </svg>
   `);
 
-  const render = sharp(svg).png({ compressionLevel: 9 });
-  if (logoOverlay) {
-    render.composite([{ input: logoOverlay, left: 40, top: 28 }]);
+  const layers = [];
+  if (avatarOverlay) {
+    layers.push({ input: avatarOverlay, left: avatarLeft, top: avatarTop });
   }
-  return render.toBuffer();
+  if (logoOverlay) {
+    layers.push({ input: logoOverlay, left: 40, top: 28 });
+  }
+  return sharp(svg)
+    .composite(layers)
+    .png({ compressionLevel: 9 })
+    .toBuffer();
 }
 
 function derivePlayerOfTheGameFromState(game, teams) {
@@ -2128,7 +2167,7 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
     if (parsedCustom) {
       png = await buildCustomSocialCoverPng(game, state.teams || [], parsedCustom.buffer, baseOrigin);
     } else {
-      png = await buildSocialCoverPng(game, state.teams || []);
+      png = await buildSocialCoverPng(game, state.teams || [], baseOrigin);
     }
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');

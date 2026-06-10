@@ -218,6 +218,7 @@
             const pendingModalSoftResumeRef = useRef(false);
             const liveGameplayControlSnapshotRef = useRef(null);
             const attemptedAutoPotgWriteupRef = useRef(new Set());
+            const pendingYoutubeSaveRef = useRef({});
 
             // Modal Alert System for 4th and 5th personal fouls
             const [foulAlert, setFoulAlert] = useState(null);
@@ -3129,7 +3130,41 @@
 
                             if (payload.state) {
                                 setTeams(normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []));
-                                setGames(Array.isArray(payload.state.games) ? payload.state.games.sort((a, b) => b.id.localeCompare(a.id)) : []);
+                                setGames(() => {
+                                    const remoteGames = Array.isArray(payload.state.games)
+                                        ? payload.state.games.sort((a, b) => b.id.localeCompare(a.id))
+                                        : [];
+                                    const now = Date.now();
+
+                                    return remoteGames.map((remoteGame) => {
+                                        const gameId = String(remoteGame?.id || '');
+                                        const pending = pendingYoutubeSaveRef.current[gameId];
+                                        if (!pending) return remoteGame;
+
+                                        if (!pending.expiresAt || pending.expiresAt <= now) {
+                                            delete pendingYoutubeSaveRef.current[gameId];
+                                            return remoteGame;
+                                        }
+
+                                        const pendingUrl = normalizeYouTubeUrl(pending.url || '');
+                                        const remoteUrl = normalizeYouTubeUrl(remoteGame?.youtubeUrl || '');
+                                        if (remoteUrl === pendingUrl) {
+                                            delete pendingYoutubeSaveRef.current[gameId];
+                                            return remoteGame;
+                                        }
+
+                                        if (pendingUrl) {
+                                            return {
+                                                ...remoteGame,
+                                                youtubeUrl: pendingUrl
+                                            };
+                                        }
+
+                                        const nextGame = { ...remoteGame };
+                                        delete nextGame.youtubeUrl;
+                                        return nextGame;
+                                    });
+                                });
                             }
 
                             if ('session' in payload) {
@@ -3728,9 +3763,20 @@
                     return nextGame;
                 });
 
+                pendingYoutubeSaveRef.current[String(gameId)] = {
+                    url: normalizedUrl || '',
+                    expiresAt: Date.now() + 15000
+                };
+
                 setGames(updatedGames);
-                await saveFullState(teams, updatedGames);
-                showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
+                const didSave = await saveFullState(teams, updatedGames);
+                delete pendingYoutubeSaveRef.current[String(gameId)];
+
+                if (didSave) {
+                    showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
+                } else {
+                    showToast('Could not save YouTube link right now. Please try again.', 'error');
+                }
             };
 
             const handleSaveGameWriteup = async (gameId) => {
@@ -7347,6 +7393,28 @@
                 canvas.height = H;
                 const ctx = canvas.getContext('2d');
                 const customCoverDataUrl = String(game?.socialCoverDataUrl || '').trim();
+
+                // Keep downloaded default cover identical to the OG image by preferring server-rendered PNG.
+                if (!customCoverDataUrl && !generatedPlayerArtDataUrl && game?.id) {
+                    try {
+                        const response = await fetch(`/api/social-cover/${encodeURIComponent(game.id)}.png?v=${Date.now()}`, {
+                            cache: 'no-store'
+                        });
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            if (blob && blob.size > 0) {
+                                const blobUrl = URL.createObjectURL(blob);
+                                const link = document.createElement('a');
+                                link.download = `wknd-game-${game.id}-cover.png`;
+                                link.href = blobUrl;
+                                link.click();
+                                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                                showToast('Cover image downloaded.', 'success');
+                                return;
+                            }
+                        }
+                    } catch (_) {}
+                }
 
                 const detectFaceBoundingBox = async (img) => {
                     try {
