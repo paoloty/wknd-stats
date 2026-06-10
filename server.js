@@ -2132,7 +2132,7 @@ app.use((req, res, next) => {
   res.redirect(308, `${protocol}://${targetHost}${req.originalUrl || '/'}`);
 });
 
-app.get('/', (req, res) => {
+function renderInjectedIndex(req, res) {
   try {
     const gameId = String(req.query.gameId || '').trim();
     const isGameView = String(req.query.view || '').toLowerCase() === 'game' && gameId;
@@ -2150,6 +2150,14 @@ app.get('/', (req, res) => {
   } catch {
     res.sendFile(path.join(__dirname, 'index.html'));
   }
+}
+
+app.get('/', (req, res) => {
+  renderInjectedIndex(req, res);
+});
+
+app.get('/index.html', (req, res) => {
+  renderInjectedIndex(req, res);
 });
 
 app.use(express.static(__dirname, { index: false }));
