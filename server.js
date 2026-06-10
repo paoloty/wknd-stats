@@ -57,6 +57,7 @@ const OPENAI_FALLBACK_MODELS = [
 ];
 const AI_PRIMARY_PROVIDER = String(process.env.AI_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase();
 const SOCIAL_COVER_LOGO_PATH = path.join(__dirname, 'src', 'wknd-s3-logo.png');
+const SVG_FONT_STACK = 'Noto Sans, DejaVu Sans, Liberation Sans, Arial, sans-serif';
 
 function getAiProviderOrder() {
   if (AI_PRIMARY_PROVIDER === 'openai') {
@@ -1073,28 +1074,28 @@ async function buildSocialCoverPng(game, teams = []) {
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
   <rect width="${W}" height="${H}" fill="url(#diag)"/>
 
-  <text x="${W - 44}" y="56" fill="#94a3b8" text-anchor="end" font-size="24" font-family="Arial, sans-serif">${escapeHtml(dateText)}</text>
+  <text x="${W - 44}" y="56" fill="#94a3b8" text-anchor="end" font-size="24" font-family="${SVG_FONT_STACK}">${escapeHtml(dateText)}</text>
 
-  <text x="80" y="140" fill="#ef4444" font-size="44" font-family="Arial, sans-serif" font-weight="700">${escapeHtml(teamAName)}</text>
-  <text x="80" y="300" fill="#ffffff" font-size="170" font-family="Arial, sans-serif" font-weight="800">${teamAScore}</text>
+  <text x="80" y="140" fill="#ef4444" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamAName)}</text>
+  <text x="80" y="300" fill="#ffffff" font-size="170" font-family="${SVG_FONT_STACK}" font-weight="800">${teamAScore}</text>
 
-  <text x="${W - 80}" y="140" fill="#64748b" text-anchor="end" font-size="44" font-family="Arial, sans-serif" font-weight="700">${escapeHtml(teamBName)}</text>
-  <text x="${W - 80}" y="300" fill="#ffffff" text-anchor="end" font-size="170" font-family="Arial, sans-serif" font-weight="800">${teamBScore}</text>
+  <text x="${W - 80}" y="140" fill="#64748b" text-anchor="end" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamBName)}</text>
+  <text x="${W - 80}" y="300" fill="#ffffff" text-anchor="end" font-size="170" font-family="${SVG_FONT_STACK}" font-weight="800">${teamBScore}</text>
 
-  <text x="${W / 2}" y="238" fill="#334155" text-anchor="middle" font-size="56" font-family="Arial, sans-serif" font-weight="700">VS</text>
+  <text x="${W / 2}" y="238" fill="#334155" text-anchor="middle" font-size="56" font-family="${SVG_FONT_STACK}" font-weight="700">VS</text>
   <line x1="64" y1="352" x2="1136" y2="352" stroke="#334155" stroke-width="3"/>
 
-  <text x="64" y="408" fill="#e2e8f0" font-size="46" font-family="Arial, sans-serif" font-weight="700">${escapeHtml(title)}</text>
-  <text x="64" y="${writeupY}" fill="#94a3b8" font-size="30" font-family="Arial, sans-serif">${escapeHtml(writeup)}</text>
+  <text x="64" y="408" fill="#e2e8f0" font-size="46" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(title)}</text>
+  <text x="64" y="${writeupY}" fill="#94a3b8" font-size="30" font-family="${SVG_FONT_STACK}">${escapeHtml(writeup)}</text>
 
   ${potg ? `
   <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 4}" fill="${escapeHtml(potgTeamColor)}66"/>
   <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR}" fill="#0b1220"/>
-  <text x="${avatarCx}" y="${avatarCy + 11}" text-anchor="middle" fill="#f8fafc" font-size="30" font-family="Arial, sans-serif" font-weight="800">${escapeHtml(potgInitial)}</text>
+  <text x="${avatarCx}" y="${avatarCy + 11}" text-anchor="middle" fill="#f8fafc" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgInitial)}</text>
 
-  <text x="${potgTextX}" y="495" fill="#f97316" font-size="16" font-family="Arial, sans-serif" font-weight="700">PLAYER OF THE GAME</text>
-  <text x="${potgTextX}" y="533" fill="#ffffff" font-size="34" font-family="Arial, sans-serif" font-weight="800">${escapeHtml(potgName)}</text>
-  <text x="${potgTextX}" y="563" fill="#e2e8f0" font-size="22" font-family="Arial, sans-serif" font-weight="700">${escapeHtml(potgStats)}</text>
+  <text x="${potgTextX}" y="495" fill="#f97316" font-size="16" font-family="${SVG_FONT_STACK}" font-weight="700">PLAYER OF THE GAME</text>
+  <text x="${potgTextX}" y="533" fill="#ffffff" font-size="34" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgName)}</text>
+  <text x="${potgTextX}" y="563" fill="#e2e8f0" font-size="22" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(potgStats)}</text>
   ` : ''}
 </svg>
   `);
@@ -1302,18 +1303,18 @@ async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOri
 
   <rect x="0" y="${Math.round(H * 0.75)}" width="${W}" height="${Math.round(H * 0.25)}" fill="url(#bottomFade)"/>
 
-  <text x="${scoreTextRight}" y="${scoreTextTop}" text-anchor="end" fill="${escapeHtml(colorA)}" font-size="30" font-family="Arial, sans-serif" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamAName || '').toUpperCase())} ${Number(game?.teamAScore || 0)}</text>
-  <text x="${scoreTextRight}" y="${scoreTextTop + scoreLineGap}" text-anchor="end" fill="${escapeHtml(colorB)}" font-size="30" font-family="Arial, sans-serif" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamBName || '').toUpperCase())} ${Number(game?.teamBScore || 0)}</text>
+  <text x="${scoreTextRight}" y="${scoreTextTop}" text-anchor="end" fill="${escapeHtml(colorA)}" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamAName || '').toUpperCase())} ${Number(game?.teamAScore || 0)}</text>
+  <text x="${scoreTextRight}" y="${scoreTextTop + scoreLineGap}" text-anchor="end" fill="${escapeHtml(colorB)}" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamBName || '').toUpperCase())} ${Number(game?.teamBScore || 0)}</text>
 
   <rect x="${scoreBarX}" y="${scoreBarY}" width="${scoreBarW / 2}" height="${scoreBarH}" fill="${escapeHtml(colorA)}"/>
   <rect x="${scoreBarX + (scoreBarW / 2)}" y="${scoreBarY}" width="${scoreBarW / 2}" height="${scoreBarH}" fill="${escapeHtml(colorB)}"/>
 
   ${potg ? `
   <circle cx="${avatarX}" cy="${avatarY}" r="${avatarR}" fill="none" stroke="${escapeHtml(String(potg.teamColor || '#f97316'))}" stroke-width="2"/>
-  ${compositeLayers.length === 1 ? `<text x="${avatarX}" y="${avatarY + 12}" text-anchor="middle" fill="#f8fafc" font-size="30" font-family="Arial, sans-serif" font-weight="800" filter="url(#shadow)">${escapeHtml(getInitials(potg.name))}</text>` : ''}
-  <text x="${contentLeft}" y="${potgLabelY}" fill="#f97316" font-size="14" font-family="Arial, sans-serif" font-weight="700" filter="url(#shadow)">PLAYER OF THE GAME</text>
-  <text x="${contentLeft}" y="${potgNameY}" fill="#ffffff" font-size="30" font-family="Arial, sans-serif" font-weight="800" filter="url(#shadow)">${escapeHtml(potg.name)}</text>
-  <text x="${contentLeft}" y="${potgStatsY}" fill="#e2e8f0" font-size="18" font-family="Arial, sans-serif" font-weight="700" filter="url(#shadow)">${escapeHtml(potg.statsLine)}</text>
+  ${compositeLayers.length === 1 ? `<text x="${avatarX}" y="${avatarY + 12}" text-anchor="middle" fill="#f8fafc" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="800" filter="url(#shadow)">${escapeHtml(getInitials(potg.name))}</text>` : ''}
+  <text x="${contentLeft}" y="${potgLabelY}" fill="#f97316" font-size="14" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">PLAYER OF THE GAME</text>
+  <text x="${contentLeft}" y="${potgNameY}" fill="#ffffff" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="800" filter="url(#shadow)">${escapeHtml(potg.name)}</text>
+  <text x="${contentLeft}" y="${potgStatsY}" fill="#e2e8f0" font-size="18" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">${escapeHtml(potg.statsLine)}</text>
   ` : ''}
 </svg>
   `);
