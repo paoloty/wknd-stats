@@ -2074,12 +2074,47 @@ function migrateLegacyIfNeeded() {
 
 migrateLegacyIfNeeded();
 
+function getCanonicalRequestHost(req) {
+  const rawForwardedHost = String(req.headers['x-forwarded-host'] || '').trim().toLowerCase();
+  const rawHost = String(req.get('host') || '').trim().toLowerCase();
+  return (rawForwardedHost || rawHost).split(',')[0].trim();
+}
+
+function getCanonicalRequestHostname(req) {
+  const canonicalHost = getCanonicalRequestHost(req);
+  return canonicalHost
+    .split(':')[0]
+    .replace(/\.$/, '')
+    .replace(/^www\./, '');
+}
+
+function isGaEnabledForRequest(req) {
+  const isAllowedGaDomain = getCanonicalRequestHostname(req) === 'wkndbasketball.com';
+  return Boolean(
+    GA_MEASUREMENT_ID
+    && isAllowedGaDomain
+    && (process.env.NODE_ENV === 'production' || GA_ENABLE_IN_DEV)
+  );
+}
+
+function buildGaHeadSnippet(req) {
+  if (!isGaEnabledForRequest(req)) return '';
+  const safeId = GA_MEASUREMENT_ID.replace(/'/g, "\\'");
+  return [
+    `<script async src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(GA_MEASUREMENT_ID)}"></script>`,
+    '<script>',
+    '  window.dataLayer = window.dataLayer || [];',
+    '  function gtag(){dataLayer.push(arguments);}',
+    '  gtag(\'js\', new Date());',
+    `  gtag('config', '${safeId}', { send_page_view: false });`,
+    '</script>'
+  ].join('\n    ');
+}
+
 app.use(express.json({ limit: '12mb' }));
 
 app.use((req, res, next) => {
-  const rawForwardedHost = String(req.headers['x-forwarded-host'] || '').trim().toLowerCase();
-  const rawHost = String(req.get('host') || '').trim().toLowerCase();
-  const canonicalHost = (rawForwardedHost || rawHost).split(',')[0].trim();
+  const canonicalHost = getCanonicalRequestHost(req);
   const hostParts = canonicalHost.split(':');
   const hostname = String(hostParts[0] || '').replace(/\.$/, '');
 
@@ -2106,7 +2141,9 @@ app.get('/', (req, res) => {
     const indexPath = path.join(__dirname, 'index.html');
     const html = fs.readFileSync(indexPath, 'utf8');
     const metaTags = buildSocialMetaTags({ req, game });
-    const injected = html.replace('</head>', `    ${metaTags}\n</head>`);
+    const gaHeadSnippet = buildGaHeadSnippet(req);
+    const headFragments = [metaTags, gaHeadSnippet].filter(Boolean).join('\n    ');
+    const injected = html.replace('</head>', `    ${headFragments}\n</head>`);
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(injected);
@@ -2132,19 +2169,7 @@ app.get('/api/bootstrap', (_req, res) => {
 });
 
 app.get('/api/client-config', (req, res) => {
-  const rawForwardedHost = String(req.headers['x-forwarded-host'] || '').trim().toLowerCase();
-  const rawHost = String(req.get('host') || '').trim().toLowerCase();
-  const canonicalHost = (rawForwardedHost || rawHost).split(',')[0].trim();
-  const requestHostname = canonicalHost
-    .split(':')[0]
-    .replace(/\.$/, '')
-    .replace(/^www\./, '');
-  const isAllowedGaDomain = requestHostname === 'wkndbasketball.com';
-  const gaEnabled = Boolean(
-    GA_MEASUREMENT_ID
-    && isAllowedGaDomain
-    && (process.env.NODE_ENV === 'production' || GA_ENABLE_IN_DEV)
-  );
+  const gaEnabled = isGaEnabledForRequest(req);
 
   res.json({
     gaEnabled,
