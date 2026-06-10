@@ -1,0 +1,16 @@
+{
+  "name": "WKND League Stats",
+  "short_name": "WKND Stats",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0f19",
+  "theme_color": "#0b0f19",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230b0f19'/%3E%3Cpath d='M48 48h96v96H48z' fill='%2310b981' opacity='.2'/%3E%3Cpath d='M64 128V64h16l16 32 16-32h16v64h-14V86l-18 34h-4L74 86v42z' fill='white'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

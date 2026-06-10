@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WKND League Stats</title>
+    <meta name="theme-color" content="#0b0f19">
+    <link rel="manifest" href="/manifest.webmanifest">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React and ReactDOM CDN -->
@@ -65,7 +67,14 @@
     <div id="root"></div>
     <!-- Persistence now handled by Node + SQLite backend APIs -->
 
-        <script src="app.bundle.js?v=20260609-potg-btn-1"></script>
+        <script src="app.bundle.js?v=20260609-game-log-login-gate-1"></script>
+        <script>
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function () {
+                    navigator.serviceWorker.register('/service-worker.js').catch(function () {});
+                });
+            }
+        </script>
         <script>
             (function () {
                 function parseStatsFromPotgCard(card) {

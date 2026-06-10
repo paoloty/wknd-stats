@@ -4,7 +4,24 @@ const http = require('http');
 const express = require('express');
 const Database = require('better-sqlite3');
 const { WebSocketServer } = require('ws');
-const sharp = require('sharp');
+
+const SHARP_ENABLED = String(process.env.WKND_DISABLE_SHARP || '').trim() !== '1';
+let sharp = null;
+if (SHARP_ENABLED) {
+  try {
+    sharp = require('sharp');
+  } catch (error) {
+    sharp = null;
+  }
+}
+
+function requireSharp() {
+  if (!sharp) {
+    const error = new Error('Image generation is disabled because sharp is unavailable in this build.');
+    error.code = 'SHARP_UNAVAILABLE';
+    throw error;
+  }
+}
 
 require('dotenv').config();
 
@@ -819,6 +836,7 @@ function buildSocialMetaTags({ req, game }) {
 }
 
 async function buildSocialCoverPng(game) {
+  requireSharp();
   const W = 1200;
   const H = 630;
   const title = buildRecapTitle(game);
@@ -945,6 +963,7 @@ function derivePlayerOfTheGameFromState(game, teams) {
 async function readImageBufferFromSource(source, baseOrigin = '') {
   const value = String(source || '').trim();
   if (!value) return null;
+  if (!sharp) return null;
 
   const parsed = parseImageDataUrl(value);
   if (parsed?.buffer?.length) return parsed.buffer;
@@ -984,6 +1003,7 @@ function getInitials(name) {
 }
 
 async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOrigin = '') {
+  requireSharp();
   const W = 1200;
   const H = 630;
   const base = await sharp(customImageBuffer)
@@ -1049,7 +1069,13 @@ async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOri
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#020617" flood-opacity="0.9"/>
     </filter>
+    <linearGradient id="bottomFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="rgba(2,6,23,0.0)"/>
+      <stop offset="100%" stop-color="rgba(2,6,23,0.94)"/>
+    </linearGradient>
   </defs>
+
+  <rect x="0" y="${Math.round(H * 0.75)}" width="${W}" height="${Math.round(H * 0.25)}" fill="url(#bottomFade)"/>
 
   <text x="${scoreTextRight}" y="${scoreTextTop}" text-anchor="end" fill="${escapeHtml(colorA)}" font-size="30" font-family="Arial, sans-serif" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamAName || '').toUpperCase())} ${Number(game?.teamAScore || 0)}</text>
   <text x="${scoreTextRight}" y="${scoreTextTop + scoreLineGap}" text-anchor="end" fill="${escapeHtml(colorB)}" font-size="30" font-family="Arial, sans-serif" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamBName || '').toUpperCase())} ${Number(game?.teamBScore || 0)}</text>
@@ -1799,6 +1825,10 @@ app.get('/api/stats', (_req, res) => {
 
 app.get('/api/social-cover/default.png', async (_req, res) => {
   try {
+    if (!sharp) {
+      res.status(501).json({ error: 'Social cover generation is disabled in this build because sharp is not installed.' });
+      return;
+    }
     const png = await buildSocialCoverPng(null);
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');
@@ -1810,6 +1840,10 @@ app.get('/api/social-cover/default.png', async (_req, res) => {
 
 app.get('/api/social-cover/:gameId.png', async (req, res) => {
   try {
+    if (!sharp) {
+      res.status(501).json({ error: 'Social cover generation is disabled in this build because sharp is not installed.' });
+      return;
+    }
     const gameId = String(req.params.gameId || '').trim();
     const baseOrigin = `${req.protocol}://${req.get('host')}`;
     const state = readState();
@@ -2207,6 +2241,10 @@ app.post('/api/generate-potg-writeup', async (req, res) => {
 });
 
 app.post('/api/generate-player-2d-art', async (req, res) => {
+  if (!sharp) {
+    res.status(501).json({ error: '2D player art generation is disabled in this build because sharp is not installed.' });
+    return;
+  }
   const { imageDataUrl, imageUrl, coverImageDataUrl, playerName, teamName, playerStatsSummary, gameContext, stylePrompt } = req.body || {};
   let parsed = parseImageDataUrl(imageDataUrl);
 

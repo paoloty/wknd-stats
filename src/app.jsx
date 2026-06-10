@@ -119,6 +119,7 @@
             const [historyVideoInput, setHistoryVideoInput] = useState('');
             const [historyWriteupInput, setHistoryWriteupInput] = useState('');
             const [showShareTools, setShowShareTools] = useState(false);
+            const [showGameRecapTools, setShowGameRecapTools] = useState(false);
             const [generatingWriteupGameId, setGeneratingWriteupGameId] = useState(null);
             const [generatingPotgWriteupGameId, setGeneratingPotgWriteupGameId] = useState(null);
             const playerArtStylePrompt = 'A premium sports app background template, widescreen 16:9 aspect ratio. On the right side, a high-quality cell-shaded anime cartoon style illustration of a young Asian basketball player wearing a black and white pinstripe jersey with the number 3. The left and center areas are kept completely empty and clear for UI text placement. The entire background features a dark navy blue and slate grey gradient with subtle diagonal tech stripes. Low contrast, clean aesthetic, no random text, no floating numbers, designed specifically as a graphic design template for text overlay.';
@@ -209,6 +210,7 @@
             const sessionRevisionRef = useRef(0);
             const discardedLiveSessionTombstoneRef = useRef({ sessionInstanceId: '', discardedAt: 0 });
             const lastRemoteGameLogIdsRef = useRef(new Set());
+            const gameLogImportInputRef = useRef(null);
             const lastLocalSessionUpdatedAtRef = useRef(0);
             const lastLocalDnpUpdatedAtRef = useRef(0);
             const localResumeLockUntilRef = useRef(0);
@@ -247,6 +249,7 @@
                 || liveLogEditTarget
             );
             const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
+            const LOCAL_APP_STATE_CACHE_KEY = 'wknd_app_state_cache';
             const normalizePlayerPositions = (playerLike) => {
                 const rawPositions = [];
                 const pushFromValue = (value) => {
@@ -2967,16 +2970,35 @@
 
             useEffect(() => {
                 const loadState = async () => {
+                    const cachedState = readCachedAppState();
+                    if (cachedState?.dirty) {
+                        setTeams(normalizeTeamsForStorage(cachedState.teams));
+                        setGames(Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : []);
+                        setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
+                        return;
+                    }
+
                     try {
                         const bootstrap = await apiRequest('/api/bootstrap');
                         const loadedTeams = Array.isArray(bootstrap?.state?.teams) ? bootstrap.state.teams : [];
                         const loadedGames = Array.isArray(bootstrap?.state?.games) ? bootstrap.state.games : [];
                         const loadedActions = Array.isArray(bootstrap?.statActions) ? bootstrap.statActions : [];
 
-                        setTeams(normalizeTeamsForStorage(loadedTeams));
-                        setGames(loadedGames.sort((a, b) => b.id.localeCompare(a.id)));
+                        const normalizedTeams = normalizeTeamsForStorage(loadedTeams);
+                        const normalizedGames = loadedGames.sort((a, b) => b.id.localeCompare(a.id));
+
+                        setTeams(normalizedTeams);
+                        setGames(normalizedGames);
                         setStatActions(loadedActions);
+                        writeCachedAppState(normalizedTeams, normalizedGames, loadedActions, { dirty: false });
                     } catch (e) {
+                        if (cachedState) {
+                            setTeams(normalizeTeamsForStorage(cachedState.teams));
+                            setGames(Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : []);
+                            setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
+                            return;
+                        }
+
                         console.error('Failed to load persisted state, using defaults.', e);
                         setTeams([]);
                         setGames([]);
@@ -3425,6 +3447,39 @@
                 }));
             };
 
+            const readCachedAppState = () => {
+                try {
+                    const cached = localStorage.getItem(LOCAL_APP_STATE_CACHE_KEY);
+                    if (!cached) return null;
+                    const parsed = JSON.parse(cached);
+                    if (!parsed || typeof parsed !== 'object') return null;
+                    return {
+                        version: Number(parsed.version || 1),
+                        dirty: Boolean(parsed.dirty),
+                        updatedAt: Number(parsed.updatedAt || 0),
+                        teams: Array.isArray(parsed.teams) ? parsed.teams : [],
+                        games: Array.isArray(parsed.games) ? parsed.games : [],
+                        statActions: Array.isArray(parsed.statActions) ? parsed.statActions : []
+                    };
+                } catch (error) {
+                    return null;
+                }
+            };
+
+            const writeCachedAppState = (nextTeams, nextGames, nextStatActions, { dirty = false } = {}) => {
+                try {
+                    const payload = {
+                        version: 1,
+                        dirty: Boolean(dirty),
+                        updatedAt: Date.now(),
+                        teams: normalizeTeamsForStorage(nextTeams),
+                        games: Array.isArray(nextGames) ? nextGames : [],
+                        statActions: Array.isArray(nextStatActions) ? nextStatActions : []
+                    };
+                    localStorage.setItem(LOCAL_APP_STATE_CACHE_KEY, JSON.stringify(payload));
+                } catch (error) {}
+            };
+
             const togglePlayerDidNotPlay = (playerId) => {
                 const currentlyMarked = dnpPlayers.includes(playerId);
                 const alreadyPlayed = hasAnyTrackedLiveStat(playerId);
@@ -3439,19 +3494,198 @@
 
             const saveFullState = async (updatedTeams, updatedGames) => {
                 const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
-                await apiRequest('/api/state', {
-                    method: 'PUT',
-                    body: JSON.stringify({ teams: normalizedTeams, games: updatedGames })
+                writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: true });
+                try {
+                    if (navigator.onLine !== false) {
+                        await apiRequest('/api/state', {
+                            method: 'PUT',
+                            body: JSON.stringify({ teams: normalizedTeams, games: updatedGames })
+                        });
+                        writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: false });
+                    }
+                    return true;
+                } catch (error) {
+                    writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: true });
+                    return false;
+                }
+            };
+
+            const getGameLogExportTeams = (game) => {
+                const teamIds = [game?.teamAId, game?.teamBId].map((id) => String(id || '').trim()).filter(Boolean);
+                return normalizeTeamsForStorage(
+                    teamIds
+                        .map((teamId) => teams.find((team) => String(team?.id || '').trim() === teamId) || null)
+                        .filter(Boolean)
+                );
+            };
+
+            const mergeImportedTeamsIntoState = (importedTeams = []) => {
+                const normalizedImportedTeams = normalizeTeamsForStorage(importedTeams);
+                if (!normalizedImportedTeams.length) return teams;
+
+                const mergedTeams = [...teams];
+                normalizedImportedTeams.forEach((importedTeam) => {
+                    const existingIndex = mergedTeams.findIndex((team) => String(team?.id || '') === String(importedTeam?.id || ''));
+                    if (existingIndex >= 0) {
+                        mergedTeams[existingIndex] = {
+                            ...mergedTeams[existingIndex],
+                            ...importedTeam
+                        };
+                    } else {
+                        mergedTeams.push(importedTeam);
+                    }
                 });
+
+                return normalizeTeamsForStorage(mergedTeams);
+            };
+
+            const exportGameLogPayload = (game) => ({
+                type: 'wknd-game-log',
+                version: 2,
+                exportedAt: new Date().toISOString(),
+                gameId: game?.id || '',
+                gameLog: Array.isArray(game?.gameLog) ? game.gameLog : [],
+                periodSnapshots: Array.isArray(game?.periodSnapshots) ? game.periodSnapshots : [],
+                dnpPlayers: Array.isArray(game?.dnpPlayers) ? game.dnpPlayers : [],
+                teamAId: game?.teamAId || '',
+                teamBId: game?.teamBId || '',
+                teamAName: game?.teamAName || '',
+                teamBName: game?.teamBName || '',
+                game: {
+                    date: game?.date || '',
+                    teamAId: game?.teamAId || '',
+                    teamBId: game?.teamBId || '',
+                    teamAName: game?.teamAName || '',
+                    teamBName: game?.teamBName || '',
+                    teamAScore: Number(game?.teamAScore || 0),
+                    teamBScore: Number(game?.teamBScore || 0),
+                    playerStats: game?.playerStats || {},
+                    gameWriteup: game?.gameWriteup || '',
+                    potgWriteup: game?.potgWriteup || '',
+                    youtubeUrl: game?.youtubeUrl || ''
+                },
+                teams: getGameLogExportTeams(game)
+            });
+
+            const handleExportGameLog = (game) => {
+                if (!game) return;
+
+                try {
+                    const exportPayload = exportGameLogPayload(game);
+                    const fileName = `wknd_gamelog_${String(game.id || 'game').replace(/[^a-zA-Z0-9_-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+                    const dataStr = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(exportPayload, null, 2))}`;
+                    const downloadAnchor = document.createElement('a');
+                    downloadAnchor.setAttribute('href', dataStr);
+                    downloadAnchor.setAttribute('download', fileName);
+                    document.body.appendChild(downloadAnchor);
+                    downloadAnchor.click();
+                    downloadAnchor.remove();
+                    showToast('Game log exported.', 'success');
+                } catch (error) {
+                    showToast('Failed to export game log.', 'error');
+                }
+            };
+
+            const handleImportGameLog = (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file) return;
+
+                const fileReader = new FileReader();
+                fileReader.readAsText(file, 'UTF-8');
+                fileReader.onload = async (event) => {
+                    try {
+                        const parsed = JSON.parse(event.target.result);
+                        const importedGameLog = Array.isArray(parsed)
+                            ? parsed
+                            : (Array.isArray(parsed?.gameLog) ? parsed.gameLog : null);
+
+                        if (!Array.isArray(importedGameLog)) {
+                            showToast('Imported file does not contain a game log.', 'error');
+                            return;
+                        }
+
+                        const importedTeams = Array.isArray(parsed?.teams) ? parsed.teams : [];
+                        const mergedTeams = importedTeams.length ? mergeImportedTeamsIntoState(importedTeams) : teams;
+
+                        const importedGameMeta = (parsed?.game && typeof parsed.game === 'object') ? parsed.game : {};
+                        const importedTeamAId = String(importedGameMeta?.teamAId || parsed?.teamAId || '').trim();
+                        const importedTeamBId = String(importedGameMeta?.teamBId || parsed?.teamBId || '').trim();
+                        const resolvedTeamAName = String(importedGameMeta?.teamAName || parsed?.teamAName || '').trim();
+                        const resolvedTeamBName = String(importedGameMeta?.teamBName || parsed?.teamBName || '').trim();
+                        const fallbackTeamAName = mergedTeams.find((team) => String(team?.id || '') === importedTeamAId)?.name || 'HOME';
+                        const fallbackTeamBName = mergedTeams.find((team) => String(team?.id || '') === importedTeamBId)?.name || 'AWAY';
+
+                        const idSeedRaw = String(parsed?.gameId || importedTeamAId || importedTeamBId || 'gamelog').trim();
+                        const idSeed = idSeedRaw.replace(/[^a-zA-Z0-9_-]+/g, '_') || 'gamelog';
+                        let nextImportedGameId = `${idSeed}_import_${Date.now()}`;
+                        while (games.some((game) => game.id === nextImportedGameId)) {
+                            nextImportedGameId = `${idSeed}_import_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+                        }
+
+                        const importedPlayerStats = (importedGameMeta?.playerStats && typeof importedGameMeta.playerStats === 'object')
+                            ? importedGameMeta.playerStats
+                            : {};
+                        const importedDate = String(importedGameMeta?.date || parsed?.exportedAt || new Date().toISOString()).trim();
+
+                        const importedGame = {
+                            id: nextImportedGameId,
+                            date: importedDate,
+                            teamAId: importedTeamAId,
+                            teamBId: importedTeamBId,
+                            teamAName: resolvedTeamAName || fallbackTeamAName,
+                            teamBName: resolvedTeamBName || fallbackTeamBName,
+                            teamAScore: Number(importedGameMeta?.teamAScore || 0),
+                            teamBScore: Number(importedGameMeta?.teamBScore || 0),
+                            playerStats: importedPlayerStats,
+                            dnpPlayers: Array.isArray(parsed?.dnpPlayers) ? parsed.dnpPlayers : [],
+                            periodSnapshots: Array.isArray(parsed?.periodSnapshots) ? parsed.periodSnapshots : [],
+                            gameLog: importedGameLog
+                        };
+
+                        const maybeGameWriteup = String(importedGameMeta?.gameWriteup || '').trim();
+                        if (maybeGameWriteup) {
+                            importedGame.gameWriteup = maybeGameWriteup;
+                        }
+                        const maybePotgWriteup = String(importedGameMeta?.potgWriteup || '').trim();
+                        if (maybePotgWriteup) {
+                            importedGame.potgWriteup = maybePotgWriteup;
+                        }
+                        const maybeYoutubeUrl = String(importedGameMeta?.youtubeUrl || '').trim();
+                        if (maybeYoutubeUrl) {
+                            importedGame.youtubeUrl = maybeYoutubeUrl;
+                        }
+
+                        const updatedGames = [importedGame, ...games].sort((a, b) => String(b.id || '').localeCompare(String(a.id || '')));
+
+                        setTeams(mergedTeams);
+                        setGames(updatedGames);
+                        await saveFullState(mergedTeams, updatedGames);
+                        setSelectedHistoryGameId(nextImportedGameId);
+                        showToast('Game log imported as a new game.', 'success');
+                    } catch (error) {
+                        showToast('Failed to import game log.', 'error');
+                    }
+                };
             };
 
             const saveTeamState = async (updatedTeams) => {
                 const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
                 setTeams(normalizedTeams);
-                await apiRequest('/api/teams', {
-                    method: 'PUT',
-                    body: JSON.stringify({ teams: normalizedTeams })
-                });
+                writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
+                try {
+                    if (navigator.onLine !== false) {
+                        await apiRequest('/api/teams', {
+                            method: 'PUT',
+                            body: JSON.stringify({ teams: normalizedTeams })
+                        });
+                        writeCachedAppState(normalizedTeams, games, statActions, { dirty: false });
+                    }
+                    return true;
+                } catch (error) {
+                    writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
+                    return false;
+                }
             };
 
             const saveNewGameState = async (newGame, updatedTeams) => {
@@ -4025,58 +4259,6 @@
                         showToast("Failed to process roster upload.", "error");
                     }
                 };
-            };
-
-            const handleExportGamesCSV = () => {
-                try {
-                    if (homepageGameSummaries.length === 0) {
-                        showToast("No game records available to export.", "info");
-                        return;
-                    }
-
-                    const escapeCsv = (value) => {
-                        return `"${String(value ?? '').replace(/"/g, '""')}"`;
-                    };
-
-                    const headers = ['game_id', 'status', 'date', 'home_team', 'home_score', 'away_team', 'away_score', 'winner', 'margin'];
-                    const rows = homepageGameSummaries.map(game => {
-                        const margin = Math.abs((game.homeScore || 0) - (game.awayScore || 0));
-                        const winner = game.homeScore === game.awayScore
-                            ? 'Draw'
-                            : (game.homeScore > game.awayScore ? game.homeTeam : game.awayTeam);
-
-                        return [
-                            game.id,
-                            game.status,
-                            game.date,
-                            game.homeTeam,
-                            game.homeScore,
-                            game.awayTeam,
-                            game.awayScore,
-                            winner,
-                            margin
-                        ];
-                    });
-
-                    const csvContent = [
-                        headers.join(','),
-                        ...rows.map(row => row.map(escapeCsv).join(','))
-                    ].join('\n');
-
-                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                    const url = URL.createObjectURL(blob);
-                    const downloadAnchor = document.createElement('a');
-                    downloadAnchor.setAttribute('href', url);
-                    downloadAnchor.setAttribute('download', `wknd_games_${new Date().toISOString().split('T')[0]}.csv`);
-                    document.body.appendChild(downloadAnchor);
-                    downloadAnchor.click();
-                    downloadAnchor.remove();
-                    URL.revokeObjectURL(url);
-
-                    showToast("Games summary exported to CSV.", "success");
-                } catch (e) {
-                    showToast("Failed to export games CSV.", "error");
-                }
             };
 
             const clearTransientLiveActionState = () => {
@@ -6346,7 +6528,7 @@
                     onConfirm: async () => {
                         const updatedTeams = teams.filter(t => t.id !== teamId);
                         setTeams(updatedTeams);
-                        await apiRequest(`/api/teams/${teamId}`, { method: 'DELETE' });
+                        await saveTeamState(updatedTeams);
                         setConfirmDialog(null);
                         showToast("Team deleted successfully.", "success");
                     }
@@ -7263,6 +7445,13 @@
                         ctx.fillStyle = '#0f172a';
                         ctx.fillRect(0, 0, W, H);
                     }
+
+                    // Keep lower text readable on bright uploaded images.
+                    const bottomFade = ctx.createLinearGradient(0, H * 0.75, 0, H);
+                    bottomFade.addColorStop(0, 'rgba(2, 6, 23, 0)');
+                    bottomFade.addColorStop(1, 'rgba(2, 6, 23, 0.94)');
+                    ctx.fillStyle = bottomFade;
+                    ctx.fillRect(0, H * 0.75, W, H * 0.25);
 
                     const colorA = teamAObj?.color || '#10b981';
                     const colorB = teamBObj?.color || '#ef4444';
@@ -9120,40 +9309,56 @@
                                                                         </div>
                                                                         <div className="text-[11px] text-slate-400 mt-1">PER-style live rating {Number(livePlayerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.</div>
                                                                     </div>
-                                                                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 font-mono text-slate-300">
-                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">PTS</div>
-                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.pts || 0}</div>
-                                                                        </div>
-                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">REB</div>
-                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.reb || 0}</div>
-                                                                        </div>
-                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">AST</div>
-                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.ast || 0}</div>
-                                                                        </div>
-                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">STL</div>
-                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.stl || 0}</div>
-                                                                        </div>
-                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">BLK</div>
-                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.blk || 0}</div>
-                                                                        </div>
-                                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                            <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">TO</div>
-                                                                            <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{livePlayerOfTheGame.stats.to || 0}</div>
-                                                                        </div>
-                                                                    </div>
+                                                                    {(() => {
+                                                                        const displayedStats = [
+                                                                            ['PTS', Number(livePlayerOfTheGame.stats?.pts || 0)],
+                                                                            ['REB', Number(livePlayerOfTheGame.stats?.reb || 0)],
+                                                                            ['AST', Number(livePlayerOfTheGame.stats?.ast || 0)],
+                                                                            ['STL', Number(livePlayerOfTheGame.stats?.stl || 0)],
+                                                                            ['BLK', Number(livePlayerOfTheGame.stats?.blk || 0)],
+                                                                            ['TO', Number(livePlayerOfTheGame.stats?.to || 0)],
+                                                                            ['PER', Math.round(Number(livePlayerOfTheGame.perScore || 0))]
+                                                                        ].filter(([label, value]) => label === 'PER' || value !== 0);
+                                                                        const maxValue = displayedStats.reduce((best, [, value]) => Math.max(best, Number(value || 0)), 0);
+
+                                                                        return (
+                                                                            <div
+                                                                                className="grid gap-2 font-mono text-slate-300"
+                                                                                style={{ gridTemplateColumns: `repeat(${Math.max(displayedStats.length, 1)}, minmax(0, 1fr))` }}
+                                                                            >
+                                                                                {displayedStats.map(([label, value]) => {
+                                                                                    const isOutstanding = label === 'PER' || (Number(value) === maxValue && maxValue > 0);
+                                                                                    return (
+                                                                                        <div
+                                                                                            key={`live-potg-stat-${label}`}
+                                                                                            className={`rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between border ${isOutstanding ? 'bg-amber-500/15 border-amber-400/70 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]' : 'bg-slate-900/80 border-slate-800'}`}
+                                                                                        >
+                                                                                            <div className={`text-[9px] uppercase tracking-wider font-bold leading-none ${isOutstanding ? 'text-amber-200' : 'text-slate-400'}`}>{label}</div>
+                                                                                            <div className={`mt-1 font-mono font-black text-lg md:text-xl leading-none ${isOutstanding ? 'text-amber-100' : 'text-white'}`}>{value}</div>
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        );
+                                                                    })()}
                                                                 </div>
 
                                                                 <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3">
                                                                     <h5 className="text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-2">Top Live Performers</h5>
                                                                     {(() => {
-                                                                        const mergedLiveTopPerformers = [...liveTopTeamAPerformers, ...liveTopTeamBPerformers]
+                                                                        const baseLiveTopPerformers = [...liveTopTeamAPerformers, ...liveTopTeamBPerformers]
                                                                             .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0))
                                                                             .slice(0, 6);
+                                                                        const livePotgInTable = baseLiveTopPerformers.some((entry) => entry.id === livePlayerOfTheGame.id);
+                                                                        const mergedLiveTopPerformers = livePotgInTable
+                                                                            ? baseLiveTopPerformers
+                                                                            : [...baseLiveTopPerformers, {
+                                                                                ...livePlayerOfTheGame,
+                                                                                stats: livePlayerOfTheGame.stats || {},
+                                                                                perScore: Number(livePlayerOfTheGame.perScore || 0),
+                                                                                teamName: livePlayerOfTheGame.teamName,
+                                                                                teamColor: livePlayerOfTheGame.teamColor
+                                                                            }];
 
                                                                         return (
                                                                             <div className="overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20">
@@ -10050,7 +10255,24 @@
                                         <h4 className="text-sm font-extrabold text-white uppercase tracking-wide">History</h4>
                                         <div className="flex items-center gap-2">
                                             <span className="text-[10px] text-slate-400 font-mono">{homepageGameSummaries.length} game(s)</span>
-                                            {isLoggedIn && <button onClick={handleExportGamesCSV} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer">Export CSV</button>}
+                                            {isLoggedIn && (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => gameLogImportInputRef.current?.click()}
+                                                        className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold cursor-pointer"
+                                                    >
+                                                        Import New Game Log
+                                                    </button>
+                                                    <input
+                                                        ref={gameLogImportInputRef}
+                                                        type="file"
+                                                        accept=".json,application/json"
+                                                        className="hidden"
+                                                        onChange={handleImportGameLog}
+                                                    />
+                                                </>
+                                            )}
                                         </div>
                                     </div>
 
@@ -10065,10 +10287,21 @@
                                                 const isSelected = selectedHistoryGameId === game.id;
 
                                                 return (
-                                                    <button
-                                                        type="button"
+                                                    <div
                                                         key={game.id}
+                                                        role="button"
+                                                        tabIndex={0}
                                                         onClick={() => {
+                                                            if (game.status === 'LIVE') {
+                                                                setActiveTab('live');
+                                                                showToast('Opened active game. Continue adding stats from Games.', 'info');
+                                                                return;
+                                                            }
+                                                            openHistoryGame(game.id);
+                                                        }}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key !== 'Enter' && event.key !== ' ') return;
+                                                            event.preventDefault();
                                                             if (game.status === 'LIVE') {
                                                                 setActiveTab('live');
                                                                 showToast('Opened active game. Continue adding stats from Games.', 'info');
@@ -10097,7 +10330,7 @@
                                                                 {game.writeupSnippet}{game.writeupSnippet.length >= 140 ? '...' : ''}
                                                             </div>
                                                         ) : null}
-                                                    </button>
+                                                    </div>
                                                 );
                                             })}
                                         </div>
@@ -10114,8 +10347,16 @@
                                         >
                                             Back to Game List
                                         </button>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[10px] text-slate-400 font-mono">Detail mode</span>
+                                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                                            {isLoggedIn && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleExportGameLog(selectedHistoryGame)}
+                                                    className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold cursor-pointer"
+                                                >
+                                                    Export Game Log
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -10249,7 +10490,7 @@
                                                 </div>
 
                                                 {/* SHARE & PUBLISH — collapsible panel */}
-                                                {(canOperateLive || String(game.gameWriteup || '').trim()) && (
+                                                {isLoggedIn && (canOperateLive || String(game.gameWriteup || '').trim()) && (
                                                     <div className="bg-slate-950/50 border border-slate-800 rounded-xl overflow-hidden">
                                                         {/* Collapsible header */}
                                                         <button
@@ -10288,7 +10529,14 @@
                                                                     {/* Mini preview */}
                                                                     <div className="shrink-0 w-[120px] h-[63px] rounded-lg overflow-hidden border border-slate-700 bg-slate-950">
                                                                         {game.socialCoverDataUrl ? (
-                                                                            <img src={game.socialCoverDataUrl} alt="Custom social cover preview" className="w-full h-full object-cover" />
+                                                                            <div className="relative w-full h-full">
+                                                                                <img src={game.socialCoverDataUrl} alt="Custom social cover preview" className="w-full h-full object-cover" />
+                                                                                <div
+                                                                                    aria-hidden="true"
+                                                                                    className="pointer-events-none absolute left-0 right-0 bottom-0"
+                                                                                    style={{ height: '25%', background: 'linear-gradient(to top, rgba(2,6,23,0.94) 0%, rgba(2,6,23,0) 100%)' }}
+                                                                                />
+                                                                            </div>
                                                                         ) : (
                                                                             <div className="w-full h-full flex flex-col justify-between p-1.5" style={{ background: 'linear-gradient(135deg,#0f172a 60%,#1e293b)' }}>
                                                                                 <div className="flex justify-between items-center">
@@ -10338,46 +10586,60 @@
                                                                     </div>
                                                                 </div>
 
-                                                                {/* Game Recap */}
-                                                                <div className="space-y-2">
-                                                                    <div className="flex items-center justify-between gap-2">
-                                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Game Recap</span>
-                                                                        <span className="text-[9px] text-slate-600">Included in cover image if saved</span>
-                                                                    </div>
-                                                                    {canOperateLive ? (
-                                                                        <>
-                                                                            <textarea
-                                                                                value={historyWriteupInput}
-                                                                                onChange={(e) => setHistoryWriteupInput(e.target.value)}
-                                                                                placeholder="Add a quick game recap..."
-                                                                                rows={4}
-                                                                                className="w-full resize-y bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
-                                                                            />
-                                                                            <div className="flex justify-end gap-2">
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleGenerateGameWriteup({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers })}
-                                                                                    disabled={generatingWriteupGameId === game.id}
-                                                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                                                                                >
-                                                                                    {generatingWriteupGameId === game.id ? 'Generating...' : 'Generate Recap'}
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleSaveGameWriteup(game.id)}
-                                                                                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
-                                                                                >
-                                                                                    Save Recap
-                                                                                </button>
-                                                                            </div>
-                                                                        </>
-                                                                    ) : (
-                                                                        <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
-                                                                            {game.gameWriteup}
-                                                                        </p>
-                                                                    )}
-                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
 
+                                                {/* GAME RECAP — separate collapsible panel */}
+                                                {(canOperateLive || String(game.gameWriteup || '').trim()) && (
+                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl overflow-hidden">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowGameRecapTools((v) => !v)}
+                                                            className="w-full flex items-center justify-between px-3 py-2.5 text-left select-none cursor-pointer hover:bg-slate-900/60 transition-colors"
+                                                        >
+                                                            <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                                                                <Icons.Edit />
+                                                                Game Recap
+                                                            </span>
+                                                            <span className={`text-slate-500 transition-transform duration-200 ${showGameRecapTools ? 'rotate-180' : ''}`}><Icons.ChevronDown /></span>
+                                                        </button>
+
+                                                        {showGameRecapTools && (
+                                                            <div className="px-3 pb-3 space-y-2 border-t border-slate-800 pt-3">
+                                                                {canOperateLive ? (
+                                                                    <>
+                                                                        <textarea
+                                                                            value={historyWriteupInput}
+                                                                            onChange={(e) => setHistoryWriteupInput(e.target.value)}
+                                                                            placeholder="Add a quick game recap..."
+                                                                            rows={4}
+                                                                            className="w-full resize-y bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                                                                        />
+                                                                        <div className="flex justify-end gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleGenerateGameWriteup({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers })}
+                                                                                disabled={generatingWriteupGameId === game.id}
+                                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                                                                            >
+                                                                                {generatingWriteupGameId === game.id ? 'Generating...' : 'Generate Recap'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleSaveGameWriteup(game.id)}
+                                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                                                                            >
+                                                                                Save Recap
+                                                                            </button>
+                                                                        </div>
+                                                                    </>
+                                                                ) : (
+                                                                    <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
+                                                                        {game.gameWriteup}
+                                                                    </p>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>
@@ -10480,38 +10742,44 @@
                                                                     </div>
                                                                 )}
                                                             </div>
-                                                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 font-mono text-slate-300 shrink-0">
-                                                                <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                    <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">PTS</div>
-                                                                    <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{playerOfTheGame.stats.pts || 0}</div>
-                                                                </div>
-                                                                <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                    <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">REB</div>
-                                                                    <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{playerOfTheGame.stats.reb || 0}</div>
-                                                                </div>
-                                                                <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                    <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">AST</div>
-                                                                    <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{playerOfTheGame.stats.ast || 0}</div>
-                                                                </div>
-                                                                <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                    <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">STL</div>
-                                                                    <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{playerOfTheGame.stats.stl || 0}</div>
-                                                                </div>
-                                                                <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                    <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">BLK</div>
-                                                                    <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{playerOfTheGame.stats.blk || 0}</div>
-                                                                </div>
-                                                                <div className="bg-slate-900/80 border border-slate-800 rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between">
-                                                                    <div className="text-[9px] uppercase tracking-wider font-bold leading-none text-slate-400">TO</div>
-                                                                    <div className="mt-1 font-mono font-black text-lg md:text-xl leading-none text-white">{playerOfTheGame.stats.to || 0}</div>
-                                                                </div>
-                                                            </div>
+                                                            {(() => {
+                                                                const displayedStats = [
+                                                                    ['PTS', Number(playerOfTheGame.stats?.pts || 0)],
+                                                                    ['REB', Number(playerOfTheGame.stats?.reb || 0)],
+                                                                    ['AST', Number(playerOfTheGame.stats?.ast || 0)],
+                                                                    ['STL', Number(playerOfTheGame.stats?.stl || 0)],
+                                                                    ['BLK', Number(playerOfTheGame.stats?.blk || 0)],
+                                                                    ['TO', Number(playerOfTheGame.stats?.to || 0)],
+                                                                    ['PER', Math.round(Number(playerOfTheGame.perScore || 0))]
+                                                                ].filter(([label, value]) => label === 'PER' || value !== 0);
+                                                                const maxValue = displayedStats.reduce((best, [, value]) => Math.max(best, Number(value || 0)), 0);
+
+                                                                return (
+                                                                    <div
+                                                                        className="grid gap-2 font-mono text-slate-300 shrink-0"
+                                                                        style={{ gridTemplateColumns: `repeat(${Math.max(displayedStats.length, 1)}, minmax(0, 1fr))` }}
+                                                                    >
+                                                                        {displayedStats.map(([label, value]) => {
+                                                                            const isOutstanding = label === 'PER' || (Number(value) === maxValue && maxValue > 0);
+                                                                            return (
+                                                                                <div
+                                                                                    key={`history-potg-stat-${label}`}
+                                                                                    className={`rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between border ${isOutstanding ? 'bg-amber-500/15 border-amber-400/70 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]' : 'bg-slate-900/80 border-slate-800'}`}
+                                                                                >
+                                                                                    <div className={`text-[9px] uppercase tracking-wider font-bold leading-none ${isOutstanding ? 'text-amber-200' : 'text-slate-400'}`}>{label}</div>
+                                                                                    <div className={`mt-1 font-mono font-black text-lg md:text-xl leading-none ${isOutstanding ? 'text-amber-100' : 'text-white'}`}>{value}</div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                );
+                                                            })()}
                                                         </div>
 
                                                         <div className="bg-slate-950/35 border border-slate-800/60 rounded-xl p-3">
                                                             <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Top Performers Boxscore</div>
                                                             {(() => {
-                                                                const mergedTopPerformers = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])]
+                                                                const baseTopPerformers = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])]
                                                                     .map((entry) => ({
                                                                         ...entry,
                                                                         teamName: teamAObj?.players?.some((player) => player.id === entry.id)
@@ -10522,6 +10790,16 @@
                                                                             : (teamBObj?.color || '#ef4444')
                                                                     }))
                                                                     .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0));
+                                                                const potgInTable = baseTopPerformers.some((entry) => entry.id === playerOfTheGame.id);
+                                                                const mergedTopPerformers = potgInTable
+                                                                    ? baseTopPerformers
+                                                                    : [...baseTopPerformers, {
+                                                                        ...playerOfTheGame,
+                                                                        stats: playerOfTheGame.stats || {},
+                                                                        perScore: Number(playerOfTheGame.perScore || 0),
+                                                                        teamName: playerOfTheGame.teamName,
+                                                                        teamColor: playerOfTheGame.teamColor
+                                                                    }];
 
                                                                 return (
                                                                     <div className="overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20">
