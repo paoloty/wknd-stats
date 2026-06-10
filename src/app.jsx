@@ -27,6 +27,73 @@
             return payload;
         }
 
+        let gaInitialized = false;
+        let gaMeasurementId = '';
+
+        function loadGaScript(measurementId) {
+            return new Promise((resolve, reject) => {
+                if (!measurementId) {
+                    reject(new Error('Missing GA measurement ID.'));
+                    return;
+                }
+
+                const existing = document.querySelector('script[data-ga-script="1"]');
+                if (existing) {
+                    resolve();
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.async = true;
+                script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
+                script.setAttribute('data-ga-script', '1');
+                script.onload = () => resolve();
+                script.onerror = () => reject(new Error('Failed to load GA script.'));
+                document.head.appendChild(script);
+            });
+        }
+
+        async function initGoogleAnalytics() {
+            if (gaInitialized) return true;
+
+            try {
+                const config = await apiRequest('/api/client-config');
+                const enabled = Boolean(config?.gaEnabled);
+                const measurementId = String(config?.gaMeasurementId || '').trim();
+                if (!enabled || !measurementId) return false;
+
+                await loadGaScript(measurementId);
+
+                window.dataLayer = window.dataLayer || [];
+                window.gtag = window.gtag || function gtag() {
+                    window.dataLayer.push(arguments);
+                };
+
+                window.gtag('js', new Date());
+                window.gtag('config', measurementId, { send_page_view: false });
+
+                gaMeasurementId = measurementId;
+                gaInitialized = true;
+                return true;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function trackAnalyticsEvent(eventName, params = {}) {
+            if (!gaInitialized || !window.gtag || !eventName) return;
+            window.gtag('event', eventName, params);
+        }
+
+        function trackAnalyticsPageView(pagePath, pageTitle) {
+            if (!gaInitialized || !window.gtag || !gaMeasurementId) return;
+            window.gtag('event', 'page_view', {
+                page_path: pagePath,
+                page_title: pageTitle || document.title,
+                send_to: gaMeasurementId
+            });
+        }
+
         const Icons = {
             Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
             Minus: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/></svg>,
@@ -299,6 +366,19 @@
                     setOperatorFocus(savedFocus);
                 }
             }, []);
+
+            useEffect(() => {
+                initGoogleAnalytics();
+            }, []);
+
+            useEffect(() => {
+                const historySuffix = (activeTab === 'history' && selectedHistoryGameId)
+                    ? `?gameId=${encodeURIComponent(selectedHistoryGameId)}`
+                    : '';
+                const pagePath = `/app/${activeTab}${historySuffix}`;
+                const pageTitle = `WKND League Stats - ${String(activeTab || 'live').toUpperCase()}`;
+                trackAnalyticsPageView(pagePath, pageTitle);
+            }, [activeTab, selectedHistoryGameId]);
 
             useEffect(() => {
                 try {
@@ -3803,9 +3883,25 @@
                     });
 
                     delete pendingYoutubeSaveRef.current[String(gameId)];
+                    trackAnalyticsEvent('save_video_link', {
+                        game_id: String(gameId),
+                        has_video_link: normalizedUrl ? 1 : 0
+                    });
                     showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
                 } catch (error) {
+                    // Backward-compatible fallback for servers that do not yet expose /api/games/:id/video.
+                    const didFallbackSave = await saveFullState(teams, updatedGames);
                     delete pendingYoutubeSaveRef.current[String(gameId)];
+
+                    if (didFallbackSave) {
+                        trackAnalyticsEvent('save_video_link', {
+                            game_id: String(gameId),
+                            has_video_link: normalizedUrl ? 1 : 0
+                        });
+                        showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
+                        return;
+                    }
+
                     setGames(games);
                     writeCachedAppState(teams, games, statActions, { dirty: true });
                     showToast(String(error?.message || 'Could not save YouTube link right now. Please try again.'), 'error');
@@ -4574,6 +4670,10 @@
                 setLineupRevision(0);
                 lineupRevisionRef.current = 0;
                 setIsGameLive(true);
+                trackAnalyticsEvent('start_match', {
+                    team_a_id: teamAId,
+                    team_b_id: teamBId
+                });
                 showToast('Match started. Press Start Q1 to begin period play.', 'success');
             };
 

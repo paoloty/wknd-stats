@@ -55,6 +55,8 @@ const OPENAI_FALLBACK_MODELS = [
   'gpt-4.1-mini',
   'gpt-4o-mini'
 ];
+const GA_MEASUREMENT_ID = String(process.env.GA_MEASUREMENT_ID || '').trim();
+const GA_ENABLE_IN_DEV = String(process.env.WKND_ENABLE_GA_DEV || '').trim() === '1';
 const AI_PRIMARY_PROVIDER = String(process.env.AI_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase();
 const SOCIAL_COVER_LOGO_PATHS = [
   path.join(__dirname, 'wknd-s3-logo.png'),
@@ -2103,6 +2105,22 @@ app.get('/api/bootstrap', (_req, res) => {
   res.json({
     statActions,
     state
+  });
+});
+
+app.get('/api/client-config', (req, res) => {
+  const requestHost = String(req.get('host') || '').trim().toLowerCase();
+  const requestHostname = requestHost.split(':')[0];
+  const isAllowedGaDomain = requestHostname === 'wkndbasketball.com';
+  const gaEnabled = Boolean(
+    GA_MEASUREMENT_ID
+    && isAllowedGaDomain
+    && (process.env.NODE_ENV === 'production' || GA_ENABLE_IN_DEV)
+  );
+
+  res.json({
+    gaEnabled,
+    gaMeasurementId: gaEnabled ? GA_MEASUREMENT_ID : ''
   });
 });
 
