@@ -56,8 +56,21 @@ const OPENAI_FALLBACK_MODELS = [
   'gpt-4o-mini'
 ];
 const AI_PRIMARY_PROVIDER = String(process.env.AI_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase();
-const SOCIAL_COVER_LOGO_PATH = path.join(__dirname, 'src', 'wknd-s3-logo.png');
+const SOCIAL_COVER_LOGO_PATHS = [
+  path.join(__dirname, 'wknd-s3-logo.png'),
+  path.join(__dirname, 'src', 'wknd-s3-logo.png')
+];
 const SVG_FONT_STACK = 'Noto Sans, DejaVu Sans, Liberation Sans, Arial, sans-serif';
+
+function resolveSocialCoverLogoPath() {
+  return SOCIAL_COVER_LOGO_PATHS.find((logoPath) => {
+    try {
+      return fs.existsSync(logoPath);
+    } catch {
+      return false;
+    }
+  }) || '';
+}
 
 function getAiProviderOrder() {
   if (AI_PRIMARY_PROVIDER === 'openai') {
@@ -1048,10 +1061,11 @@ async function buildSocialCoverPng(game, teams = []) {
   const avatarR = 30;
   const potgTextX = avatarCx + avatarR + 30;
   let logoOverlay = null;
+  const logoPath = resolveSocialCoverLogoPath();
 
-  if (fs.existsSync(SOCIAL_COVER_LOGO_PATH)) {
+  if (logoPath) {
     try {
-      logoOverlay = await sharp(SOCIAL_COVER_LOGO_PATH)
+      logoOverlay = await sharp(logoPath)
         .resize({ width: 220, height: 44, fit: 'contain', withoutEnlargement: true })
         .png()
         .toBuffer();

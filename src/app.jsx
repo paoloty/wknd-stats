@@ -7380,10 +7380,12 @@
                 });
 
                 let socialCoverLogo = null;
-                try {
-                    socialCoverLogo = await loadImage('/src/wknd-s3-logo.png');
-                } catch (_) {
-                    socialCoverLogo = null;
+                const logoCandidates = ['/wknd-s3-logo.png', '/src/wknd-s3-logo.png'];
+                for (const logoSource of logoCandidates) {
+                    try {
+                        socialCoverLogo = await loadImage(logoSource);
+                        if (socialCoverLogo) break;
+                    } catch (_) {}
                 }
 
                 const drawTopLeftCoverLogo = () => {
