@@ -1292,6 +1292,19 @@ async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOri
   const avatarLeft = avatarX - avatarR;
   const avatarTop = avatarY - avatarR;
   const contentLeft = avatarX + avatarR + 16;
+  let logoOverlay = null;
+  const logoPath = resolveSocialCoverLogoPath();
+
+  if (logoPath) {
+    try {
+      logoOverlay = await sharp(logoPath)
+        .resize({ width: 220, height: 44, fit: 'contain', withoutEnlargement: true })
+        .png()
+        .toBuffer();
+    } catch (_) {
+      logoOverlay = null;
+    }
+  }
 
   const avatarBaseSvg = Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -1347,8 +1360,13 @@ async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOri
 </svg>
   `);
 
+  const layers = [...compositeLayers, { input: overlaySvg, top: 0, left: 0 }];
+  if (logoOverlay) {
+    layers.push({ input: logoOverlay, left: 40, top: 28 });
+  }
+
   return sharp(base)
-    .composite([...compositeLayers, { input: overlaySvg, top: 0, left: 0 }])
+    .composite(layers)
     .png({ compressionLevel: 9 })
     .toBuffer();
 }
