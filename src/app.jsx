@@ -1053,9 +1053,13 @@
             const formatPercent = (made, attempts) => `${toPercent(made, attempts).toFixed(1)}%`;
             const formatPercentOrNA = (made, attempts) => {
                 const safeAttempts = Number(attempts) || 0;
-                return safeAttempts <= 0 ? 'N/A' : formatPercent(made, attempts);
+                return safeAttempts <= 0 ? '—' : formatPercent(made, attempts);
             };
-            const formatMadeAttempts = (made, attempts) => `${Number(made) || 0}/${Number(attempts) || 0}`;
+            const formatMadeAttempts = (made, attempts) => {
+                const safeAttempts = Number(attempts) || 0;
+                if (safeAttempts <= 0) return '—';
+                return `${Number(made) || 0}/${safeAttempts}`;
+            };
 
             const getLogLockReason = (entry, ordinal) => {
                 const isPeriodEnd = entry?.kind === 'meta' && entry?.metaType === 'quarterEnd';
@@ -7256,11 +7260,11 @@
                 const total3PtAttempts = (stats.fg3m || 0) + (stats.fg3m_miss || 0);
                 const ftAttempts = (stats.ftm || 0) + (stats.ft_miss || 0);
                 return {
-                    fgPct: totalAttempts === 0 ? (showNAWhenNoAttempts ? 'N/A' : "0%") : `${Math.round((totalMade / totalAttempts) * 100)}%`,
-                    fg3Pct: total3PtAttempts === 0 ? (showNAWhenNoAttempts ? 'N/A' : "0%") : `${Math.round(((stats.fg3m || 0) / total3PtAttempts) * 100)}%`,
-                    ftPct: ftAttempts === 0 ? (showNAWhenNoAttempts ? 'N/A' : "0%") : `${Math.round(((stats.ftm || 0) / ftAttempts) * 100)}%`,
-                    fgMadeAtt: `${Number(totalMade || 0)}/${Number(totalAttempts || 0)}`,
-                    fg3MadeAtt: `${Number(stats.fg3m || 0)}/${Number(total3PtAttempts || 0)}`,
+                    fgPct: totalAttempts === 0 ? (showNAWhenNoAttempts ? '—' : "0%") : `${Math.round((totalMade / totalAttempts) * 100)}%`,
+                    fg3Pct: total3PtAttempts === 0 ? (showNAWhenNoAttempts ? '—' : "0%") : `${Math.round(((stats.fg3m || 0) / total3PtAttempts) * 100)}%`,
+                    ftPct: ftAttempts === 0 ? (showNAWhenNoAttempts ? '—' : "0%") : `${Math.round(((stats.ftm || 0) / ftAttempts) * 100)}%`,
+                    fgMadeAtt: formatMadeAttempts(totalMade, totalAttempts),
+                    fg3MadeAtt: formatMadeAttempts(stats.fg3m, total3PtAttempts),
                     ftm: stats.ftm || 0,
                     fta: ftAttempts
                 };
