@@ -3768,14 +3768,47 @@
                     expiresAt: Date.now() + 15000
                 };
 
+                writeCachedAppState(teams, updatedGames, statActions, { dirty: true });
                 setGames(updatedGames);
-                const didSave = await saveFullState(teams, updatedGames);
-                delete pendingYoutubeSaveRef.current[String(gameId)];
+                try {
+                    const payload = await apiRequest(`/api/games/${encodeURIComponent(gameId)}/video`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ youtubeUrl: normalizedUrl || '' })
+                    });
 
-                if (didSave) {
+                    const persistedGame = payload?.game && typeof payload.game === 'object'
+                        ? payload.game
+                        : null;
+
+                    setGames((prevGames) => {
+                        const mergedGames = prevGames.map((existingGame) => {
+                            if (existingGame.id !== gameId) return existingGame;
+                            if (!persistedGame) {
+                                return normalizedUrl
+                                    ? { ...existingGame, youtubeUrl: normalizedUrl }
+                                    : (() => {
+                                        const nextGame = { ...existingGame };
+                                        delete nextGame.youtubeUrl;
+                                        return nextGame;
+                                    })();
+                            }
+                            return {
+                                ...existingGame,
+                                ...persistedGame
+                            };
+                        });
+
+                        writeCachedAppState(teams, mergedGames, statActions, { dirty: false });
+                        return mergedGames;
+                    });
+
+                    delete pendingYoutubeSaveRef.current[String(gameId)];
                     showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
-                } else {
-                    showToast('Could not save YouTube link right now. Please try again.', 'error');
+                } catch (error) {
+                    delete pendingYoutubeSaveRef.current[String(gameId)];
+                    setGames(games);
+                    writeCachedAppState(teams, games, statActions, { dirty: true });
+                    showToast(String(error?.message || 'Could not save YouTube link right now. Please try again.'), 'error');
                 }
             };
 

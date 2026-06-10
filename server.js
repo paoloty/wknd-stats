@@ -2817,6 +2817,41 @@ app.put('/api/stat-actions', (req, res) => {
   res.json({ ok: true });
 });
 
+app.put('/api/games/:gameId/video', (req, res) => {
+  const gameId = String(req.params.gameId || '').trim();
+  if (!gameId) {
+    res.status(400).json({ error: 'gameId is required.' });
+    return;
+  }
+
+  const youtubeUrl = String(req.body?.youtubeUrl || '').trim();
+  const state = readState();
+  const existingGames = Array.isArray(state.games) ? state.games : [];
+  const targetGame = existingGames.find((game) => String(game?.id || '').trim() === gameId);
+
+  if (!targetGame) {
+    res.status(404).json({ error: 'Game not found.' });
+    return;
+  }
+
+  const nextGames = existingGames.map((game) => {
+    if (String(game?.id || '').trim() !== gameId) return game;
+    const nextGame = { ...game };
+    if (youtubeUrl) {
+      nextGame.youtubeUrl = youtubeUrl;
+    } else {
+      delete nextGame.youtubeUrl;
+    }
+    return nextGame;
+  });
+
+  writeState(state.teams || [], nextGames);
+  broadcastSync();
+
+  const savedGame = nextGames.find((game) => String(game?.id || '').trim() === gameId) || null;
+  res.json({ ok: true, game: savedGame });
+});
+
 app.put('/api/games/:gameId/social-cover', (req, res) => {
   const gameId = String(req.params.gameId || '').trim();
   const imageDataUrl = String(req.body?.imageDataUrl || '').trim();
