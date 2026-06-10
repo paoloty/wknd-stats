@@ -189,6 +189,7 @@
             const [isPlayPaused, setIsPlayPaused] = useState(false);
             const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
             const [pendingSharedGameId, setPendingSharedGameId] = useState(null);
+            const [pendingSharedHistoryDetailTab, setPendingSharedHistoryDetailTab] = useState('');
             const [historyDetailTab, setHistoryDetailTab] = useState('potg');
             const [historyVideoInput, setHistoryVideoInput] = useState('');
             const [historyWriteupInput, setHistoryWriteupInput] = useState('');
@@ -407,9 +408,13 @@
                     const params = new URLSearchParams(window.location.search || '');
                     const view = params.get('view');
                     const sharedGameId = params.get('gameId');
+                    const sharedTab = String(params.get('tab') || '').trim();
                     if (view === 'game' && sharedGameId) {
                         setActiveTab('history');
                         setPendingSharedGameId(sharedGameId);
+                        if (sharedTab) {
+                            setPendingSharedHistoryDetailTab(sharedTab);
+                        }
                     }
                 } catch (e) {}
             }, []);
@@ -420,7 +425,8 @@
                     const initialState = {
                         __wkndNav: true,
                         activeTab,
-                        selectedHistoryGameId: selectedHistoryGameId || null
+                        selectedHistoryGameId: selectedHistoryGameId || null,
+                        historyDetailTab: activeTab === 'history' ? historyDetailTab : null
                     };
                     window.history.replaceState(initialState, '', url.toString());
                     lastNavUrlRef.current = url.toString();
@@ -435,6 +441,9 @@
                     suppressNextNavHistoryPushRef.current = true;
                     setActiveTab(state.activeTab || 'live');
                     setSelectedHistoryGameId(state.selectedHistoryGameId || null);
+                    if (state.activeTab === 'history' && state.historyDetailTab) {
+                        setHistoryDetailTab(String(state.historyDetailTab));
+                    }
                 };
 
                 window.addEventListener('popstate', onPopState);
@@ -512,14 +521,6 @@
                 if (stoppedClockActionIds.has(action?.id) && isPeriodClockRunning) {
                     showToast('Free Throw and Free Throw Missed are only available when the clock is stopped.', 'info');
                     return;
-                }
-
-                const shouldAutoFinalizeEndedPeriod = hasMatchStarted && hasCurrentQuarterStarted && periodClockSeconds <= 0 && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
-                if (shouldAutoFinalizeEndedPeriod) {
-                    const startedNextPeriod = autoFinalizeEndedPeriodAndStartNextPeriod();
-                    if (!startedNextPeriod) {
-                        return;
-                    }
                 }
 
                 const isTrueFoulAction = action?.stat === 'pf';
@@ -1010,6 +1011,10 @@
             };
 
             const formatPercent = (made, attempts) => `${toPercent(made, attempts).toFixed(1)}%`;
+            const formatPercentOrNA = (made, attempts) => {
+                const safeAttempts = Number(attempts) || 0;
+                return safeAttempts <= 0 ? 'N/A' : formatPercent(made, attempts);
+            };
             const formatMadeAttempts = (made, attempts) => `${Number(made) || 0}/${Number(attempts) || 0}`;
 
             const getLogLockReason = (entry, ordinal) => {
@@ -2465,6 +2470,15 @@
                 && (!timeoutIsActive || allowAllActionsWhileManualPause)
                 && !isAwaitingPeriodStart
                 && !awaitingOvertimeDecision;
+            const hasFinalizedPreviousPeriod = isAwaitingPeriodStart
+                && latestPeriodMetaEvent?.metaType === 'quarterEnd'
+                && !awaitingOvertimeDecision;
+            const canBackfillEndedPeriodStats = hasMatchStarted
+                && !awaitingOvertimeDecision
+                && (
+                    (hasCurrentQuarterStarted && Number(periodClockSeconds || 0) <= 0)
+                    || hasFinalizedPreviousPeriod
+                );
             const liveGameplayControlDisplay = isLiveGameplayModalActive && liveGameplayControlSnapshotRef.current
                 ? liveGameplayControlSnapshotRef.current
                 : {
@@ -2513,7 +2527,7 @@
             const canTriggerAlwaysAction = (action) => Boolean(action && isGameLive && alwaysAllowedActionIds.has(action.id));
             const canTriggerRunningClockAction = (action) => Boolean(
                 action
-                && displayCanTriggerStatLogging
+                && (displayCanTriggerStatLogging || canBackfillEndedPeriodStats)
                 && !stoppedClockActionIds.has(action.id)
             );
             const canTriggerStoppedClockAction = (action) => Boolean(
@@ -2521,7 +2535,7 @@
                 && isGameLive
                 && stoppedClockActionIds.has(action.id)
                 && hasMatchStarted
-                && !isAwaitingPeriodStart
+                && (!isAwaitingPeriodStart || canBackfillEndedPeriodStats)
                 && !awaitingOvertimeDecision
                 && !displayIsPeriodClockRunning
             );
@@ -4000,7 +4014,7 @@
                         .slice(0, 8);
 
                     const orderedGameLog = [...(Array.isArray(game.gameLog) ? game.gameLog : [])].reverse();
-                    const isRecapNoiseEvent = (entry) => {
+                    const isRecapNoiseEvent = (entry, idx, allEntries) => {
                         const text = String(entry?.text || '').toLowerCase();
                         if (entry?.hiddenFromLog) return true;
                         if (entry?.metaType === 'periodCheckpoint') return true;
@@ -4010,24 +4024,52 @@
                         if (/clock adjusted|sync clock|clock updated/.test(text)) return true;
                         if (/^undo:\s*reversed/i.test(text)) return true;
                         if (/\bcorrection\b/.test(text)) return true;
-                        if (entry?.kind === 'meta' && ['manualPause', 'playResume', 'foulPause'].includes(entry?.metaType)) return true;
+
+                        if (entry?.metaType === 'manualPause') return true;
+                        if (text.trim() === 'manual pause' || text.trim() === 'pause game' || text.trim() === 'pause') return true;
+
+                        const isPlayResume = entry?.metaType === 'playResume' || text.startsWith('play resumed');
+                        if (isPlayResume) {
+                            let precedingPauseType = '';
+                            for (let cursor = idx - 1; cursor >= 0; cursor -= 1) {
+                                const prior = allEntries[cursor];
+                                const priorMetaType = String(prior?.metaType || '').trim();
+                                if (!priorMetaType) continue;
+
+                                if (priorMetaType === 'manualPause' || priorMetaType === 'timeout' || priorMetaType === 'officialsTimeout' || priorMetaType === 'foulPause') {
+                                    precedingPauseType = priorMetaType;
+                                    break;
+                                }
+
+                                if (priorMetaType === 'playResume' || priorMetaType === 'timeoutResume' || priorMetaType === 'quarterStart' || priorMetaType === 'matchStart' || priorMetaType === 'hardReset') {
+                                    break;
+                                }
+                            }
+
+                            if (precedingPauseType === 'manualPause') return true;
+                        }
+
+                        if (entry?.kind === 'meta' && entry?.metaType === 'foulPause') return true;
                         return false;
                     };
-                    const recapReadyGameLog = orderedGameLog.filter((entry) => !isRecapNoiseEvent(entry));
+                    const recapReadyGameLog = orderedGameLog.filter((entry, idx, allEntries) => !isRecapNoiseEvent(entry, idx, allEntries));
+
+                    const finalMomentRawEvents = recapReadyGameLog.slice(-45);
 
                     const pbpForPrompt = recapReadyGameLog
-                        .slice(-220)
+                        .slice(-180)
                         .map((entry) => ({
-                            time: String(entry?.time || ''),
+                            quarter: Number(entry?.quarter || 0) || 1,
+                            clock: String(entry?.clockRemaining || ''),
                             team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : 'Neutral',
                             text: String(entry?.text || '')
                         }))
                         .filter((entry) => entry.text.trim());
 
-                    const finalMomentsForPrompt = recapReadyGameLog
-                        .slice(-45)
+                    const finalMomentsForPrompt = finalMomentRawEvents
                         .map((entry) => ({
-                            time: String(entry?.time || ''),
+                            quarter: Number(entry?.quarter || 0) || 1,
+                            clock: String(entry?.clockRemaining || ''),
                             team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : 'Neutral',
                             text: String(entry?.text || '')
                         }))
@@ -4138,11 +4180,7 @@
                             if (event?.outId) uniqueSubPlayers.add(event.outId);
                             if (event?.inId) uniqueSubPlayers.add(event.inId);
                         });
-                        const lateSubCount = finalMomentsForPrompt.filter((entry) => {
-                            const raw = recapReadyGameLog.find((log) => String(log?.text || '') === String(entry?.text || '') && String(log?.time || '') === String(entry?.time || ''));
-                            if (!raw) return false;
-                            return raw.kind === 'sub' && raw.isTeamA === isTeamA;
-                        }).length;
+                        const lateSubCount = finalMomentRawEvents.filter((raw) => raw?.kind === 'sub' && raw?.isTeamA === isTeamA).length;
 
                         return {
                             teamName: teamObj?.name || (isTeamA ? game.teamAName : game.teamBName),
@@ -4723,7 +4761,7 @@
                     showToast('Press Start Match before logging stats.', 'info');
                     return;
                 }
-                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted && !canTriggerAlwaysAction(activeAction)) {
+                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted && !canTriggerAlwaysAction(activeAction) && !canBackfillEndedPeriodStats) {
                     showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
                     return;
                 }
@@ -6278,6 +6316,20 @@
                 showToast("Live statistics committed to system database successfully!", "success");
             };
 
+            const openFinalizePeriodConfirm = () => {
+                const periodLabel = getPeriodLabel(currentQuarter);
+                setConfirmDialog({
+                    title: `Finalize ${periodLabel}?`,
+                    text: `You can continue backfilling missed stats, or finalize ${periodLabel} now and move on.`,
+                    cancelLabel: 'Continue Backfill',
+                    confirmLabel: 'Finalize Period',
+                    onConfirm: () => {
+                        setConfirmDialog(null);
+                        handleAdvanceQuarter();
+                    }
+                });
+            };
+
             const openEndGameConfirm = () => {
                 if (missingRegulationQuarters.length > 0) {
                     const missingLabel = missingRegulationQuarters.map((q) => `Q${q}`).join(', ');
@@ -6359,6 +6411,11 @@
                         clockRemaining: formatSecondsAsClock(periodClockSeconds)
                     }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                     showToast('Play resumed.', 'success');
+                    return;
+                }
+
+                if (periodActionMode === 'endPeriod') {
+                    openFinalizePeriodConfirm();
                     return;
                 }
 
@@ -6963,15 +7020,16 @@
                 showToast("Player updated.", "success");
             };
 
-            const computeShootingPercentages = (stats) => {
+            const computeShootingPercentages = (stats, options = {}) => {
+                const showNAWhenNoAttempts = Boolean(options?.showNAWhenNoAttempts);
                 const totalMade = (stats.fg2m || 0) + (stats.fg3m || 0);
                 const totalAttempts = totalMade + (stats.fg2m_miss || 0) + (stats.fg3m_miss || 0);
                 const total3PtAttempts = (stats.fg3m || 0) + (stats.fg3m_miss || 0);
                 const ftAttempts = (stats.ftm || 0) + (stats.ft_miss || 0);
                 return {
-                    fgPct: totalAttempts === 0 ? "0%" : `${Math.round((totalMade / totalAttempts) * 100)}%`,
-                    fg3Pct: total3PtAttempts === 0 ? "0%" : `${Math.round(((stats.fg3m || 0) / total3PtAttempts) * 100)}%`,
-                    ftPct: ftAttempts === 0 ? "0%" : `${Math.round(((stats.ftm || 0) / ftAttempts) * 100)}%`,
+                    fgPct: totalAttempts === 0 ? (showNAWhenNoAttempts ? 'N/A' : "0%") : `${Math.round((totalMade / totalAttempts) * 100)}%`,
+                    fg3Pct: total3PtAttempts === 0 ? (showNAWhenNoAttempts ? 'N/A' : "0%") : `${Math.round(((stats.fg3m || 0) / total3PtAttempts) * 100)}%`,
+                    ftPct: ftAttempts === 0 ? (showNAWhenNoAttempts ? 'N/A' : "0%") : `${Math.round(((stats.ftm || 0) / ftAttempts) * 100)}%`,
                     fgMadeAtt: `${Number(totalMade || 0)}/${Number(totalAttempts || 0)}`,
                     fg3MadeAtt: `${Number(stats.fg3m || 0)}/${Number(total3PtAttempts || 0)}`,
                     ftm: stats.ftm || 0,
@@ -7991,15 +8049,22 @@
                     if (activeTab === 'history' && gameId) {
                         url.searchParams.set('view', 'game');
                         url.searchParams.set('gameId', gameId);
+                        if (historyDetailTab) {
+                            url.searchParams.set('tab', historyDetailTab);
+                        } else {
+                            url.searchParams.delete('tab');
+                        }
                     } else {
                         url.searchParams.delete('view');
                         url.searchParams.delete('gameId');
+                        url.searchParams.delete('tab');
                     }
                     const nextUrl = url.toString();
                     const nextState = {
                         __wkndNav: true,
                         activeTab,
-                        selectedHistoryGameId: gameId || null
+                        selectedHistoryGameId: gameId || null,
+                        historyDetailTab: activeTab === 'history' ? historyDetailTab : null
                     };
 
                     if (mode === 'push') {
@@ -8023,8 +8088,12 @@
                 const targetGame = games.find((game) => game.id === pendingSharedGameId);
                 if (!targetGame) return;
                 openHistoryGame(targetGame.id);
+                if (pendingSharedHistoryDetailTab) {
+                    setHistoryDetailTab(pendingSharedHistoryDetailTab);
+                    setPendingSharedHistoryDetailTab('');
+                }
                 setPendingSharedGameId(null);
-            }, [pendingSharedGameId, games]);
+            }, [pendingSharedGameId, pendingSharedHistoryDetailTab, games]);
 
             useEffect(() => {
                 if (suppressNextNavHistoryPushRef.current) {
@@ -8040,9 +8109,15 @@
                     if (activeTab === 'history' && nextGameId) {
                         url.searchParams.set('view', 'game');
                         url.searchParams.set('gameId', nextGameId);
+                        if (historyDetailTab) {
+                            url.searchParams.set('tab', historyDetailTab);
+                        } else {
+                            url.searchParams.delete('tab');
+                        }
                     } else {
                         url.searchParams.delete('view');
                         url.searchParams.delete('gameId');
+                        url.searchParams.delete('tab');
                     }
                     nextUrl = url.toString();
                 } catch (e) {}
@@ -8050,7 +8125,9 @@
                 const currentState = window.history.state;
                 const currentTab = currentState?.__wkndNav ? String(currentState.activeTab || 'live') : null;
                 const currentGameId = currentState?.__wkndNav ? (currentState.selectedHistoryGameId || null) : null;
-                const stateMatches = currentTab === activeTab && currentGameId === nextGameId;
+                const currentHistoryDetailTab = currentState?.__wkndNav ? (currentState.historyDetailTab || null) : null;
+                const nextHistoryDetailTab = activeTab === 'history' ? historyDetailTab : null;
+                const stateMatches = currentTab === activeTab && currentGameId === nextGameId && currentHistoryDetailTab === nextHistoryDetailTab;
                 const currentUrl = (() => {
                     try {
                         return new URL(window.location.href).toString();
@@ -8065,7 +8142,7 @@
                 }
 
                 syncHistoryShareUrl(nextGameId, 'push');
-            }, [activeTab, selectedHistoryGameId]);
+            }, [activeTab, selectedHistoryGameId, historyDetailTab]);
 
             const getTopTeamPerformers = (team, game, limit = 3) => {
                 if (!team || !game) return [];
@@ -8670,7 +8747,7 @@
                                                     <button
                                                         onClick={() => handleLogTimeout(true)}
                                                             disabled={!teamATimeoutEnabled || !canOperateTeam(true)}
-                                                        className="w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
+                                                        className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
                                                         style={{
                                                             backgroundColor: `${liveHomeTeam?.color || '#06b6d4'}${teamATimeoutEnabled ? '66' : '22'}`,
                                                             borderColor: liveHomeTeam?.color || '#06b6d4',
@@ -8684,7 +8761,7 @@
                                                     </button>
                                                     <button
                                                         onClick={handlePeriodAction}
-                                                        className={`w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
+                                                        className={`w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
                                                             displayPeriodActionIsPositive
                                                                 ? `bg-emerald-600/25 hover:bg-emerald-600/35 border-emerald-400/70 text-emerald-100 ${!isLiveGameplayModalActive ? 'animate-pulse' : ''}`
                                                                 : displayPeriodActionIsPause
@@ -8700,7 +8777,7 @@
                                                     <button
                                                         onClick={() => handleLogTimeout(false)}
                                                         disabled={!teamBTimeoutEnabled || !canOperateTeam(false)}
-                                                        className="w-full font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
+                                                        className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
                                                         style={{
                                                             backgroundColor: `${liveAwayTeam?.color || '#06b6d4'}${teamBTimeoutEnabled ? '66' : '22'}`,
                                                             borderColor: liveAwayTeam?.color || '#06b6d4',
@@ -8726,7 +8803,7 @@
                                                                 return next;
                                                             });
                                                         }}
-                                                        className="w-full font-bold py-2 px-3 rounded-lg text-[10px] md:text-xs border border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800/90 cursor-pointer"
+                                                        className="w-full inline-flex items-center justify-center font-bold py-2 px-3 rounded-lg text-[10px] md:text-xs border border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800/90 cursor-pointer"
                                                     >
                                                         <span className="inline-flex items-center justify-center gap-1">
                                                             <Icons.Zap />
@@ -8741,7 +8818,7 @@
                                                                     <button
                                                                         type="button"
                                                                         onClick={openEndGameConfirm}
-                                                                        className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/55 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer"
+                                                                        className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/55 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer"
                                                                     >
                                                                         <span className="inline-flex items-center justify-center gap-1">
                                                                             <Icons.Stop />
@@ -8751,9 +8828,9 @@
                                                                 ) : (
                                                                     <button
                                                                         type="button"
-                                                                        onClick={handleAdvanceQuarter}
+                                                                        onClick={openFinalizePeriodConfirm}
                                                                         disabled={!canEndCurrentPeriod}
-                                                                        className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/50 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                        className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/50 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                     >
                                                                         <span className="inline-flex items-center justify-center gap-1">
                                                                             <Icons.Stop />
@@ -8766,7 +8843,7 @@
                                                                 <button
                                                                     onClick={handleOfficialsTimeout}
                                                                     disabled={!canOfficialsTimeout}
-                                                                    className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-sky-500/50 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                    className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-sky-500/50 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                 >
                                                                     <span className="inline-flex items-center justify-center gap-1">
                                                                         <Icons.Timer />
@@ -8778,7 +8855,7 @@
                                                                     disabled={!technicalFoulAction || !canUseActionTrigger(technicalFoulAction)}
                                                                     onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, operatorFocus === 'away' ? false : true)}
                                                                     title={(!undoLockedByQuarterEnd && !canUseActionTrigger(technicalFoulAction)) ? 'Unavailable right now' : undefined}
-                                                                    className="w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/45 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                    className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/45 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                 >
                                                                     <span className="inline-flex items-center justify-center gap-1">
                                                                         <Icons.ShieldAlert />
@@ -8794,7 +8871,7 @@
                                                                             }
                                                                         }}
                                                                         disabled={showSyncClockEditor}
-                                                                        className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${showSyncClockEditor
+                                                                        className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${showSyncClockEditor
                                                                             ? 'border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed opacity-70'
                                                                             : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer'}`}
                                                                     >
@@ -8851,10 +8928,18 @@
                                             <div className="flex items-center border-b border-slate-800 pb-1.5">
                                                 <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1"><Icons.Zap /> Tap action first, then select player on court</span>
                                             </div>
+                                            {canBackfillEndedPeriodStats && (
+                                                <div className="text-[10px] font-bold text-sky-200 bg-sky-500/10 border border-sky-500/30 rounded-lg px-2.5 py-2 inline-flex items-center gap-1.5">
+                                                    <Icons.Edit />
+                                                    Backfill Mode: clock has ended, but stat buttons stay enabled so you can log missed actions before finalizing the period.
+                                                </div>
+                                            )}
                                             {!displayCanTriggerStatLogging && (
                                                 <div className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
-                                                    {isAwaitingPeriodStart || awaitingOvertimeDecision
-                                                        ? `Period finalized. ${getPeriodLabel(currentQuarter)} stats are locked. Start the next period (or end match) to continue. Undo to previous period is disabled.`
+                                                    {(isAwaitingPeriodStart || awaitingOvertimeDecision)
+                                                        ? (canBackfillEndedPeriodStats
+                                                            ? `Clock has ended for ${getPeriodLabel(currentQuarter)}. You can still log missed stats before starting the next period.`
+                                                            : `Period finalized. ${getPeriodLabel(currentQuarter)} stats are locked. Start the next period (or end match) to continue. Undo to previous period is disabled.`)
                                                         : (hasMatchStarted
                                                             ? 'Most stat triggers are locked while paused/stopped. Technical Foul stays enabled. Free Throw and Free Throw Missed are only enabled when the clock is stopped.'
                                                             : 'Stat triggers are locked until you press Start Match.')}
@@ -8871,7 +8956,7 @@
                                                             disabled={!canUseActionTrigger(act)}
                                                             onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                             title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
-                                                            className={`py-3.5 md:py-6 px-1.5 md:px-4 rounded-lg md:rounded-2xl text-center text-[9px] md:text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
+                                                            className={`py-3.5 md:py-6 px-1.5 md:px-4 rounded-lg md:rounded-2xl inline-flex items-center justify-center text-center text-[9px] md:text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                         >
                                                             {act.label}
                                                         </button>
@@ -8891,7 +8976,7 @@
                                                                 disabled={!canUseActionTrigger(act)}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
-                                                                className={`py-3.5 md:py-4 px-2 md:px-4 rounded-lg md:rounded-xl text-center text-[10px] md:text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
+                                                                className={`py-3.5 md:py-4 px-2 md:px-4 rounded-lg md:rounded-xl inline-flex items-center justify-center text-center text-[10px] md:text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
                                                             </button>
@@ -8909,7 +8994,7 @@
                                                                 disabled={!canUseActionTrigger(act)}
                                                                 onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
                                                                 title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
-                                                                className={`py-[11px] md:py-2.5 px-1.5 md:px-2 rounded-lg text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
+                                                                className={`py-[11px] md:py-2.5 px-1.5 md:px-2 rounded-lg inline-flex items-center justify-center text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
                                                             </button>
@@ -8921,8 +9006,8 @@
 
                                         {/* Mobile Tab Toggles */}
                                         <div className="col-span-12 md:hidden flex bg-slate-955 p-1 rounded-xl border border-slate-855 gap-1">
-                                            <button onClick={() => setActiveMobileConsoleTab('home')} className={`flex-1 py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'home' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🏠 Home lineup</button>
-                                            <button onClick={() => setActiveMobileConsoleTab('away')} className={`flex-1 py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'away' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🚌 Away lineup</button>
+                                            <button onClick={() => setActiveMobileConsoleTab('home')} className={`flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'home' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🏠 Home lineup</button>
+                                            <button onClick={() => setActiveMobileConsoleTab('away')} className={`flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === 'away' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>🚌 Away lineup</button>
                                         </div>
 
                                         {/* Main Courtside tracking zones */}
@@ -9539,9 +9624,9 @@
                                                         const liveComparisonRows = [
                                                             { label: 'PTS', teamAValue: Math.round(Number(liveTeamATotals.pts) || 0), teamBValue: Math.round(Number(liveTeamBTotals.pts) || 0), teamACompare: Number(liveTeamATotals.pts) || 0, teamBCompare: Number(liveTeamBTotals.pts) || 0 },
                                                             { label: 'FG', teamAValue: formatMadeAttempts(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatMadeAttempts(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: liveTeamAFgMade, teamBCompare: liveTeamBFgMade },
-                                                            { label: 'FG%', teamAValue: formatPercent(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatPercent(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: toPercent(liveTeamAFgMade, liveTeamAFgAtt), teamBCompare: toPercent(liveTeamBFgMade, liveTeamBFgAtt) },
+                                                            { label: 'FG%', teamAValue: formatPercentOrNA(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatPercentOrNA(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: toPercent(liveTeamAFgMade, liveTeamAFgAtt), teamBCompare: toPercent(liveTeamBFgMade, liveTeamBFgAtt) },
                                                             { label: '3PT', teamAValue: formatMadeAttempts(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatMadeAttempts(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: liveTeamA3PMade, teamBCompare: liveTeamB3PMade },
-                                                            { label: '3P%', teamAValue: formatPercent(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatPercent(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: toPercent(liveTeamA3PMade, liveTeamA3PAtt), teamBCompare: toPercent(liveTeamB3PMade, liveTeamB3PAtt) },
+                                                            { label: '3P%', teamAValue: formatPercentOrNA(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatPercentOrNA(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: toPercent(liveTeamA3PMade, liveTeamA3PAtt), teamBCompare: toPercent(liveTeamB3PMade, liveTeamB3PAtt) },
                                                             { label: 'FT', teamAValue: formatMadeAttempts(liveTeamAFtMade, liveTeamAFtAtt), teamBValue: formatMadeAttempts(liveTeamBFtMade, liveTeamBFtAtt), teamACompare: liveTeamAFtMade, teamBCompare: liveTeamBFtMade },
                                                             { label: 'REB', teamAValue: Math.round(Number(liveTeamATotals.reb) || 0), teamBValue: Math.round(Number(liveTeamBTotals.reb) || 0), teamACompare: Number(liveTeamATotals.reb) || 0, teamBCompare: Number(liveTeamBTotals.reb) || 0 },
                                                             { label: 'AST', teamAValue: Math.round(Number(liveTeamATotals.ast) || 0), teamBValue: Math.round(Number(liveTeamBTotals.ast) || 0), teamACompare: Number(liveTeamATotals.ast) || 0, teamBCompare: Number(liveTeamBTotals.ast) || 0 },
@@ -9719,7 +9804,7 @@
                                                                                                     <td className="py-2 px-2 text-slate-600 italic" colSpan={13}>No qualifying performers</td>
                                                                                                 </tr>
                                                                                             ) : mergedLiveTopPerformers.map((entry, idx) => {
-                                                                                                const shooting = computeShootingPercentages(entry.stats || {});
+                                                                                                const shooting = computeShootingPercentages(entry.stats || {}, { showNAWhenNoAttempts: true });
                                                                                                 return (
                                                                                                     <tr key={`live-potg-top-${entry.id}`} className="hover:bg-slate-855/20">
                                                                                                         <td className="py-2 px-2 text-center font-bold text-slate-500">#{idx + 1}</td>
@@ -10726,9 +10811,9 @@
                                         const historyComparisonRows = [
                                             { label: 'PTS', teamAValue: Math.round(Number(teamATotals.pts) || 0), teamBValue: Math.round(Number(teamBTotals.pts) || 0), teamACompare: Number(teamATotals.pts) || 0, teamBCompare: Number(teamBTotals.pts) || 0 },
                                             { label: 'FG', teamAValue: formatMadeAttempts(teamAFgMade, teamAFgAtt), teamBValue: formatMadeAttempts(teamBFgMade, teamBFgAtt), teamACompare: teamAFgMade, teamBCompare: teamBFgMade },
-                                            { label: 'FG%', teamAValue: formatPercent(teamAFgMade, teamAFgAtt), teamBValue: formatPercent(teamBFgMade, teamBFgAtt), teamACompare: toPercent(teamAFgMade, teamAFgAtt), teamBCompare: toPercent(teamBFgMade, teamBFgAtt) },
+                                            { label: 'FG%', teamAValue: formatPercentOrNA(teamAFgMade, teamAFgAtt), teamBValue: formatPercentOrNA(teamBFgMade, teamBFgAtt), teamACompare: toPercent(teamAFgMade, teamAFgAtt), teamBCompare: toPercent(teamBFgMade, teamBFgAtt) },
                                             { label: '3PT', teamAValue: formatMadeAttempts(teamA3PMade, teamA3PAtt), teamBValue: formatMadeAttempts(teamB3PMade, teamB3PAtt), teamACompare: teamA3PMade, teamBCompare: teamB3PMade },
-                                            { label: '3P%', teamAValue: formatPercent(teamA3PMade, teamA3PAtt), teamBValue: formatPercent(teamB3PMade, teamB3PAtt), teamACompare: toPercent(teamA3PMade, teamA3PAtt), teamBCompare: toPercent(teamB3PMade, teamB3PAtt) },
+                                            { label: '3P%', teamAValue: formatPercentOrNA(teamA3PMade, teamA3PAtt), teamBValue: formatPercentOrNA(teamB3PMade, teamB3PAtt), teamACompare: toPercent(teamA3PMade, teamA3PAtt), teamBCompare: toPercent(teamB3PMade, teamB3PAtt) },
                                             { label: 'FT', teamAValue: formatMadeAttempts(teamAFtMade, teamAFtAtt), teamBValue: formatMadeAttempts(teamBFtMade, teamBFtAtt), teamACompare: teamAFtMade, teamBCompare: teamBFtMade },
                                             { label: 'REB', teamAValue: Math.round(Number(teamATotals.reb) || 0), teamBValue: Math.round(Number(teamBTotals.reb) || 0), teamACompare: Number(teamATotals.reb) || 0, teamBCompare: Number(teamBTotals.reb) || 0 },
                                             { label: 'AST', teamAValue: Math.round(Number(teamATotals.ast) || 0), teamBValue: Math.round(Number(teamBTotals.ast) || 0), teamACompare: Number(teamATotals.ast) || 0, teamBCompare: Number(teamBTotals.ast) || 0 },
@@ -11160,7 +11245,7 @@
                                                                                             <td className="py-2 px-2 text-slate-600 italic" colSpan={14}>No qualifying performers</td>
                                                                                         </tr>
                                                                                     ) : mergedTopPerformers.map((entry, idx) => {
-                                                                                        const shooting = computeShootingPercentages(entry.stats || {});
+                                                                                        const shooting = computeShootingPercentages(entry.stats || {}, { showNAWhenNoAttempts: true });
                                                                                         return (
                                                                                             <tr key={`potg-top-merged-${entry.id}`} className="hover:bg-slate-855/20">
                                                                                                 <td className="py-2 px-2 text-center font-bold text-slate-500">#{idx + 1}</td>
@@ -11404,7 +11489,7 @@
                                                                 {teamAObj?.players
                                                                     .map(player => {
                                                                         const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
-                                                                        const pPct = computeShootingPercentages(pstats);
+                                                                        const pPct = computeShootingPercentages(pstats, { showNAWhenNoAttempts: true });
                                                                         const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
                                                                         const hasSavedRow = Boolean(game.playerStats?.[player.id]);
                                                                         const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(pstats[field] || 0) > 0);
@@ -11492,7 +11577,7 @@
                                                                 {teamBObj?.players
                                                                     .map(player => {
                                                                         const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
-                                                                        const pPct = computeShootingPercentages(pstats);
+                                                                        const pPct = computeShootingPercentages(pstats, { showNAWhenNoAttempts: true });
                                                                         const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
                                                                         const hasSavedRow = Boolean(game.playerStats?.[player.id]);
                                                                         const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(pstats[field] || 0) > 0);
@@ -11560,12 +11645,39 @@
 
                                                         {Array.isArray(game.gameLog) && game.gameLog.length > 0 ? (
                                                             <div className="space-y-1.5 text-xs md:text-sm max-h-72 overflow-auto pr-1">
-                                                                {(game.gameLog || []).filter((log) => !log?.hiddenFromLog).map((log, idx) => {
+                                                                {(game.gameLog || []).filter((log, idx, allLogs) => {
+                                                                    if (log?.hiddenFromLog) return false;
+                                                                    const text = String(log?.text || '').trim().toLowerCase();
+                                                                    if (log?.metaType === 'manualPause') return false;
+                                                                    if (text === 'manual pause' || text === 'pause game' || text === 'pause') return false;
+
+                                                                    const isPlayResume = log?.metaType === 'playResume' || text.startsWith('play resumed');
+                                                                    if (isPlayResume) {
+                                                                        let precedingPauseType = '';
+                                                                        for (let cursor = idx + 1; cursor < allLogs.length; cursor += 1) {
+                                                                            const prior = allLogs[cursor];
+                                                                            const priorMetaType = String(prior?.metaType || '').trim();
+                                                                            if (!priorMetaType) continue;
+
+                                                                            if (priorMetaType === 'manualPause' || priorMetaType === 'timeout' || priorMetaType === 'officialsTimeout' || priorMetaType === 'foulPause') {
+                                                                                precedingPauseType = priorMetaType;
+                                                                                break;
+                                                                            }
+
+                                                                            if (priorMetaType === 'playResume' || priorMetaType === 'timeoutResume' || priorMetaType === 'quarterStart' || priorMetaType === 'matchStart' || priorMetaType === 'hardReset') {
+                                                                                break;
+                                                                            }
+                                                                        }
+
+                                                                        if (precedingPauseType === 'manualPause') return false;
+                                                                    }
+
+                                                                    return true;
+                                                                }).map((log, idx) => {
                                                                     const isSubEvent = typeof log.text === 'string' && log.text.includes('SUB:');
                                                                     const isHomeEvent = log.isTeamA === true;
                                                                     const isAwayEvent = log.isTeamA === false;
                                                                     const isNeutralEvent = !isHomeEvent && !isAwayEvent;
-                                                                    const timeLabel = (log.time || '').split(' ')[0] || '--';
                                                                     return (
                                                                         <div
                                                                             key={`${log.time || 'event'}-${idx}`}
@@ -11583,9 +11695,6 @@
                                                                                 <div className="text-center">
                                                                                     <span className="inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-950/95 px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-widest text-slate-400">
                                                                                         {getPeriodLabel(log.quarter || 1)} {log.clockRemaining || '--:--'}
-                                                                                    </span>
-                                                                                    <span className="mt-1 inline-flex items-center justify-center rounded-full border border-slate-800 bg-slate-900/90 px-2 py-0.5 text-[9px] font-mono uppercase tracking-widest text-slate-500">
-                                                                                        {timeLabel}
                                                                                     </span>
                                                                                 </div>
 
@@ -12233,8 +12342,16 @@
                     {showLoggingModal && activeAction && (
                         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                             <div className={`bg-slate-900 border border-slate-800 rounded-2xl w-full shadow-2xl relative my-auto ${isCompactRecordActionModal ? 'max-w-xl p-4' : 'max-w-2xl p-5'}`}>
-                                <div className={`text-center ${isCompactRecordActionModal ? 'mb-2' : 'mb-3'}`}>
-                                    <h3 className={`${isCompactRecordActionModal ? 'text-xs' : 'text-sm'} font-black text-white`}>Record Action: <span className="text-emerald-400 font-mono">{activeAction.label}</span></h3>
+                                <div className={`rounded-xl border border-emerald-400/45 bg-gradient-to-r from-emerald-500/20 via-emerald-400/10 to-cyan-500/15 ${isCompactRecordActionModal ? 'p-2 mb-2' : 'p-3 mb-3'}`}>
+                                    <div className="text-center">
+                                        <div className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-200">Armed Stat Action</div>
+                                        <h3 className={`${isCompactRecordActionModal ? 'text-base mt-1' : 'text-xl mt-1'} font-black text-white leading-tight`}>
+                                            Record Action:
+                                            <span className="ml-2 inline-flex items-center rounded-md border border-emerald-300/60 bg-emerald-400/20 px-2 py-0.5 text-emerald-100 font-mono tracking-wide">
+                                                {activeAction.label}
+                                            </span>
+                                        </h3>
+                                    </div>
                                 </div>
                                 <div className={`text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? 'mb-2 text-[9px]' : 'mb-3 text-[10px]'}`}>Focus: <span className="text-orange-300">{operatorFocus}</span></div>
                                 <div className={`grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'} ${isCompactRecordActionModal ? 'gap-2.5' : 'gap-4'}`}>
