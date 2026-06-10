@@ -2133,6 +2133,9 @@ app.use((req, res, next) => {
 });
 
 function renderInjectedIndex(req, res) {
+  const gaEnabledForRequest = isGaEnabledForRequest(req);
+  const requestHostname = getCanonicalRequestHostname(req);
+
   try {
     const gameId = String(req.query.gameId || '').trim();
     const isGameView = String(req.query.view || '').toLowerCase() === 'game' && gameId;
@@ -2140,15 +2143,32 @@ function renderInjectedIndex(req, res) {
     const game = isGameView ? ((state.games || []).find((item) => item.id === gameId) || null) : null;
     const indexPath = path.join(__dirname, 'index.html');
     const html = fs.readFileSync(indexPath, 'utf8');
-    const metaTags = buildSocialMetaTags({ req, game });
-    const gaHeadSnippet = buildGaHeadSnippet(req);
+    let metaTags = '';
+    let gaHeadSnippet = '';
+
+    try {
+      metaTags = buildSocialMetaTags({ req, game });
+    } catch {
+      metaTags = '';
+    }
+
+    try {
+      gaHeadSnippet = buildGaHeadSnippet(req);
+    } catch {
+      gaHeadSnippet = '';
+    }
+
     const headFragments = [metaTags, gaHeadSnippet].filter(Boolean).join('\n    ');
     const injected = html.replace('</head>', `    ${headFragments}\n</head>`);
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('X-GA-Enabled', gaEnabledForRequest ? '1' : '0');
+    res.setHeader('X-GA-Hostname', requestHostname || 'unknown');
+    res.setHeader('X-GA-Injected', gaHeadSnippet ? '1' : '0');
     res.send(injected);
   } catch {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.status(500).type('text/plain').send('Failed to render index.');
   }
 }
 
