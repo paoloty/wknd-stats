@@ -975,8 +975,22 @@ function getRecapFirstParagraph(game) {
 }
 
 function getSocialImageVersion(game) {
-  if (!game) return 'default';
+  let logoVersionPart = 'logo:none';
+  const logoPath = resolveSocialCoverLogoPath();
+  if (logoPath) {
+    try {
+      const stat = fs.statSync(logoPath);
+      logoVersionPart = `logo:${path.basename(logoPath)}:${Number(stat.size || 0)}:${Math.floor(Number(stat.mtimeMs || 0))}`;
+    } catch {
+      logoVersionPart = `logo:${path.basename(logoPath)}`;
+    }
+  }
+
+  if (!game) {
+    return crypto.createHash('sha1').update(logoVersionPart).digest('hex').slice(0, 12);
+  }
   const source = [
+    logoVersionPart,
     String(game.id || ''),
     String(game.date || ''),
     String(game.teamAName || ''),
@@ -2072,6 +2086,8 @@ app.get('/api/social-cover/default.png', async (_req, res) => {
     const png = await buildSocialCoverPng(null, []);
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');
+    const resolvedLogoPath = resolveSocialCoverLogoPath();
+    res.setHeader('X-Social-Cover-Logo', resolvedLogoPath ? path.basename(resolvedLogoPath) : 'none');
     res.send(png);
   } catch {
     res.status(500).json({ error: 'Failed to build social cover.' });
@@ -2098,6 +2114,8 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
     }
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Cache-Control', 'public, max-age=300');
+    const resolvedLogoPath = resolveSocialCoverLogoPath();
+    res.setHeader('X-Social-Cover-Logo', resolvedLogoPath ? path.basename(resolvedLogoPath) : 'none');
     res.send(png);
   } catch {
     res.status(500).json({ error: 'Failed to build social cover.' });
