@@ -207,6 +207,7 @@
             const [isGeneratingPlayerArt, setIsGeneratingPlayerArt] = useState(false);
             const [awaitingOvertimeDecision, setAwaitingOvertimeDecision] = useState(false);
             const [awaitingPeriodStart, setAwaitingPeriodStart] = useState(false);
+            const [localSoftPauseActive, setLocalSoftPauseActive] = useState(false);
 
             // Historic Boxscore Editing States
             const [editingGame, setEditingGame] = useState(null); 
@@ -298,6 +299,10 @@
             const wasLiveGameModalOpenRef = useRef(false);
             const pendingModalSoftResumeRef = useRef(false);
             const liveGameplayControlSnapshotRef = useRef(null);
+            const localFoulPauseTriggerIdRef = useRef('');
+            const adminFocusRevisionRef = useRef(0);
+            const lastRolePresenceEmitAtRef = useRef(0);
+            const adminMissingToastAtRef = useRef(0);
             const attemptedAutoPotgWriteupRef = useRef(new Set());
             const pendingYoutubeSaveRef = useRef({});
             const suppressNextNavHistoryPushRef = useRef(false);
@@ -307,7 +312,9 @@
             const [foulAlert, setFoulAlert] = useState(null);
 
             const [confirmDialog, setConfirmDialog] = useState(null);
-            const [periodEndAlert, setPeriodEndAlert] = useState(null);
+            const [isAdminSupervisorPresent, setIsAdminSupervisorPresent] = useState(false);
+            const [sharedAdminFocus, setSharedAdminFocus] = useState(null);
+            const [isRoleCapacityExceeded, setIsRoleCapacityExceeded] = useState(false);
             const hadLiveSessionRef = useRef(false);
 
             const [authRole, setAuthRole] = useState('viewer');
@@ -317,9 +324,25 @@
             const [operatorFocus, setOperatorFocus] = useState('both');
 
             const canOperateLive = authRole === 'operator' || authRole === 'admin';
+            const isOperatorScreenLockedByAdminBoth = authRole === 'operator'
+                && isGameLive
+                && sharedAdminFocus === 'both';
+            const canUseLiveControls = canOperateLive
+                && (
+                    authRole === 'admin'
+                    || !isOperatorScreenLockedByAdminBoth
+                );
+            const effectiveOperatorFocus = (authRole === 'operator' && isGameLive)
+                ? (sharedAdminFocus === 'home'
+                    ? 'away'
+                    : sharedAdminFocus === 'away'
+                        ? 'home'
+                        : operatorFocus)
+                : operatorFocus;
+            const canAdminControlClock = authRole === 'admin';
             const canEditPlayers = authRole === 'operator' || authRole === 'admin';
             const isLoggedIn = authRole !== 'viewer';
-            const showOperatorFocusControls = canOperateLive && activeTab === 'live' && isGameLive;
+            const showOperatorFocusControls = canAdminControlClock && activeTab === 'live' && isGameLive;
             const editableLiveStatActions = (statActions || []).filter((action) => {
                 if (!action || !action.id || !action.label || !action.stat) return false;
                 return Number(action.val || 0) !== 0;
@@ -491,16 +514,62 @@
                 showToast('Logged out. Viewer access only.', 'info');
             };
 
+            const handleOperatorFocusChange = (nextFocus) => {
+                if (authRole !== 'admin') {
+                    showToast('Only admin can change focus assignment.', 'info');
+                    return;
+                }
+                const resolvedFocus = nextFocus === 'home' || nextFocus === 'away' || nextFocus === 'both'
+                    ? nextFocus
+                    : 'both';
+                setOperatorFocus(resolvedFocus);
+                setSharedAdminFocus(resolvedFocus);
+
+                if (!isGameLive) return;
+                const focusEventTs = Date.now();
+                const nextFocusRevision = Math.max(Number(adminFocusRevisionRef.current || 0) + 1, focusEventTs * 1000);
+                adminFocusRevisionRef.current = nextFocusRevision;
+                const focusEvent = {
+                    id: `${focusEventTs}_${Math.random().toString(36).slice(2, 8)}`,
+                    time: getWallClockTime(),
+                    text: `Admin focus: ${resolvedFocus.toUpperCase()}`,
+                    kind: 'meta',
+                    metaType: 'adminFocusSet',
+                    quarter: currentQuarter,
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                    role: 'admin',
+                    focus: resolvedFocus,
+                    focusRevision: nextFocusRevision,
+                    clientId: syncClientIdRef.current
+                };
+                markLocalSessionUpdated();
+                setGameLog((prev) => [focusEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+            };
+
             const canOperateTeam = (isTeamA) => {
-                if (!canOperateLive) return false;
-                if (operatorFocus === 'both') return true;
-                return operatorFocus === (isTeamA ? 'home' : 'away');
+                if (!canUseLiveControls) return false;
+                if (effectiveOperatorFocus === 'both') return true;
+                return effectiveOperatorFocus === (isTeamA ? 'home' : 'away');
             };
 
             const ensureTeamOperationAccess = (isTeamA, actionLabel = 'operate on this team') => {
+                if (!canUseLiveControls) {
+                    if (authRole === 'operator' && isOperatorScreenLockedByAdminBoth) {
+                        showToast('Operator controls are locked while admin focus is BOTH.', 'info');
+                        return false;
+                    }
+                    if (authRole === 'operator' && !isAdminSupervisorPresent) {
+                        showToast('Admin must be active before operator can use live controls.', 'info');
+                        return false;
+                    }
+                    if (isRoleCapacityExceeded) {
+                        showToast('Live game allows max 2 users: 1 admin and 1 operator.', 'info');
+                        return false;
+                    }
+                }
                 if (canOperateTeam(isTeamA)) return true;
                 const teamLabel = isTeamA ? 'HOME' : 'AWAY';
-                showToast(`Focus is set to ${operatorFocus.toUpperCase()}. Switch to ${teamLabel} or BOTH to ${actionLabel}.`, 'info');
+                showToast(`Focus is set to ${effectiveOperatorFocus.toUpperCase()}. Switch to ${teamLabel} or BOTH to ${actionLabel}.`, 'info');
                 return false;
             };
 
@@ -527,7 +596,7 @@
                 }
 
                 if (stoppedClockActionIds.has(action?.id) && isPeriodClockRunning) {
-                    showToast('Free Throw and Free Throw Missed are only available when the clock is stopped.', 'info');
+                    showToast('Free Throw and Free Throw Missed are only available when the clock is stopped or paused.', 'info');
                     return;
                 }
 
@@ -544,15 +613,13 @@
                 actionModalSoftPauseRef.current = false;
                 pendingFoulActionPauseRef.current = false;
                 if (shouldPauseClockForFoulSelection) {
-                    markLocalSessionUpdated();
                     pendingFoulActionPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
-                    showToast('Clock stopped while foul action is being selected.', 'info');
+                    setLocalSoftPauseActive(true);
+                    showToast('Soft pause is active on this device while foul action is being selected.', 'info');
                 } else if (shouldSoftPauseForActionSelection) {
-                    markLocalSessionUpdated();
                     actionModalSoftPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
-                    showToast('Clock paused while action modal is open. Record the stat or cancel to resume.', 'info');
+                    setLocalSoftPauseActive(true);
+                    showToast('Soft pause is active on this device while action modal is open.', 'info');
                 }
 
                 setActiveAction(action);
@@ -568,9 +635,9 @@
                 setCorrectionMode(false);
             };
 
-            const showHomeLivePanel = !canOperateLive || operatorFocus !== 'away';
-            const showAwayLivePanel = !canOperateLive || operatorFocus !== 'home';
-            const isCompactRecordActionModal = canOperateLive && operatorFocus === 'both' && showHomeLivePanel && showAwayLivePanel;
+            const showHomeLivePanel = isOperatorScreenLockedByAdminBoth || !canOperateLive || effectiveOperatorFocus !== 'away';
+            const showAwayLivePanel = isOperatorScreenLockedByAdminBoth || !canOperateLive || effectiveOperatorFocus !== 'home';
+            const isCompactRecordActionModal = canOperateLive && effectiveOperatorFocus === 'both' && showHomeLivePanel && showAwayLivePanel;
             const resolveActionToneClasses = (action) => {
                 const source = String(action?.colorClass || '');
                 const actionId = String(action?.id || '');
@@ -1559,12 +1626,13 @@
                 const getRotationEventSortInfo = (event) => {
                     const id = String(event?.id || '');
                     const isClear = event?.kind === 'meta' && event?.metaType === 'onCourtClear';
+                    const isRemove = event?.kind === 'meta' && event?.metaType === 'onCourtRemove';
                     const isAdd = event?.kind === 'meta' && event?.metaType === 'onCourtAdd';
                     const addMatch = id.match(/_add_(\d+)$/);
                     const addIndex = addMatch ? Number.parseInt(addMatch[1], 10) : Number.MAX_SAFE_INTEGER;
                     return {
-                        isRotationMeta: isClear || isAdd,
-                        phase: isClear ? 0 : (isAdd ? 1 : 2),
+                        isRotationMeta: isClear || isRemove || isAdd,
+                        phase: isClear ? 0 : (isRemove ? 1 : (isAdd ? 2 : 3)),
                         addIndex: Number.isFinite(addIndex) ? addIndex : Number.MAX_SAFE_INTEGER
                     };
                 };
@@ -1737,6 +1805,26 @@
                             nextState.playedPlayers.push(event.playerId);
                         }
                     }
+
+                    if (event.kind === 'meta' && event.metaType === 'onCourtRemove' && event.playerId) {
+                        if (event.isTeamA) {
+                            const nextLineup = nextState.teamALineup.filter((id) => id !== event.playerId);
+                            const nextBench = nextState.teamABench.includes(event.playerId)
+                                ? nextState.teamABench
+                                : [...nextState.teamABench, event.playerId];
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, nextLineup, nextBench, { fillToFive: false });
+                            nextState.teamALineup = sanitized.lineup;
+                            nextState.teamABench = sanitized.bench;
+                        } else if (event.isTeamA === false) {
+                            const nextLineup = nextState.teamBLineup.filter((id) => id !== event.playerId);
+                            const nextBench = nextState.teamBBench.includes(event.playerId)
+                                ? nextState.teamBBench
+                                : [...nextState.teamBBench, event.playerId];
+                            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, nextLineup, nextBench, { fillToFive: false });
+                            nextState.teamBLineup = sanitized.lineup;
+                            nextState.teamBBench = sanitized.bench;
+                        }
+                    }
                 });
 
                 // Final guard: keep scoreboard totals aligned with replayed player points.
@@ -1796,7 +1884,7 @@
             };
 
             const getLineupRevisionFromLog = (logs = []) => {
-                const lineupMetaTypes = new Set(['onCourtAdd', 'onCourtClear']);
+                const lineupMetaTypes = new Set(['onCourtAdd', 'onCourtClear', 'onCourtRemove']);
                 return (logs || []).reduce((maxRevision, event) => {
                     const isRotationEvent =
                         event?.kind === 'sub' ||
@@ -1824,7 +1912,7 @@
             const isRotationLogEvent = (event) => {
                 if (!event || typeof event !== 'object') return false;
                 if (event.kind === 'sub') return true;
-                return event.kind === 'meta' && (event.metaType === 'onCourtAdd' || event.metaType === 'onCourtClear');
+                return event.kind === 'meta' && (event.metaType === 'onCourtAdd' || event.metaType === 'onCourtClear' || event.metaType === 'onCourtRemove');
             };
 
             const getRecentRotationEventIds = (logs = [], maxItems = 30) => {
@@ -1877,7 +1965,7 @@
                     if (
                         !latest ||
                         eventTimestamp > latestTimestamp ||
-                        (eventTimestamp === latestTimestamp && index > latestIndex)
+                        (eventTimestamp === latestTimestamp && (latestIndex < 0 || index < latestIndex))
                     ) {
                         latest = event;
                         latestTimestamp = eventTimestamp;
@@ -2261,6 +2349,11 @@
             const liveAwayTeam = teams.find(t => t.id === teamBId);
             const homeTeamLabel = liveHomeTeam?.name || 'HOME';
             const awayTeamLabel = liveAwayTeam?.name || 'AWAY';
+            const operatorHandledTeamLabel = effectiveOperatorFocus === 'home'
+                ? homeTeamLabel
+                : effectiveOperatorFocus === 'away'
+                    ? awayTeamLabel
+                    : 'BOTH TEAMS';
             const getFocusOptionLabel = (optionId) => {
                 if (optionId === 'home') return homeTeamLabel;
                 if (optionId === 'away') return awayTeamLabel;
@@ -2487,6 +2580,63 @@
                 ? (games.find(g => g.id === selectedHistoryGameId) || null)
                 : null;
             const currentLiveGameLog = getCurrentGameLogSegment(gameLog);
+            const ROLE_PRESENCE_STALE_MS = 30000;
+            const latestAdminFocusEvent = (() => {
+                let latestEvent = null;
+                let latestRevision = -1;
+                let latestTimestamp = -1;
+                let latestIndex = Number.POSITIVE_INFINITY;
+
+                (currentLiveGameLog || []).forEach((event, index) => {
+                    if (!(event?.kind === 'meta' && event.metaType === 'adminFocusSet')) return;
+                    const eventRevision = Number.parseInt(event?.focusRevision, 10) || 0;
+                    const eventTimestamp = getEventTimestampFromId(event?.id);
+                    const shouldUseEvent =
+                        !latestEvent
+                        || eventRevision > latestRevision
+                        || (eventRevision === latestRevision && eventTimestamp > latestTimestamp)
+                        || (eventRevision === latestRevision && eventTimestamp === latestTimestamp && index < latestIndex);
+                    if (!shouldUseEvent) return;
+
+                    latestEvent = event;
+                    latestRevision = eventRevision;
+                    latestTimestamp = eventTimestamp;
+                    latestIndex = index;
+                });
+
+                return latestEvent;
+            })();
+            const derivedSharedAdminFocus = (() => {
+                const focusFromField = String(latestAdminFocusEvent?.focus || '').toLowerCase();
+                const focusFromTextMatch = String(latestAdminFocusEvent?.text || '').toLowerCase().match(/admin focus:\s*(home|away|both)/);
+                const focusFromText = focusFromTextMatch ? String(focusFromTextMatch[1] || '') : '';
+                const focus = focusFromField || focusFromText;
+                if (focus === 'home' || focus === 'away' || focus === 'both') return focus;
+                return null;
+            })();
+            const latestAdminPresenceEvent = getLatestLogEvent(
+                currentLiveGameLog,
+                (event) => event?.kind === 'meta' && event.metaType === 'rolePresence' && String(event?.role || '').toLowerCase() === 'admin'
+            );
+            const freshRolePresenceEvents = currentLiveGameLog.filter((event) => {
+                if (!event || event.kind !== 'meta' || event.metaType !== 'rolePresence') return false;
+                const ts = getEventTimestampFromId(event.id);
+                return ts > 0 && (Date.now() - ts) <= ROLE_PRESENCE_STALE_MS;
+            });
+            const activeAdminPresenceCount = new Set(
+                freshRolePresenceEvents
+                    .filter((event) => String(event?.role || '').toLowerCase() === 'admin')
+                    .map((event) => String(event?.clientId || 'unknown-admin'))
+            ).size;
+            const activeOperatorPresenceCount = new Set(
+                freshRolePresenceEvents
+                    .filter((event) => String(event?.role || '').toLowerCase() === 'operator')
+                    .map((event) => String(event?.clientId || 'unknown-operator'))
+            ).size;
+            const adminPresenceAgeMs = latestAdminPresenceEvent
+                ? Math.max(0, Date.now() - getEventTimestampFromId(latestAdminPresenceEvent.id))
+                : Number.POSITIVE_INFINITY;
+            const hasFreshAdminPresence = Boolean(latestAdminPresenceEvent) && adminPresenceAgeMs <= ROLE_PRESENCE_STALE_MS;
             const finalizedPeriods = new Set(
                 currentLiveGameLog
                     .filter((event) => event?.kind === 'meta' && event?.metaType === 'quarterEnd')
@@ -2519,6 +2669,79 @@
                 };
             });
             const liveTimeouts = computeTimeoutsFromLog(currentLiveGameLog);
+
+            useEffect(() => {
+                if (!derivedSharedAdminFocus) return;
+                setSharedAdminFocus((prev) => (prev === derivedSharedAdminFocus ? prev : derivedSharedAdminFocus));
+            }, [derivedSharedAdminFocus]);
+
+            useEffect(() => {
+                const latestFocusRevision = Number.parseInt(latestAdminFocusEvent?.focusRevision, 10) || 0;
+                if (latestFocusRevision > Number(adminFocusRevisionRef.current || 0)) {
+                    adminFocusRevisionRef.current = latestFocusRevision;
+                }
+            }, [latestAdminFocusEvent?.id, latestAdminFocusEvent?.focusRevision]);
+
+            useEffect(() => {
+                const supervisorPresent = authRole === 'admin' || hasFreshAdminPresence;
+                setIsAdminSupervisorPresent(supervisorPresent);
+                if (authRole === 'operator' && isGameLive && !supervisorPresent) {
+                    if (Date.now() - Number(adminMissingToastAtRef.current || 0) > 8000) {
+                        adminMissingToastAtRef.current = Date.now();
+                        showToast('Admin must be active for operator to control live game.', 'info');
+                    }
+                }
+            }, [authRole, hasFreshAdminPresence, isGameLive]);
+
+            useEffect(() => {
+                const exceedsRoleCapacity = (authRole === 'admin' && activeAdminPresenceCount > 1)
+                    || (authRole === 'operator' && activeOperatorPresenceCount > 1);
+                setIsRoleCapacityExceeded(exceedsRoleCapacity);
+                if (!exceedsRoleCapacity) return;
+                if (Date.now() - Number(adminMissingToastAtRef.current || 0) > 8000) {
+                    adminMissingToastAtRef.current = Date.now();
+                    showToast('Live game allows max 2 users: 1 admin and 1 operator.', 'info');
+                }
+            }, [authRole, activeAdminPresenceCount, activeOperatorPresenceCount]);
+
+            useEffect(() => {
+                if (authRole !== 'operator') return;
+                if (!isGameLive) return;
+                const enforcedFocus = sharedAdminFocus === 'home'
+                    ? 'away'
+                    : sharedAdminFocus === 'away'
+                        ? 'home'
+                        : 'away';
+                if (operatorFocus !== enforcedFocus) {
+                    setOperatorFocus(enforcedFocus);
+                }
+            }, [authRole, isGameLive, sharedAdminFocus, operatorFocus]);
+
+            useEffect(() => {
+                if (!isGameLive) return;
+                if (!(authRole === 'admin' || authRole === 'operator')) return;
+                const emitPresence = () => {
+                    const now = Date.now();
+                    if (now - Number(lastRolePresenceEmitAtRef.current || 0) < 9000) return;
+                    lastRolePresenceEmitAtRef.current = now;
+                    const rolePresenceEvent = {
+                        id: `${now}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: `${authRole.toUpperCase()} active`,
+                        kind: 'meta',
+                        metaType: 'rolePresence',
+                        quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                        role: authRole,
+                        clientId: syncClientIdRef.current,
+                        hiddenFromLog: true
+                    };
+                    setGameLog((prev) => [rolePresenceEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+                };
+                emitPresence();
+                const timer = window.setInterval(emitPresence, 12000);
+                return () => window.clearInterval(timer);
+            }, [isGameLive, authRole, currentQuarter, periodClockSeconds]);
             const regulationQuarterCoverage = Array.from({ length: 4 }, (_, idx) => {
                 const quarter = idx + 1;
                 const hasEvidence = currentLiveGameLog.some((event) => {
@@ -2572,11 +2795,29 @@
             const nextPeriodStartLabel = getPeriodLabel(nextPeriodToStart);
             const isNextPeriodOvertime = nextPeriodToStart > 4;
             const shouldBlockOvertimeStart = isNextPeriodOvertime && !isTieGame;
-            const timeoutIsActive = Boolean(isPlayPaused);
             // Lock undo only while a period is finalized and waiting state is active.
             // Do not lock it permanently for the rest of the game after one quarter ends.
             const undoLockedByQuarterEnd = isAwaitingPeriodStart || awaitingOvertimeDecision;
             const latestPauseMetaType = getLatestActivePauseMetaType(currentLiveGameLog);
+            const latestFoulPauseEvent = getLatestLogEvent(
+                currentLiveGameLog,
+                (event) => event?.kind === 'meta' && event.metaType === 'foulPause'
+            );
+            const isLocallyTriggeredFoulPause = Boolean(
+                latestFoulPauseEvent?.id
+                && localFoulPauseTriggerIdRef.current
+                && latestFoulPauseEvent.id === localFoulPauseTriggerIdRef.current
+            );
+            const isRemoteFoulPause = latestPauseMetaType === 'foulPause' && !isLocallyTriggeredFoulPause;
+            const timeoutIsActive = Boolean(isPlayPaused) && !isRemoteFoulPause;
+            const isSoloOperatorFocus = canOperateLive && effectiveOperatorFocus !== 'both';
+            const isFoulPauseLockedForFocusedSide = Boolean(
+                isSoloOperatorFocus
+                && latestPauseMetaType === 'foulPause'
+                && isLocallyTriggeredFoulPause
+                && latestFoulPauseEvent
+                && canOperateTeam(Boolean(latestFoulPauseEvent.isTeamA))
+            );
             const allowAllActionsWhileManualPause = latestPauseMetaType === 'manualPause';
             const canCallOfficialsWhilePaused = latestPauseMetaType === 'manualPause' || latestPauseMetaType === 'foulPause';
             const isTeamTimeoutPauseActive = timeoutIsActive && (latestPauseMetaType === 'timeout' || latestPauseMetaType === 'officialsTimeout');
@@ -2620,20 +2861,28 @@
             const periodActionIsEnd = periodActionLabel.startsWith('End');
             const periodActionIsPause = periodActionMode === 'pauseGame';
             const periodActionIsPositive = periodActionIsStart || periodActionIsResume;
+            const periodActionRequiresAdminControl = periodActionIsPause || periodActionIsResume || periodActionIsEnd;
             const canTriggerStatLogging = hasMatchStarted
                 && isPeriodClockRunning
+                && !localSoftPauseActive
                 && (!timeoutIsActive || allowAllActionsWhileManualPause)
                 && !isAwaitingPeriodStart
                 && !awaitingOvertimeDecision;
             const hasFinalizedPreviousPeriod = isAwaitingPeriodStart
                 && latestPeriodMetaEvent?.metaType === 'quarterEnd'
                 && !awaitingOvertimeDecision;
-            const canBackfillEndedPeriodStats = hasMatchStarted
+            const hasQuarterEndedFromLog = latestPeriodMetaEvent?.metaType === 'quarterEnd'
+                && latestPeriodMetaQuarter === currentQuarter;
+            const hasEndedPeriodBackfillWindow = isGameLive
                 && !awaitingOvertimeDecision
+                && !isPeriodClockRunning
                 && (
-                    (hasCurrentQuarterStarted && Number(periodClockSeconds || 0) <= 0)
+                    Number(periodClockSeconds || 0) <= 0
+                    || hasQuarterEndedFromLog
                     || hasFinalizedPreviousPeriod
                 );
+            const isBackfillMode = hasEndedPeriodBackfillWindow;
+            const canBackfillEndedPeriodStats = isBackfillMode;
             const liveGameplayControlDisplay = isLiveGameplayModalActive && liveGameplayControlSnapshotRef.current
                 ? liveGameplayControlSnapshotRef.current
                 : {
@@ -2677,30 +2926,45 @@
                 periodActionIsPause,
                 periodActionIsPositive
             ]);
+
+            useEffect(() => {
+                if (latestPauseMetaType === 'foulPause') return;
+                localFoulPauseTriggerIdRef.current = '';
+            }, [latestPauseMetaType]);
+
             const alwaysAllowedActionIds = new Set(['pf_technical']);
             const stoppedClockActionIds = new Set(['pts_1', 'ft_miss']);
             const canTriggerAlwaysAction = (action) => Boolean(action && isGameLive && alwaysAllowedActionIds.has(action.id));
-            const canTriggerRunningClockAction = (action) => Boolean(
-                action
-                && (displayCanTriggerStatLogging || canBackfillEndedPeriodStats)
-                && !stoppedClockActionIds.has(action.id)
-            );
             const canTriggerStoppedClockAction = (action) => Boolean(
                 action
                 && isGameLive
                 && stoppedClockActionIds.has(action.id)
                 && hasMatchStarted
-                && (!isAwaitingPeriodStart || canBackfillEndedPeriodStats)
-                && !awaitingOvertimeDecision
                 && !displayIsPeriodClockRunning
             );
-            const canUseActionTrigger = (action) => canTriggerRunningClockAction(action) || canTriggerAlwaysAction(action) || canTriggerStoppedClockAction(action);
+            const canUseActionTrigger = (action) => {
+                if (!action || !isGameLive || !canOperateLive) return false;
+                if (stoppedClockActionIds.has(action.id)) {
+                    return canTriggerStoppedClockAction(action);
+                }
+                return true;
+            };
+            const isBackfillActionEnabled = Boolean(isBackfillMode && canOperateLive && isGameLive);
+            const isActionDisabled = (action) => !isBackfillActionEnabled && !canUseActionTrigger(action);
+            const getActionDisabledTitle = (action) => {
+                if (!isActionDisabled(action)) return undefined;
+                if (stoppedClockActionIds.has(action?.id) && isPeriodClockRunning) {
+                    return 'Free Throw and Free Throw Missed are only allowed when the clock is stopped or paused.';
+                }
+                return 'Unavailable right now';
+            };
+            const isSyncClockControlDisabled = showSyncClockEditor || !canAdminControlClock;
             const teamACanTimeout = teamATimeoutUsed < timeoutLimit;
             const teamBCanTimeout = teamBTimeoutUsed < timeoutLimit;
-            const teamATimeoutEnabled = hasMatchStarted && !isTeamTimeoutPauseActive && teamACanTimeout;
-            const teamBTimeoutEnabled = hasMatchStarted && !isTeamTimeoutPauseActive && teamBCanTimeout;
-            const canPauseGame = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart && isPeriodClockRunning;
-            const canOfficialsTimeout = hasMatchStarted && (!isAwaitingPeriodStart || hasCurrentQuarterStarted) && (!timeoutIsActive || canCallOfficialsWhilePaused);
+            const teamATimeoutEnabled = hasMatchStarted && !localSoftPauseActive && !isTeamTimeoutPauseActive && teamACanTimeout;
+            const teamBTimeoutEnabled = hasMatchStarted && !localSoftPauseActive && !isTeamTimeoutPauseActive && teamBCanTimeout;
+            const canPauseGame = hasMatchStarted && !localSoftPauseActive && !timeoutIsActive && !isAwaitingPeriodStart && isPeriodClockRunning;
+            const canOfficialsTimeout = hasMatchStarted && !localSoftPauseActive && (!isAwaitingPeriodStart || hasCurrentQuarterStarted) && (!timeoutIsActive || canCallOfficialsWhilePaused);
             const canEndCurrentPeriod = hasMatchStarted && hasCurrentQuarterStarted && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
             const canFinalizeGame = hasMatchStarted && periodActionMode === 'endGame';
             const latestUndoEntry = (loggedHistory || []).find((entry) => !entry?.isUndoCompensation) || null;
@@ -2736,7 +3000,10 @@
                 : isProtectedLogEntry(latestUndoLog, finalizedPeriods)
                     ? (String(latestUndoLog?.lockReason || '').includes('checkpoint10') ? 'checkpoint lock' : 'period-end lock')
                     : '';
-            const canUndoLatest = Boolean(latestUndoEntry) && !undoLockedByQuarterEnd && !isProtectedLogEntry(latestUndoLog, finalizedPeriods);
+            const canUndoLatest = Boolean(latestUndoEntry)
+                && canUseLiveControls
+                && !undoLockedByQuarterEnd
+                && !isProtectedLogEntry(latestUndoLog, finalizedPeriods);
             const teamAFoulsForDisplay = currentQuarter <= 4
                 ? Number((liveQuarterStats.find((row) => row.quarter === currentQuarter)?.teamA?.pf) || 0)
                 : liveQuarterStats
@@ -2835,35 +3102,7 @@
 
                 const periodLabel = getPeriodLabel(currentQuarter);
                 showToast(`${periodLabel} reached 00:00. Press End ${periodLabel} to finalize period stats.`, 'info');
-                setPeriodEndAlert({
-                    title: `${periodLabel} Ended`,
-                    text: `Finalize ${periodLabel} first, then start the next period. This keeps stats recorded in the correct period.`
-                });
             };
-
-            useEffect(() => {
-                if (!periodEndAlert) return;
-
-                const shouldKeepVisible =
-                    isGameLive
-                    && hasCurrentQuarterStarted
-                    && !isAwaitingPeriodStart
-                    && !awaitingOvertimeDecision
-                    && !isPeriodClockRunning
-                    && Number(periodClockSeconds) <= 0;
-
-                if (!shouldKeepVisible) {
-                    setPeriodEndAlert(null);
-                }
-            }, [
-                periodEndAlert,
-                isGameLive,
-                hasCurrentQuarterStarted,
-                isAwaitingPeriodStart,
-                awaitingOvertimeDecision,
-                isPeriodClockRunning,
-                periodClockSeconds
-            ]);
 
             useEffect(() => {
                 if (!isGameLive) return;
@@ -2912,37 +3151,32 @@
                 const liveEditModalOpen = Boolean(liveLogEditTarget);
 
                 if (foulActionModalOpen) {
-                    markLocalSessionUpdated();
                     pendingFoulActionPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
+                    setLocalSoftPauseActive(true);
                     return;
                 }
 
                 if (actionModalOpen) {
-                    markLocalSessionUpdated();
                     actionModalSoftPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
+                    setLocalSoftPauseActive(true);
                     return;
                 }
 
                 if (showSubstitutionModal) {
-                    markLocalSessionUpdated();
                     pendingSubSelectionAutoPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
+                    setLocalSoftPauseActive(true);
                     return;
                 }
 
                 if (showAddFromBenchModal) {
-                    markLocalSessionUpdated();
                     addFromBenchModalSoftPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
+                    setLocalSoftPauseActive(true);
                     return;
                 }
 
                 if (liveEditModalOpen) {
-                    markLocalSessionUpdated();
                     actionModalSoftPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
+                    setLocalSoftPauseActive(true);
                 }
             }, [
                 isGameLive,
@@ -2967,13 +3201,7 @@
                 if (Number(periodClockSeconds) <= 0) return false;
 
                 pendingModalSoftResumeRef.current = false;
-                markLocalSessionUpdated();
-                armLocalResumeStabilityWindow();
-                suppressPeriodAutoStopRef.current = true;
-                suppressTimeoutAutoStopRef.current = true;
-                suppressModalAutoPauseRef.current = true;
-                setIsPlayPaused(false);
-                setIsPeriodClockRunning(true);
+                setLocalSoftPauseActive(false);
                 return true;
             };
 
@@ -3029,6 +3257,11 @@
                     || showAddFromBenchModal
                     || liveLogEditTarget
                 );
+
+                if (!isGameLive || !liveGameplayModalOpen) {
+                    setLocalSoftPauseActive(false);
+                }
+
                 tryApplyPendingModalSoftResume(liveGameplayModalOpen);
             }, [
                 isGameLive,
@@ -3037,6 +3270,7 @@
                 showSubstitutionModal,
                 showAddFromBenchModal,
                 liveLogEditTarget,
+                localSoftPauseActive,
                 timeoutIsActive,
                 isAwaitingPeriodStart,
                 awaitingOvertimeDecision,
@@ -3914,6 +4148,18 @@
             };
 
             const togglePlayerDidNotPlay = (playerId) => {
+                if (!canUseLiveControls) {
+                    showToast('Live controls are locked right now.', 'info');
+                    return;
+                }
+
+                const teamAObj = teams.find((team) => team.id === teamAId);
+                const teamBObj = teams.find((team) => team.id === teamBId);
+                const isTeamAPlayer = Boolean(teamAObj?.players?.some((player) => player.id === playerId));
+                const isTeamBPlayer = Boolean(teamBObj?.players?.some((player) => player.id === playerId));
+                if (isTeamAPlayer && !ensureTeamOperationAccess(true, 'manage DNP for this team')) return;
+                if (isTeamBPlayer && !ensureTeamOperationAccess(false, 'manage DNP for this team')) return;
+
                 const currentlyMarked = dnpPlayers.includes(playerId);
                 const alreadyPlayed = hasAnyTrackedLiveStat(playerId);
                 if (!currentlyMarked && alreadyPlayed) {
@@ -4806,6 +5052,7 @@
                 pendingSubSelectionAutoPauseRef.current = false;
                 addFromBenchModalSoftPauseRef.current = false;
                 suppressModalAutoPauseRef.current = false;
+                setLocalSoftPauseActive(false);
             };
 
             const createLiveCheckpointSnapshot = (quarterValue = currentQuarter) => ({
@@ -4936,8 +5183,8 @@
 
             const handleStartMatch = async (e) => {
                 e?.preventDefault?.();
-                if (!canOperateLive) {
-                    showToast('Operator/Admin access required for live game operation.', 'info');
+                if (!canAdminControlClock) {
+                    showToast('Only admin can create a live game.', 'info');
                     return;
                 }
                 if (!teamAId || !teamBId || teamAId === teamBId) return;
@@ -5019,10 +5266,10 @@
             };
 
             const handlePlayerClick = (playerId, isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
                 if (!activeAction) return;
-                if (!hasMatchStarted && !canTriggerAlwaysAction(activeAction)) {
+                if (!hasMatchStarted && !canBackfillEndedPeriodStats && !canTriggerAlwaysAction(activeAction)) {
                     showToast('Press Start Match before logging stats.', 'info');
                     return;
                 }
@@ -5030,13 +5277,8 @@
                     showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
                     return;
                 }
-                if (
-                    timeoutIsActive
-                    && !allowAllActionsWhileManualPause
-                    && !canTriggerAlwaysAction(activeAction)
-                    && !canTriggerStoppedClockAction(activeAction)
-                ) {
-                    showToast('Only Technical Foul, Free Throw, and Free Throw Missed are allowed while paused/stopped.', 'info');
+                if (stoppedClockActionIds.has(activeAction?.id) && isPeriodClockRunning) {
+                    showToast('Free Throw and Free Throw Missed are only allowed when the clock is stopped or paused.', 'info');
                     return;
                 }
 
@@ -5082,6 +5324,7 @@
                     : '';
 
                 // Foul warnings & DQ logic
+                let foulOutRemovalEvent = null;
                 if (statField === 'pf' && !correctionMode) {
                     const currentFouls = liveStats[playerId]?.pf || 0;
                     const nextFouls = currentFouls + changeAmount;
@@ -5089,6 +5332,48 @@
                         setFoulAlert({ playerName: playerObj.name, number: playerObj.number, fouls: 4, type: 'warning' });
                     } else if (nextFouls >= 5) {
                         setFoulAlert({ playerName: playerObj.name, number: playerObj.number, fouls: 5, type: 'disqualified' });
+
+                        const lineup = isTeamA ? teamALineup : teamBLineup;
+                        const bench = isTeamA ? teamABench : teamBBench;
+                        if (lineup.includes(playerId)) {
+                            const sanitized = sanitizeTeamRotation(
+                                isTeamA ? teamAId : teamBId,
+                                lineup.filter((id) => id !== playerId),
+                                bench.includes(playerId) ? bench : [...bench, playerId],
+                                { fillToFive: false }
+                            );
+                            if (isTeamA) {
+                                setTeamALineup(sanitized.lineup);
+                                setTeamABench(sanitized.bench);
+                            } else {
+                                setTeamBLineup(sanitized.lineup);
+                                setTeamBBench(sanitized.bench);
+                            }
+
+                            const foulOutEventId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                            foulOutRemovalEvent = {
+                                id: foulOutEventId,
+                                time: getWallClockTime(),
+                                text: `Auto-removed on-court: ${playerObj?.name || 'Player'} fouled out (5 PF)`,
+                                kind: 'meta',
+                                metaType: 'onCourtRemove',
+                                quarter: currentQuarter,
+                                clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                                isTeamA,
+                                playerId
+                            };
+
+                            const removeRevision = getLineupRevisionFromEventId(foulOutEventId);
+                            if (removeRevision > 0) {
+                                setLineupRevision((prev) => {
+                                    const next = Math.max(prev, removeRevision);
+                                    lineupRevisionRef.current = next;
+                                    return next;
+                                });
+                            }
+                            processedGameLogIdsRef.current.add(foulOutEventId);
+                            enqueueLiveEvent(foulOutRemovalEvent);
+                        }
                     }
                 }
 
@@ -5160,9 +5445,16 @@
                         clockRemaining: formatSecondsAsClock(periodClockSeconds),
                         isTeamA
                     };
-                    setGameLog((prev) => [foulPauseEvent, statLogEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+                    localFoulPauseTriggerIdRef.current = foulPauseEvent.id;
+                    const prependedEvents = foulOutRemovalEvent
+                        ? [foulPauseEvent, foulOutRemovalEvent, statLogEvent]
+                        : [foulPauseEvent, statLogEvent];
+                    setGameLog((prev) => [...prependedEvents, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
                 } else {
-                    setGameLog((prev) => [statLogEvent, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+                    const prependedEvents = foulOutRemovalEvent
+                        ? [foulOutRemovalEvent, statLogEvent]
+                        : [statLogEvent];
+                    setGameLog((prev) => [...prependedEvents, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 }
                 triggerPlayerFlash(playerId);
                 flashPlayerElements(playerId);
@@ -5675,7 +5967,7 @@
             };
 
             const handleAdvanceQuarter = () => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
 
                 autoFinalizeEndedPeriodAndStartNextPeriod();
@@ -5903,6 +6195,28 @@
                             benchB = sanitized.bench;
                         }
                     }
+
+                    if (event?.kind === 'meta' && event?.metaType === 'onCourtRemove' && event?.playerId) {
+                        if (event.isTeamA) {
+                            const sanitized = sanitizeTeamRotation(
+                                baselineSnapshot.teamAId,
+                                lineupA.filter((id) => id !== event.playerId),
+                                benchA.includes(event.playerId) ? benchA : [...benchA, event.playerId],
+                                { fillToFive: false }
+                            );
+                            lineupA = sanitized.lineup;
+                            benchA = sanitized.bench;
+                        } else if (event.isTeamA === false) {
+                            const sanitized = sanitizeTeamRotation(
+                                baselineSnapshot.teamBId,
+                                lineupB.filter((id) => id !== event.playerId),
+                                benchB.includes(event.playerId) ? benchB : [...benchB, event.playerId],
+                                { fillToFive: false }
+                            );
+                            lineupB = sanitized.lineup;
+                            benchB = sanitized.bench;
+                        }
+                    }
                 });
 
                 if (trackingStarted && activeQuarter === targetQuarter) {
@@ -5942,7 +6256,11 @@
             };
 
             const handleApplyManualClock = () => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
+                if (!canAdminControlClock) {
+                    showToast('Only admin can sync clock.', 'info');
+                    return;
+                }
                 if (!isGameLive) return;
 
                 const parsed = parseClockInputToSeconds(manualClockInput);
@@ -5995,7 +6313,7 @@
             };
 
             const handleStartNextQuarter = () => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!isAwaitingPeriodStart) return;
 
@@ -6030,7 +6348,7 @@
             };
 
             const handleStartOvertime = () => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (currentQuarter < 4) return;
                 if (teamAScore !== teamBScore) {
@@ -6069,7 +6387,7 @@
             };
 
             const triggerSubModal = (playerId, isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'manage substitutions for this team')) return;
                 const playerObj = teams.flatMap(t => t.players).find(p => p.id === playerId);
                 if (!playerObj) return;
@@ -6086,10 +6404,9 @@
                     && !timeoutIsActive;
                 pendingSubSelectionAutoPauseRef.current = false;
                 if (shouldAutoPauseForSubSelection) {
-                    markLocalSessionUpdated();
                     pendingSubSelectionAutoPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
-                    showToast('Clock paused while substitution modal is open. Choose a player or cancel to resume.', 'info');
+                    setLocalSoftPauseActive(true);
+                    showToast('Soft pause is active on this device while substitution modal is open.', 'info');
                 }
 
                 setSubTargetPlayer({ id: playerId, name: playerObj.name, number: playerObj.number, team: isTeamA ? 'A' : 'B' });
@@ -6102,7 +6419,7 @@
             };
 
             const executeSubstitution = (outId, inId, isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'manage substitutions for this team')) return;
                 if (dnpPlayers.includes(inId)) {
                     showToast('Player is marked DNP and cannot be substituted in.', 'info');
@@ -6188,7 +6505,7 @@
             };
 
             const handleClearOnCourtPlayers = (isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'clear on-court players for this team')) return;
 
@@ -6235,7 +6552,7 @@
             };
 
             const handleToggleBenchAdder = (isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 const lineup = isTeamA ? teamALineup : teamBLineup;
                 if (lineup.length >= 5) {
                     showToast('On-court already has 5 players.', 'info');
@@ -6249,7 +6566,7 @@
             };
 
             const handleOpenAddFromBenchModal = (isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'add bench players for this team')) return;
 
@@ -6276,10 +6593,9 @@
                     && !timeoutIsActive;
                 addFromBenchModalSoftPauseRef.current = false;
                 if (shouldSoftPauseForAddBench) {
-                    markLocalSessionUpdated();
                     addFromBenchModalSoftPauseRef.current = true;
-                    setIsPeriodClockRunning(false);
-                    showToast('Clock paused while add-player modal is open. Add players or cancel to resume.', 'info');
+                    setLocalSoftPauseActive(true);
+                    showToast('Soft pause is active on this device while add-player modal is open.', 'info');
                 }
 
                 setAddFromBenchTeam(isTeamA ? 'A' : 'B');
@@ -6294,7 +6610,7 @@
             };
 
             const handleAddOnCourtPlayer = (playerId, isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'add players for this team')) return;
                 if (dnpPlayers.includes(playerId)) {
@@ -6381,7 +6697,7 @@
             };
 
             const handleAddMultipleOnCourtPlayers = (playerIds, isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'add players for this team')) return;
 
@@ -6485,7 +6801,7 @@
             };
 
             const handleWaveSubstitution = (isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'run wave substitution for this team')) return;
 
@@ -6643,6 +6959,8 @@
             };
 
             const openClearOnCourtConfirm = (isTeamA) => {
+                if (!canUseLiveControls) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'clear on-court players for this team')) return;
                 const teamLabel = isTeamA ? (liveHomeTeam?.name || 'Home') : (liveAwayTeam?.name || 'Away');
                 setConfirmDialog({
                     title: `Clear ${teamLabel} On-Court?`,
@@ -6657,6 +6975,8 @@
             };
 
             const openWaveSubConfirm = (isTeamA) => {
+                if (!canUseLiveControls) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'run wave substitution for this team')) return;
                 const teamLabel = isTeamA ? (liveHomeTeam?.name || 'Home') : (liveAwayTeam?.name || 'Away');
                 setConfirmDialog({
                     title: `${teamLabel} Wave Sub?`,
@@ -6671,7 +6991,7 @@
             };
 
             const handleEndGame = async (options = {}) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!teamAId || !teamBId) return;
 
                 setPendingPeriodActionMode(null);
@@ -6768,6 +7088,10 @@
             };
 
             const openFinalizePeriodConfirm = () => {
+                if (!canAdminControlClock) {
+                    showToast('Only admin can end and lock scores.', 'info');
+                    return;
+                }
                 const periodLabel = getPeriodLabel(currentQuarter);
                 setConfirmDialog({
                     title: `Finalize ${periodLabel}?`,
@@ -6782,6 +7106,10 @@
             };
 
             const openEndGameConfirm = () => {
+                if (!canAdminControlClock) {
+                    showToast('Only admin can end and lock scores.', 'info');
+                    return;
+                }
                 if (missingRegulationQuarters.length > 0) {
                     const missingLabel = missingRegulationQuarters.map((q) => `Q${q}`).join(', ');
                     setConfirmDialog({
@@ -6807,8 +7135,13 @@
             };
 
             const handlePeriodAction = () => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
+
+                if ((periodActionMode === 'pauseGame' || periodActionMode === 'endPeriod' || periodActionMode === 'endGame') && !canAdminControlClock) {
+                    showToast('Only admin can pause game or end/lock scores.', 'info');
+                    return;
+                }
 
                 if (periodActionMode === 'startMatch') {
                     clearTransientLiveActionState();
@@ -6874,7 +7207,7 @@
             };
 
             const handleLogTimeout = (isTeamA) => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'call timeout for this team')) return;
                 if (!hasMatchStarted) {
@@ -6925,7 +7258,11 @@
             };
 
             const handlePauseGame = () => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
+                if (!canAdminControlClock) {
+                    showToast('Only admin can pause game.', 'info');
+                    return;
+                }
                 if (!isGameLive) return;
                 if (!hasMatchStarted) {
                     showToast('Press Start Match before pausing game.', 'info');
@@ -6957,7 +7294,7 @@
             };
 
             const handleOfficialsTimeout = () => {
-                if (!canOperateLive) return;
+                if (!canUseLiveControls) return;
                 if (!isGameLive) return;
                 if (!hasMatchStarted) {
                     showToast('Press Start Match before calling officials timeout.', 'info');
@@ -7162,6 +7499,10 @@
             };
 
             const handleResetMatch = () => {
+                if (!canAdminControlClock) {
+                    showToast('Only admin can restart a match.', 'info');
+                    return;
+                }
                 setConfirmDialog({
                     title: "Clear & Restart Match?",
                     text: "This will wipe current scores, timeline logs, lineups, and active stats, then keep this matchup ready for a fresh start.",
@@ -7243,6 +7584,10 @@
             };
 
             const handleDiscardLiveMatch = () => {
+                if (!canAdminControlClock) {
+                    showToast('Only admin can discard a match.', 'info');
+                    return;
+                }
                 setConfirmDialog({
                     title: "Cancel Match?",
                     text: "This deletes all active progress for this session. No logs will be saved to disk.",
@@ -8789,7 +9134,7 @@
                                 if (canSelect) handlePlayerClick(player.id, isTeamA);
                                 return;
                             }
-                            if (!canOperateLive) return;
+                            if (!canUseLiveControls) return;
                             triggerSubModal(player.id, isTeamA);
                         }}
                         className={`bg-slate-955/90 border p-3 rounded-xl flex flex-row items-stretch justify-between gap-2 transition-all duration-300 ${
@@ -8850,7 +9195,7 @@
             };
 
             return (
-                <div className="max-w-7xl mx-auto px-4 py-4 md:py-8">
+                <div className="max-w-7xl mx-auto px-4 py-4 md:py-8 relative">
                     
                     {/* TOAST SYSTEM */}
                     {toast && (
@@ -8955,13 +9300,18 @@
                                     {canOperateLive && (
                                         <div className="border-t border-slate-800/70 px-3 py-2.5 space-y-2">
                                             <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Current Account: <span className="text-orange-300">{authRole.toUpperCase()}</span></div>
+                                            {authRole === 'operator' && isGameLive && (
+                                                <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                                                    Handling: <span className="text-emerald-300">{isOperatorScreenLockedByAdminBoth ? 'LOCKED (WAITING FOR ASSIGNMENT)' : operatorHandledTeamLabel}</span>
+                                                </div>
+                                            )}
                                             {showOperatorFocusControls && (
                                                 <div className="grid grid-cols-3 gap-1.5">
                                                     {operatorFocusOptions.map((option) => (
                                                         <button
                                                             key={`focus-mobile-${option.id}`}
                                                             type="button"
-                                                            onClick={() => setOperatorFocus(option.id)}
+                                                            onClick={() => handleOperatorFocusChange(option.id)}
                                                             className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
                                                             style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
                                                         >
@@ -9018,15 +9368,20 @@
                                     <div className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl p-3 z-50">
                                         <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Current Account</div>
                                         <div className="text-xs font-bold text-orange-300 mt-0.5">{authRole.toUpperCase()}</div>
+                                        {authRole === 'operator' && isGameLive && (
+                                            <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                                                Handling: <span className="text-emerald-300">{isOperatorScreenLockedByAdminBoth ? 'LOCKED (WAITING FOR ASSIGNMENT)' : operatorHandledTeamLabel}</span>
+                                            </div>
+                                        )}
                                         {showOperatorFocusControls && (
                                             <>
-                                                <div className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Operator Focus</div>
+                                                <div className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Admin Team Focus</div>
                                                 <div className="grid grid-cols-3 gap-1.5 mt-1.5">
                                                     {operatorFocusOptions.map((option) => (
                                                         <button
                                                             key={`focus-account-${option.id}`}
                                                             type="button"
-                                                            onClick={() => setOperatorFocus(option.id)}
+                                                            onClick={() => handleOperatorFocusChange(option.id)}
                                                             className={`rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? '' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
                                                             style={operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : undefined}
                                                         >
@@ -9059,7 +9414,7 @@
                             <div>
                                 {!isGameLive ? (
                                     <div className="space-y-4 mt-4">
-                                        {canOperateLive && (
+                                        {canAdminControlClock && (
                                             <div className="max-w-xl mx-auto bg-slate-900/65 rounded-2xl border border-slate-800 p-6 shadow-2xl">
                                                 <form onSubmit={handleStartMatch} className="space-y-4">
                                                     <div className="grid grid-cols-2 gap-4">
@@ -9092,7 +9447,13 @@
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className={`grid grid-cols-1 lg:grid-cols-12 gap-4 ${isLiveGameplayModalActive ? 'pointer-events-none select-none [&_*]:!animate-none [&_*]:!transition-none [&_*]:!transform-none [&_*]:!shadow-none' : ''}`}>
+                                    <div className="space-y-2">
+                                        {isOperatorScreenLockedByAdminBoth && (
+                                            <div className="col-span-12 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] font-bold text-amber-200">
+                                                Operator screen locked while admin focus is BOTH. Wait for admin to assign a single team focus.
+                                            </div>
+                                        )}
+                                        <div className={`grid grid-cols-1 lg:grid-cols-12 gap-4 ${isLiveGameplayModalActive ? 'pointer-events-none select-none [&_*]:!animate-none [&_*]:!transition-none [&_*]:!transform-none [&_*]:!shadow-none' : ''}`}>
                                         {/* MOBILE BOTTOM STICKY COMPACT 2-ROW SCOREBAR */}
                                         <div className="md:hidden col-span-12 sticky top-2 z-20">
                                             <div className="bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl p-1.5 backdrop-blur-sm">
@@ -9193,7 +9554,7 @@
                                         </div>
 
                                         {canOperateLive && (
-                                            <div className="col-span-12">
+                                            <div className={`col-span-12 ${isOperatorScreenLockedByAdminBoth ? 'pointer-events-none select-none opacity-70 cursor-not-allowed ring-1 ring-amber-400/35 bg-slate-950/35 rounded-xl [&_*]:!cursor-not-allowed' : ''}`}>
                                                 <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                                                     <button
                                                         onClick={() => handleLogTimeout(true)}
@@ -9212,13 +9573,15 @@
                                                     </button>
                                                     <button
                                                         onClick={handlePeriodAction}
+                                                        disabled={periodActionRequiresAdminControl && !canAdminControlClock}
+                                                        title={periodActionRequiresAdminControl && !canAdminControlClock ? 'Only admin can control clock or lock scores.' : undefined}
                                                         className={`w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
                                                             displayPeriodActionIsPositive
                                                                 ? `bg-emerald-600/25 hover:bg-emerald-600/35 border-emerald-400/70 text-emerald-100 ${!isLiveGameplayModalActive ? 'animate-pulse' : ''}`
                                                                 : displayPeriodActionIsPause
                                                                     ? 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/70 text-amber-100'
                                                                 : 'bg-red-600 hover:bg-red-500 border-red-400 text-white'
-                                                        }`}
+                                                        } disabled:opacity-35 disabled:saturate-0 disabled:cursor-not-allowed`}
                                                     >
                                                         <span className="inline-flex items-center justify-center gap-1">
                                                             {(displayPeriodActionIsStart || displayPeriodActionIsResume) ? <Icons.Play /> : (displayPeriodActionIsEnd ? <Icons.Stop /> : <Icons.Pause />)}
@@ -9269,7 +9632,9 @@
                                                                     <button
                                                                         type="button"
                                                                         onClick={openEndGameConfirm}
-                                                                        className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/55 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer"
+                                                                        disabled={!canAdminControlClock}
+                                                                        title={!canAdminControlClock ? 'Only admin can end and lock scores.' : undefined}
+                                                                        className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/55 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                     >
                                                                         <span className="inline-flex items-center justify-center gap-1">
                                                                             <Icons.Stop />
@@ -9280,7 +9645,8 @@
                                                                     <button
                                                                         type="button"
                                                                         onClick={openFinalizePeriodConfirm}
-                                                                        disabled={!canEndCurrentPeriod}
+                                                                        disabled={!canEndCurrentPeriod || !canAdminControlClock}
+                                                                        title={!canAdminControlClock ? 'Only admin can end and lock scores.' : undefined}
                                                                         className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/50 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                     >
                                                                         <span className="inline-flex items-center justify-center gap-1">
@@ -9303,9 +9669,9 @@
                                                                 </button>
                                                                 <button
                                                                     type="button"
-                                                                    disabled={!technicalFoulAction || !canUseActionTrigger(technicalFoulAction)}
-                                                                    onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, operatorFocus === 'away' ? false : true)}
-                                                                    title={(!undoLockedByQuarterEnd && !canUseActionTrigger(technicalFoulAction)) ? 'Unavailable right now' : undefined}
+                                                                    disabled={!technicalFoulAction || isActionDisabled(technicalFoulAction)}
+                                                                    onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                    title={getActionDisabledTitle(technicalFoulAction)}
                                                                     className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/45 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
                                                                 >
                                                                     <span className="inline-flex items-center justify-center gap-1">
@@ -9321,8 +9687,9 @@
                                                                                 setShowSyncClockEditor(true);
                                                                             }
                                                                         }}
-                                                                        disabled={showSyncClockEditor}
-                                                                        className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${showSyncClockEditor
+                                                                        disabled={isSyncClockControlDisabled}
+                                                                        title={!canAdminControlClock ? 'Only admin can sync clock.' : undefined}
+                                                                        className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${isSyncClockControlDisabled
                                                                             ? 'border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed opacity-70'
                                                                             : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer'}`}
                                                                     >
@@ -9332,7 +9699,7 @@
                                                                         </span>
                                                                     </button>
                                                                 )}
-                                                                {isLoggedIn && showSyncClockEditor && (
+                                                                {isLoggedIn && showSyncClockEditor && canAdminControlClock && (
                                                                     <div className="col-span-4 md:col-span-1 w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-1.5 flex items-center gap-1">
                                                                         <input
                                                                             type="text"
@@ -9375,7 +9742,7 @@
                                         )}
 
                                         {/* QUICK ACTION DECK GRID WITH RESPONSIVE DISPLAY & TIERED PRIORITY */}
-                                        {canOperateLive && <div className="col-span-12 bg-slate-900 border border-slate-800 p-2.5 md:p-4 rounded-xl shadow-xl space-y-2 md:space-y-4 max-h-[calc(100vh-245px)] overflow-y-auto md:max-h-none md:overflow-visible">
+                                        {canOperateLive && <div className={`col-span-12 bg-slate-900 border border-slate-800 p-2.5 md:p-4 rounded-xl shadow-xl space-y-2 md:space-y-4 max-h-[calc(100vh-245px)] overflow-y-auto md:max-h-none md:overflow-visible ${isOperatorScreenLockedByAdminBoth ? 'pointer-events-none select-none opacity-70 cursor-not-allowed ring-1 ring-amber-400/35 bg-slate-950/35 [&_*]:!cursor-not-allowed' : ''}`}>
                                             <div className="flex items-center border-b border-slate-800 pb-1.5">
                                                 <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1"><Icons.Zap /> Tap action first, then select player on court</span>
                                             </div>
@@ -9390,8 +9757,8 @@
                                                                 <button
                                                                     key={`recent-action-${act.id}`}
                                                                     type="button"
-                                                                    disabled={!canUseActionTrigger(act)}
-                                                                    onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
+                                                                    disabled={isActionDisabled(act)}
+                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
                                                                     className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-[10px] font-black uppercase tracking-wide text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
                                                                 >
                                                                     {act.label}
@@ -9425,9 +9792,9 @@
                                                         {canOperateLive && primaryActions.map(act => (
                                                         <button 
                                                             key={act.id} 
-                                                            disabled={!canUseActionTrigger(act)}
-                                                            onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                            title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
+                                                            disabled={isActionDisabled(act)}
+                                                            onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
+                                                            title={getActionDisabledTitle(act)}
                                                             className={`py-3.5 md:py-6 px-1.5 md:px-4 rounded-lg md:rounded-2xl inline-flex items-center justify-center text-center text-[9px] md:text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                         >
                                                             {act.label}
@@ -9445,9 +9812,9 @@
                                                         {canOperateLive && secondaryActions.map(act => (
                                                             <button 
                                                                 key={act.id} 
-                                                                disabled={!canUseActionTrigger(act)}
-                                                                onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                                title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
+                                                                disabled={isActionDisabled(act)}
+                                                                onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                title={getActionDisabledTitle(act)}
                                                                 className={`py-3.5 md:py-4 px-2 md:px-4 rounded-lg md:rounded-xl inline-flex items-center justify-center text-center text-[10px] md:text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
@@ -9463,9 +9830,9 @@
                                                         {canOperateLive && tertiaryActions.map(act => (
                                                             <button 
                                                                 key={act.id} 
-                                                                disabled={!canUseActionTrigger(act)}
-                                                                onClick={() => openActionForTeam(act, operatorFocus === 'away' ? false : true)}
-                                                                title={(!undoLockedByQuarterEnd && !canUseActionTrigger(act)) ? 'Unavailable right now' : undefined}
+                                                                disabled={isActionDisabled(act)}
+                                                                onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                title={getActionDisabledTitle(act)}
                                                                 className={`py-[11px] md:py-2.5 px-1.5 md:px-2 rounded-lg inline-flex items-center justify-center text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
                                                             >
                                                                 {act.label}
@@ -9496,7 +9863,7 @@
                                                                     type="button"
                                                                     onClick={() => handleOpenAddFromBenchModal(true)}
                                                                     disabled={!canOperateTeam(true)}
-                                                                    className="px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer"
+                                                                    className="px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/10"
                                                                 >
                                                                     Add Player
                                                                 </button>
@@ -9506,7 +9873,7 @@
                                                                     type="button"
                                                                     onClick={() => openClearOnCourtConfirm(true)}
                                                                     disabled={!canOperateTeam(true)}
-                                                                    className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer"
+                                                                    className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-500/10"
                                                                 >
                                                                     Clear
                                                                 </button>
@@ -9625,7 +9992,7 @@
                                                                     type="button"
                                                                     onClick={() => handleOpenAddFromBenchModal(false)}
                                                                     disabled={!canOperateTeam(false)}
-                                                                    className="px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer"
+                                                                    className="px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/10"
                                                                 >
                                                                     Add Player
                                                                 </button>
@@ -9635,7 +10002,7 @@
                                                                     type="button"
                                                                     onClick={() => openClearOnCourtConfirm(false)}
                                                                     disabled={!canOperateTeam(false)}
-                                                                    className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer"
+                                                                    className="px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-500/10"
                                                                 >
                                                                     Clear
                                                                 </button>
@@ -9812,8 +10179,8 @@
                                                         📊 Live Boxscore
                                                     </h3>
                                                 </div>
-                                                <span className="text-xs font-extrabold text-orange-400 hover:text-orange-300">
-                                                    {showLiveRunningBoxscore ? "▲" : "Show Boxscore ▼"}
+                                                <span className={`text-slate-500 transition-transform duration-200 ${showLiveRunningBoxscore ? 'rotate-180' : ''}`}>
+                                                    <Icons.ChevronDown />
                                                 </span>
                                             </div>
 
@@ -9946,8 +10313,9 @@
                                                                                     ) : (
                                                                                         <button
                                                                                             type="button"
+                                                                                            disabled={!canOperateTeam(true)}
                                                                                             onClick={() => togglePlayerDidNotPlay(player.id)}
-                                                                                            className={`px-2 py-0.5 rounded text-[9px] font-black border cursor-pointer ${isMarkedDnp ? 'bg-rose-500/20 text-rose-200 border-rose-500/60' : 'bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                                                            className={`px-2 py-0.5 rounded text-[9px] font-black border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isMarkedDnp ? 'bg-rose-500/20 text-rose-200 border-rose-500/60' : 'bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
                                                                                             title={isMarkedDnp ? 'Marked DNP: excluded from games played for this match' : 'Mark as DNP: exclude from games played for this match'}
                                                                                         >
                                                                                             {isMarkedDnp ? 'DNP' : 'Counted'}
@@ -10036,8 +10404,9 @@
                                                                                     ) : (
                                                                                         <button
                                                                                             type="button"
+                                                                                            disabled={!canOperateTeam(false)}
                                                                                             onClick={() => togglePlayerDidNotPlay(player.id)}
-                                                                                            className={`px-2 py-0.5 rounded text-[9px] font-black border cursor-pointer ${isMarkedDnp ? 'bg-rose-500/20 text-rose-200 border-rose-500/60' : 'bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                                                            className={`px-2 py-0.5 rounded text-[9px] font-black border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isMarkedDnp ? 'bg-rose-500/20 text-rose-200 border-rose-500/60' : 'bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
                                                                                             title={isMarkedDnp ? 'Marked DNP: excluded from games played for this match' : 'Mark as DNP: exclude from games played for this match'}
                                                                                         >
                                                                                             {isMarkedDnp ? 'DNP' : 'Counted'}
@@ -10541,14 +10910,18 @@
                                                     <div className="flex flex-wrap items-center justify-end gap-2">
                                                     <button
                                                         onClick={handleResetMatch}
-                                                        className="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                                                        disabled={!canAdminControlClock}
+                                                        title={!canAdminControlClock ? 'Only admin can restart a match.' : undefined}
+                                                        className="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                                     >
                                                         <Icons.History />
                                                         Restart Match
                                                     </button>
                                                     <button
                                                         onClick={handleDiscardLiveMatch}
-                                                        className="bg-red-600/15 hover:bg-red-600/25 border border-red-500/40 text-red-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                                                        disabled={!canAdminControlClock}
+                                                        title={!canAdminControlClock ? 'Only admin can discard a match.' : undefined}
+                                                        className="bg-red-600/15 hover:bg-red-600/25 border border-red-500/40 text-red-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                                     >
                                                         <Icons.Trash />
                                                         Discard Live Match
@@ -10557,6 +10930,7 @@
                                                 </div>
                                             </div>
                                         )}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -12371,7 +12745,7 @@
                                             if (recentActionIds.length > 0) {
                                                 const recentAction = liveActionById.get(recentActionIds[0]);
                                                 if (recentAction) {
-                                                    openActionForTeam(recentAction, operatorFocus === 'away' ? false : true);
+                                                    openActionForTeam(recentAction, effectiveOperatorFocus === 'away' ? false : true);
                                                 }
                                             }
                                         }}
@@ -12888,7 +13262,9 @@
                                         </h3>
                                     </div>
                                 </div>
-                                <div className={`text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? 'mb-2 text-[9px]' : 'mb-3 text-[10px]'}`}>Focus: <span className="text-orange-300">{operatorFocus}</span></div>
+                                <div className={`text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? 'mb-2 text-[9px]' : 'mb-3 text-[10px]'}`}>
+                                    Operator Handling: <span className="text-orange-300">{operatorHandledTeamLabel}</span>
+                                </div>
                                 <div className={`grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'} ${isCompactRecordActionModal ? 'gap-2.5' : 'gap-4'}`}>
                                     {showHomeLivePanel && <div className={`bg-slate-950/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
                                         <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{homeTeamLabel} On Court</div>
@@ -12989,21 +13365,6 @@
                                     }`}
                                 >
                                     Acknowledge Alert
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {periodEndAlert && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end md:items-center justify-center p-0 md:p-4">
-                            <div className="bg-slate-900 border border-orange-500/60 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-md shadow-2xl relative text-center my-0 md:my-auto max-h-[85vh] overflow-y-auto">
-                                <h3 className="text-lg font-black text-white uppercase tracking-wider mb-2">{periodEndAlert.title}</h3>
-                                <p className="text-sm text-slate-200 leading-relaxed mb-4">{periodEndAlert.text}</p>
-                                <button
-                                    onClick={() => setPeriodEndAlert(null)}
-                                    className="w-full py-2.5 rounded-xl text-xs font-bold text-white bg-orange-600 hover:bg-orange-500 transition-colors cursor-pointer"
-                                >
-                                    Acknowledge
                                 </button>
                             </div>
                         </div>
