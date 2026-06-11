@@ -1088,10 +1088,27 @@
 
             const getGameTimestamp = (game) => {
                 if (!game || typeof game !== 'object') return 0;
-                const idTimestamp = Number.parseInt(String(game.id || '').replace(/\D+/g, ''), 10) || 0;
+                const now = Date.now();
+                const MIN_REASONABLE_EPOCH_MS = 946684800000; // 2000-01-01
+                const MAX_REASONABLE_EPOCH_MS = now + (24 * 60 * 60 * 1000);
+                const toReasonableEpoch = (value) => {
+                    const num = Number(value);
+                    if (!Number.isFinite(num)) return 0;
+                    if (num < MIN_REASONABLE_EPOCH_MS || num > MAX_REASONABLE_EPOCH_MS) return 0;
+                    return num;
+                };
+
                 const parsedDate = Date.parse(String(game.date || ''));
-                const dateTimestamp = Number.isFinite(parsedDate) ? parsedDate : 0;
-                return Math.max(idTimestamp, dateTimestamp);
+                const dateTimestamp = toReasonableEpoch(parsedDate);
+
+                // Some game IDs include timestamps, but others are UUIDs with random digits.
+                // Only accept 13-digit epoch-like sequences from the ID when in a sane range.
+                const idMatches = String(game.id || '').match(/\d{13}/g) || [];
+                const idTimestamp = idMatches
+                    .map((candidate) => toReasonableEpoch(Number.parseInt(candidate, 10)))
+                    .find((candidate) => candidate > 0) || 0;
+
+                return Math.max(dateTimestamp, idTimestamp);
             };
 
             const getLatestEndedGameTimestamp = (gamesList = []) => {
@@ -1539,12 +1556,37 @@
                     };
                 };
 
+                const getRotationEventSortInfo = (event) => {
+                    const id = String(event?.id || '');
+                    const isClear = event?.kind === 'meta' && event?.metaType === 'onCourtClear';
+                    const isAdd = event?.kind === 'meta' && event?.metaType === 'onCourtAdd';
+                    const addMatch = id.match(/_add_(\d+)$/);
+                    const addIndex = addMatch ? Number.parseInt(addMatch[1], 10) : Number.MAX_SAFE_INTEGER;
+                    return {
+                        isRotationMeta: isClear || isAdd,
+                        phase: isClear ? 0 : (isAdd ? 1 : 2),
+                        addIndex: Number.isFinite(addIndex) ? addIndex : Number.MAX_SAFE_INTEGER
+                    };
+                };
+
                 const orderedEvents = [...(events || [])].sort((a, b) => {
                     const aKey = Number.parseInt(String(a?.id || '').split('_')[0], 10);
                     const bKey = Number.parseInt(String(b?.id || '').split('_')[0], 10);
                     const safeA = Number.isFinite(aKey) ? aKey : 0;
                     const safeB = Number.isFinite(bKey) ? bKey : 0;
                     if (safeA !== safeB) return safeA - safeB;
+
+                    const aRotationInfo = getRotationEventSortInfo(a);
+                    const bRotationInfo = getRotationEventSortInfo(b);
+                    if (aRotationInfo.isRotationMeta && bRotationInfo.isRotationMeta) {
+                        if (aRotationInfo.phase !== bRotationInfo.phase) {
+                            return aRotationInfo.phase - bRotationInfo.phase;
+                        }
+                        if (aRotationInfo.phase === 1 && bRotationInfo.phase === 1 && aRotationInfo.addIndex !== bRotationInfo.addIndex) {
+                            return aRotationInfo.addIndex - bRotationInfo.addIndex;
+                        }
+                    }
+
                     return String(a?.id || '').localeCompare(String(b?.id || ''));
                 });
 
@@ -1957,12 +1999,22 @@
                 if (!remoteSessionInstanceId) return;
                 const localSessionInstanceId = String(liveSessionInstanceIdRef.current || '').trim();
                 const remoteSessionCreatedAt = Number.parseInt(session.sessionCreatedAt, 10) || 0;
+                const localSessionCreatedAt = Number(liveSessionCreatedAtRef.current || 0);
                 const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
                 const discardedSessionId = String(tombstone.sessionInstanceId || '').trim();
                 const discardedAt = Number(tombstone.discardedAt || 0);
+                const isDifferentLiveSession = Boolean(
+                    isGameLiveRef.current
+                    && localSessionInstanceId
+                    && remoteSessionInstanceId
+                    && remoteSessionInstanceId !== localSessionInstanceId
+                );
                 if (isGameLiveRef.current && localSessionInstanceId) {
                     if (!remoteSessionInstanceId || remoteSessionInstanceId !== localSessionInstanceId) {
-                        return;
+                        const remoteSessionIsClearlyNewer = remoteSessionCreatedAt > localSessionCreatedAt;
+                        if (!remoteSessionIsClearlyNewer) {
+                            return;
+                        }
                     }
                 }
                 if (remoteSessionInstanceId && discardedSessionId && remoteSessionInstanceId === discardedSessionId) {
@@ -1988,12 +2040,20 @@
                 if (
                     isGameLiveRef.current &&
                     localSessionUpdatedAt > 0 &&
+                    !isDifferentLiveSession &&
                     (
                         (remoteSessionUpdatedAt > 0 && remoteSessionUpdatedAt < localSessionUpdatedAt)
                         || (hasLocalOnlyLogEvents && (remoteSessionUpdatedAt === 0 || remoteSessionUpdatedAt <= localSessionUpdatedAt))
                     )
                 ) {
                     return;
+                }
+
+                if (isDifferentLiveSession) {
+                    pendingLiveEventsRef.current = [];
+                    persistPendingLiveEvents();
+                    pendingActiveSessionSyncRef.current = null;
+                    persistPendingActiveSessionSync();
                 }
 
                 suppressLiveSessionSyncRef.current = true;
@@ -3326,8 +3386,11 @@
                     const localCachedSessionId = getLiveSessionIdentity(localCachedSession);
 
                     let hydratedFromRemote = false;
+                    let remoteSessionCheckSucceeded = false;
+                    let remoteSessionExplicitlyMissing = false;
                     try {
                         const payload = await apiRequest('/api/active-session');
+                        remoteSessionCheckSucceeded = true;
                         if (payload?.session) {
                             const remoteSessionId = getLiveSessionIdentity(payload.session);
                             const remoteSessionTouchedAt = getLiveSessionLastTouchedAt(payload.session);
@@ -3360,12 +3423,15 @@
                                 hydrateSession(payload.session);
                                 hydratedFromRemote = true;
                             }
+                        } else {
+                            remoteSessionExplicitlyMissing = true;
+                            purgeStaleLocalSessionArtifacts();
                         }
                     } catch (e) {
                         // Fall back to local browser cache if DB temp cache is unavailable.
                     }
 
-                    if (!hydratedFromRemote) {
+                    if (!hydratedFromRemote && !(remoteSessionCheckSucceeded && remoteSessionExplicitlyMissing)) {
                         try {
                             if (localCachedSession) {
                                 const cachedSessionId = getLiveSessionIdentity(localCachedSession);
@@ -6441,8 +6507,18 @@
                     ...rosterIds.filter((id) => !currentLineup.includes(id) && !currentBench.includes(id))
                 ])).filter((id) => eligibleSet.has(id));
 
+                const prioritizeLowMinutesInEarlyPeriods = Number(currentQuarter || 1) <= 2;
                 const sortedByMinutesAsc = (ids) => [...ids].sort((a, b) => {
-                    const secDiff = Number(livePlayerSeconds[a] || 0) - Number(livePlayerSeconds[b] || 0);
+                    const aSeconds = Number(livePlayerSeconds[a] || 0);
+                    const bSeconds = Number(livePlayerSeconds[b] || 0);
+
+                    if (prioritizeLowMinutesInEarlyPeriods) {
+                        const aHasMinutes = aSeconds > 0 || playedPlayers.includes(a);
+                        const bHasMinutes = bSeconds > 0 || playedPlayers.includes(b);
+                        if (aHasMinutes !== bHasMinutes) return aHasMinutes ? 1 : -1;
+                    }
+
+                    const secDiff = aSeconds - bSeconds;
                     if (secDiff !== 0) return secDiff;
                     const aNumber = teamObj.players.find((p) => p.id === a)?.number || '';
                     const bNumber = teamObj.players.find((p) => p.id === b)?.number || '';
@@ -6480,6 +6556,15 @@
                 }
 
                 markLocalSessionUpdated();
+                // Immediately advance local rotation revision to guard against stale
+                // remote snapshots briefly winning the race before wave events persist.
+                const immediateWaveRevision = Math.max(
+                    Number(lineupRevisionRef.current || 0),
+                    Date.now() * 1000
+                );
+                lineupRevisionRef.current = immediateWaveRevision;
+                setLineupRevision((prev) => Math.max(prev, immediateWaveRevision));
+
                 if (isTeamA) {
                     setTeamALineup(sanitized.lineup);
                     setTeamABench(sanitized.bench);
