@@ -362,6 +362,7 @@
             const REGULATION_PERIOD_SECONDS = 12 * 60;
             const OVERTIME_PERIOD_SECONDS = 5 * 60;
             const LIVE_SESSION_STALE_AFTER_MS = 36 * 60 * 60 * 1000;
+            const LIVE_SESSION_MAX_AGE_MS = 36 * 60 * 60 * 1000;
             const MAX_LIVE_LOG_ENTRIES = 5000;
             const MAX_LIVE_HISTORY_ENTRIES = 5000;
             const OPERATOR_FOCUS_KEY = 'wknd_live_operator_focus';
@@ -1070,6 +1071,10 @@
             };
 
             const isLiveSessionStale = (session, now = Date.now()) => {
+                const createdAt = Number.parseInt(session?.sessionCreatedAt, 10) || 0;
+                if (createdAt > 0 && (now - createdAt) > LIVE_SESSION_MAX_AGE_MS) {
+                    return true;
+                }
                 const lastTouchedAt = getLiveSessionLastTouchedAt(session);
                 if (lastTouchedAt <= 0) return false;
                 return (now - lastTouchedAt) > LIVE_SESSION_STALE_AFTER_MS;
@@ -3270,9 +3275,25 @@
                     let hydratedFromRemote = false;
                     try {
                         const payload = await apiRequest('/api/active-session');
-                        if (payload?.session && !isLiveSessionStale(payload.session)) {
-                            hydrateSession(payload.session);
-                            hydratedFromRemote = true;
+                        if (payload?.session) {
+                            if (isLiveSessionStale(payload.session)) {
+                                try {
+                                    await apiRequest('/api/active-session', {
+                                        method: 'DELETE',
+                                        body: JSON.stringify({
+                                            sourceClientId: syncClientIdRef.current,
+                                            clearLiveEvents: true,
+                                            discardedSessionInstanceId: String(payload.session.sessionInstanceId || ''),
+                                            discardedSessionCreatedAt: Number(payload.session.sessionCreatedAt || 0)
+                                        })
+                                    });
+                                } catch (clearError) {
+                                    // If cleanup fails, keep startup flow running and avoid hydration.
+                                }
+                            } else {
+                                hydrateSession(payload.session);
+                                hydratedFromRemote = true;
+                            }
                         }
                     } catch (e) {
                         // Fall back to local browser cache if DB temp cache is unavailable.
