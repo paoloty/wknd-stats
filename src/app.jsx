@@ -287,6 +287,7 @@
             const lineupRevisionRef = useRef(lineupRevision);
             const liveSessionInstanceIdRef = useRef(liveSessionInstanceId);
             const liveSessionCreatedAtRef = useRef(liveSessionCreatedAt);
+            const latestEndedGameTimestampRef = useRef(0);
             const sessionRevisionRef = useRef(0);
             const discardedLiveSessionTombstoneRef = useRef({ sessionInstanceId: '', discardedAt: 0 });
             const lastRemoteGameLogIdsRef = useRef(new Set());
@@ -1070,6 +1071,11 @@
                 return Math.max(updatedAt, createdAt);
             };
 
+            const getLiveSessionIdentity = (session) => {
+                if (!session || typeof session !== 'object') return '';
+                return String(session.sessionInstanceId || session.liveSessionInstanceId || '').trim();
+            };
+
             const isLiveSessionStale = (session, now = Date.now()) => {
                 const createdAt = Number.parseInt(session?.sessionCreatedAt, 10) || 0;
                 if (createdAt > 0 && (now - createdAt) > LIVE_SESSION_MAX_AGE_MS) {
@@ -1078,6 +1084,28 @@
                 const lastTouchedAt = getLiveSessionLastTouchedAt(session);
                 if (lastTouchedAt <= 0) return false;
                 return (now - lastTouchedAt) > LIVE_SESSION_STALE_AFTER_MS;
+            };
+
+            const getGameTimestamp = (game) => {
+                if (!game || typeof game !== 'object') return 0;
+                const idTimestamp = Number.parseInt(String(game.id || '').replace(/\D+/g, ''), 10) || 0;
+                const parsedDate = Date.parse(String(game.date || ''));
+                const dateTimestamp = Number.isFinite(parsedDate) ? parsedDate : 0;
+                return Math.max(idTimestamp, dateTimestamp);
+            };
+
+            const getLatestEndedGameTimestamp = (gamesList = []) => {
+                return (Array.isArray(gamesList) ? gamesList : []).reduce((latest, game) => {
+                    return Math.max(latest, getGameTimestamp(game));
+                }, 0);
+            };
+
+            const isLiveSessionOlderThanLatestEndedGame = (session, latestEndedGameTimestamp = 0) => {
+                const safeLatestEnded = Number(latestEndedGameTimestamp) || 0;
+                if (safeLatestEnded <= 0) return false;
+                const sessionTimestamp = getLiveSessionLastTouchedAt(session);
+                if (sessionTimestamp <= 0) return false;
+                return sessionTimestamp < safeLatestEnded;
             };
 
             const getLogLockReason = (entry, ordinal) => {
@@ -1923,8 +1951,10 @@
             const applyRemoteLiveSession = (session) => {
                 if (!session) return;
                 if (isLiveSessionStale(session)) return;
+                if (isLiveSessionOlderThanLatestEndedGame(session, latestEndedGameTimestampRef.current)) return;
 
-                const remoteSessionInstanceId = String(session.sessionInstanceId || '').trim();
+                const remoteSessionInstanceId = getLiveSessionIdentity(session);
+                if (!remoteSessionInstanceId) return;
                 const localSessionInstanceId = String(liveSessionInstanceIdRef.current || '').trim();
                 const remoteSessionCreatedAt = Number.parseInt(session.sessionCreatedAt, 10) || 0;
                 const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
@@ -3272,24 +3302,60 @@
                 }
 
                 const loadActiveSession = async () => {
+                    const purgeStaleLocalSessionArtifacts = () => {
+                        localStorage.removeItem('active_live_session');
+                        pendingActiveSessionSyncRef.current = null;
+                        persistPendingActiveSessionSync();
+                        pendingLiveEventsRef.current = [];
+                        persistPendingLiveEvents();
+                    };
+
+                    const readLocalCachedSession = () => {
+                        try {
+                            const activeSession = localStorage.getItem('active_live_session');
+                            if (!activeSession) return null;
+                            const parsedSession = JSON.parse(activeSession);
+                            if (!parsedSession || typeof parsedSession !== 'object') return null;
+                            return parsedSession;
+                        } catch (e) {
+                            return null;
+                        }
+                    };
+
+                    const localCachedSession = readLocalCachedSession();
+                    const localCachedSessionId = getLiveSessionIdentity(localCachedSession);
+
                     let hydratedFromRemote = false;
                     try {
                         const payload = await apiRequest('/api/active-session');
                         if (payload?.session) {
-                            if (isLiveSessionStale(payload.session)) {
+                            const remoteSessionId = getLiveSessionIdentity(payload.session);
+                            const remoteSessionTouchedAt = getLiveSessionLastTouchedAt(payload.session);
+                            const localCachedTouchedAt = getLiveSessionLastTouchedAt(localCachedSession);
+                            const shouldRejectForIdentity = !remoteSessionId
+                                || (localCachedSessionId && remoteSessionId !== localCachedSessionId && remoteSessionTouchedAt <= localCachedTouchedAt);
+                            const shouldDiscardOldSession = shouldRejectForIdentity
+                                || isLiveSessionStale(payload.session)
+                                || isLiveSessionOlderThanLatestEndedGame(payload.session, latestEndedGameTimestampRef.current);
+                            if (shouldDiscardOldSession) {
+                                const staleSessionInstanceId = remoteSessionId;
+                                if (staleSessionInstanceId) {
+                                    markDiscardedSessionTombstone(staleSessionInstanceId, Date.now());
+                                }
                                 try {
                                     await apiRequest('/api/active-session', {
                                         method: 'DELETE',
                                         body: JSON.stringify({
                                             sourceClientId: syncClientIdRef.current,
                                             clearLiveEvents: true,
-                                            discardedSessionInstanceId: String(payload.session.sessionInstanceId || ''),
+                                            discardedSessionInstanceId: staleSessionInstanceId,
                                             discardedSessionCreatedAt: Number(payload.session.sessionCreatedAt || 0)
                                         })
                                     });
                                 } catch (clearError) {
                                     // If cleanup fails, keep startup flow running and avoid hydration.
                                 }
+                                purgeStaleLocalSessionArtifacts();
                             } else {
                                 hydrateSession(payload.session);
                                 hydratedFromRemote = true;
@@ -3301,13 +3367,17 @@
 
                     if (!hydratedFromRemote) {
                         try {
-                            const activeSession = localStorage.getItem('active_live_session');
-                            if (activeSession) {
-                                const parsedSession = JSON.parse(activeSession);
-                                if (isLiveSessionStale(parsedSession)) {
-                                    localStorage.removeItem('active_live_session');
+                            if (localCachedSession) {
+                                const cachedSessionId = getLiveSessionIdentity(localCachedSession);
+                                if (!cachedSessionId
+                                    || isLiveSessionStale(localCachedSession)
+                                    || isLiveSessionOlderThanLatestEndedGame(localCachedSession, latestEndedGameTimestampRef.current)) {
+                                    if (cachedSessionId) {
+                                        markDiscardedSessionTombstone(cachedSessionId, Date.now());
+                                    }
+                                    purgeStaleLocalSessionArtifacts();
                                 } else {
-                                    hydrateSession(parsedSession);
+                                    hydrateSession(localCachedSession);
                                 }
                             }
                         } catch (e) {}
@@ -3328,6 +3398,28 @@
 
                 loadActiveSession();
             }, []);
+
+            useEffect(() => {
+                latestEndedGameTimestampRef.current = getLatestEndedGameTimestamp(games);
+            }, [games]);
+
+            useEffect(() => {
+                if (!isGameLive) return;
+                const latestEndedGameTimestamp = Number(latestEndedGameTimestampRef.current || 0);
+                if (latestEndedGameTimestamp <= 0) return;
+
+                const currentLiveSession = {
+                    sessionCreatedAt: Number(liveSessionCreatedAtRef.current || 0),
+                    sessionUpdatedAt: Number(lastLocalSessionUpdatedAtRef.current || 0)
+                };
+
+                if (!isLiveSessionOlderThanLatestEndedGame(currentLiveSession, latestEndedGameTimestamp)) {
+                    return;
+                }
+
+                clearLiveSessionEverywhere({ keepTeamSelection: false }).catch(() => {});
+                showToast('Detected an older live session than the latest finished game. Cleared stale live game.', 'info');
+            }, [games, isGameLive, liveSessionCreatedAt]);
 
             useEffect(() => {
                 const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
