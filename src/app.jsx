@@ -617,11 +617,9 @@
                 if (shouldPauseClockForFoulSelection) {
                     pendingFoulActionPauseRef.current = true;
                     setLocalSoftPauseActive(true);
-                    showToast('Soft pause is active on this device while foul action is being selected.', 'info');
                 } else if (shouldSoftPauseForActionSelection) {
                     actionModalSoftPauseRef.current = true;
                     setLocalSoftPauseActive(true);
-                    showToast('Soft pause is active on this device while action modal is open.', 'info');
                 }
 
                 setActiveAction(action);
@@ -797,6 +795,25 @@
                             countsTeamFoul: event.countsTeamFoul
                         }, ...prev].slice(0, MAX_LIVE_HISTORY_ENTRIES);
                     });
+                }
+
+                // Propagate pause/resume clock state immediately when received as an
+                // individual live event, since applyRemoteLiveSession may be skipped
+                // due to the local-timestamp guard when the receiver has newer local events.
+                if (event.kind === 'meta') {
+                    const isPauseEvent = ['manualPause', 'foulPause', 'timeout', 'officialsTimeout'].includes(event.metaType);
+                    const isResumeEvent = ['playResume', 'timeoutResume'].includes(event.metaType);
+                    if (isPauseEvent) {
+                        setIsPlayPaused(true);
+                        setIsPeriodClockRunning(false);
+                    } else if (isResumeEvent) {
+                        setIsPlayPaused(false);
+                        // Only restart the clock if the resume event itself reports remaining time.
+                        const resumeClockSecs = parseClockInputToSeconds(event.clockRemaining);
+                        if (resumeClockSecs === null || resumeClockSecs > 0) {
+                            setIsPeriodClockRunning(true);
+                        }
+                    }
                 }
 
                 setGameLog((prev) => {
@@ -2244,15 +2261,20 @@
                 setLiveStats(replayed?.liveStats || session.liveStats || {});
                 setPeriodSnapshots(Array.isArray(session.periodSnapshots) ? session.periodSnapshots : []);
                 setPeriodClockSeconds(remoteClockSeconds);
+                // Only let log-derived pause state override session state when the session also
+                // agrees the clock is paused. If the server explicitly says running (e.g. admin
+                // resumed but the playResume event is still uploading), trust the session.
+                const sessionSaysRunning = Boolean(session.isPeriodClockRunning) && !Boolean(session.isPlayPaused);
+                const shouldEnforcePauseFromLog = pauseActiveFromLog && !shouldForceLocalResumeState && !sessionSaysRunning;
                 setIsPeriodClockRunning(
                     shouldForceRunningDuringResumeLock
                         ? true
-                        : ((pauseActiveFromLog && !shouldForceLocalResumeState) ? false : Boolean(session.isPeriodClockRunning))
+                        : (shouldEnforcePauseFromLog ? false : Boolean(session.isPeriodClockRunning))
                 );
                 setIsPlayPaused(
                     shouldForceRunningDuringResumeLock
                         ? false
-                        : ((pauseActiveFromLog && !shouldForceLocalResumeState) ? true : Boolean(session.isPlayPaused))
+                        : (shouldEnforcePauseFromLog ? true : Boolean(session.isPlayPaused))
                 );
                 setLivePlayerSeconds(session.livePlayerSeconds || {});
                 setLiveGameSnapshot(replaySnapshot || null);
@@ -3315,6 +3337,71 @@
                 isAwaitingPeriodStart,
                 awaitingOvertimeDecision,
                 periodClockSeconds,
+                isPeriodClockRunning
+            ]);
+
+            useEffect(() => {
+                if (!isGameLive) return;
+
+                const latestClockControlEvent = getLatestLogEvent(
+                    currentLiveGameLog,
+                    (event) => event?.kind === 'meta' && [
+                        'timeout',
+                        'officialsTimeout',
+                        'manualPause',
+                        'foulPause',
+                        'timeoutResume',
+                        'playResume'
+                    ].includes(event.metaType)
+                );
+
+                if (!latestClockControlEvent?.metaType) return;
+
+                const timelineClockSeconds = parseClockInputToSeconds(latestClockControlEvent.clockRemaining);
+                if (timelineClockSeconds !== null && timelineClockSeconds !== Number(periodClockSeconds || 0)) {
+                    setPeriodClockSeconds(timelineClockSeconds);
+                }
+
+                const isPauseTimelineEvent = [
+                    'timeout',
+                    'officialsTimeout',
+                    'manualPause',
+                    'foulPause'
+                ].includes(latestClockControlEvent.metaType);
+
+                if (isPauseTimelineEvent) {
+                    if (!isPlayPaused) {
+                        setIsPlayPaused(true);
+                    }
+                    if (isPeriodClockRunning) {
+                        setIsPeriodClockRunning(false);
+                    }
+                    return;
+                }
+
+                if (localSoftPauseActive) return;
+                if (isAwaitingPeriodStart || awaitingOvertimeDecision) return;
+
+                const hasTimeRemaining = timelineClockSeconds === null
+                    ? Number(periodClockSeconds || 0) > 0
+                    : timelineClockSeconds > 0;
+
+                if (isPlayPaused) {
+                    setIsPlayPaused(false);
+                }
+                if (hasTimeRemaining && !isPeriodClockRunning) {
+                    suppressPeriodAutoStopRef.current = true;
+                    suppressTimeoutAutoStopRef.current = true;
+                    setIsPeriodClockRunning(true);
+                }
+            }, [
+                isGameLive,
+                currentLiveGameLog,
+                localSoftPauseActive,
+                isAwaitingPeriodStart,
+                awaitingOvertimeDecision,
+                periodClockSeconds,
+                isPlayPaused,
                 isPeriodClockRunning
             ]);
 
@@ -6518,7 +6605,6 @@
                 if (shouldAutoPauseForSubSelection) {
                     pendingSubSelectionAutoPauseRef.current = true;
                     setLocalSoftPauseActive(true);
-                    showToast('Soft pause is active on this device while substitution modal is open.', 'info');
                 }
 
                 setSubTargetPlayer({ id: playerId, name: playerObj.name, number: playerObj.number, team: isTeamA ? 'A' : 'B' });
@@ -6707,7 +6793,6 @@
                 if (shouldSoftPauseForAddBench) {
                     addFromBenchModalSoftPauseRef.current = true;
                     setLocalSoftPauseActive(true);
-                    showToast('Soft pause is active on this device while add-player modal is open.', 'info');
                 }
 
                 setAddFromBenchTeam(isTeamA ? 'A' : 'B');
