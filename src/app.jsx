@@ -300,6 +300,7 @@
             const pendingModalSoftResumeRef = useRef(false);
             const liveGameplayControlSnapshotRef = useRef(null);
             const localFoulPauseTriggerIdRef = useRef('');
+            const nonPrimaryResumeConfirmRef = useRef(false);
             const adminFocusRevisionRef = useRef(0);
             const lastRolePresenceEmitAtRef = useRef(0);
             const adminMissingToastAtRef = useRef(0);
@@ -612,6 +613,7 @@
                     && !timeoutIsActive;
                 actionModalSoftPauseRef.current = false;
                 pendingFoulActionPauseRef.current = false;
+                nonPrimaryResumeConfirmRef.current = false;
                 if (shouldPauseClockForFoulSelection) {
                     pendingFoulActionPauseRef.current = true;
                     setLocalSoftPauseActive(true);
@@ -633,6 +635,7 @@
                 setShowLoggingModal(false);
                 setActiveAction(null);
                 setCorrectionMode(false);
+                nonPrimaryResumeConfirmRef.current = false;
             };
 
             const showHomeLivePanel = isOperatorScreenLockedByAdminBoth || !canOperateLive || effectiveOperatorFocus !== 'away';
@@ -2182,6 +2185,7 @@
                     : normalized.loggedHistory;
                 lastRemoteGameLogIdsRef.current = new Set((normalized.gameLog || []).map((event) => event?.id).filter(Boolean));
                 const replayed = buildLiveStateFromEvents(replaySnapshot || liveGameSnapshotRef.current || null, effectiveGameLog) || null;
+                const hasAdminFocusEvent = (effectiveGameLog || []).some((event) => event?.kind === 'meta' && event?.metaType === 'adminFocusSet');
                 const pauseActiveFromLog = isTimeoutCurrentlyActive(effectiveGameLog);
                 const hasActiveLocalResumeLock = Date.now() < Number(localResumeLockUntilRef.current || 0);
                 const remoteClockSeconds = Math.max(0, Number.parseInt(session.periodClockSeconds, 10) || getPeriodDurationSeconds(replayed?.currentQuarter || session.currentQuarter || 1));
@@ -2253,6 +2257,10 @@
                 setLivePlayerSeconds(session.livePlayerSeconds || {});
                 setLiveGameSnapshot(replaySnapshot || null);
                 setGameLog(effectiveGameLog);
+                if (!hasAdminFocusEvent) {
+                    setSharedAdminFocus('both');
+                    setOperatorFocus('both');
+                }
                 setLoggedHistory(effectiveLoggedHistory);
                 setPlayedPlayers(replayed?.playedPlayers || session.playedPlayers || []);
                 const keepLocalDnpState = isGameLiveRef.current && localDnpUpdatedAt > 0 && remoteDnpUpdatedAt < localDnpUpdatedAt;
@@ -2340,6 +2348,10 @@
 
             // Fixed button layout based on typical in-game stat flow, not live usage.
             const primaryActions = getActionsByOrder(['pts_2', 'pts_3', 'fg2m_miss', 'fg3m_miss']);
+            const primaryActionIds = new Set(primaryActions.map((action) => String(action?.id || '')));
+            const autoResumeActionIds = new Set(['pts_2', 'pts_3', 'fg2m_miss', 'fg3m_miss', 'reb', 'ast', 'to', 'stl', 'blk']);
+            const isPrimaryActionArmed = primaryActionIds.has(String(activeAction?.id || ''));
+            const isAutoResumeActionArmed = autoResumeActionIds.has(String(activeAction?.id || ''));
             const secondaryActions = getActionsByOrder(['reb', 'ast', 'pf', 'pf_offensive']);
             const tertiaryActions = getActionsByOrder(['pts_1', 'ft_miss', 'to', 'stl', 'blk']);
             const foulActions = getActionsByOrder(['pf_technical']);
@@ -2868,7 +2880,7 @@
                 && (!timeoutIsActive || allowAllActionsWhileManualPause)
                 && !isAwaitingPeriodStart
                 && !awaitingOvertimeDecision;
-            const hasFinalizedPreviousPeriod = isAwaitingPeriodStart
+            const hasFinalizedPreviousPeriod = (isAwaitingPeriodStart || awaitingPeriodStart)
                 && latestPeriodMetaEvent?.metaType === 'quarterEnd'
                 && !awaitingOvertimeDecision;
             const hasQuarterEndedFromLog = latestPeriodMetaEvent?.metaType === 'quarterEnd'
@@ -2883,6 +2895,14 @@
                 );
             const isBackfillMode = hasEndedPeriodBackfillWindow;
             const canBackfillEndedPeriodStats = isBackfillMode;
+            const backfillTargetQuarter = (canBackfillEndedPeriodStats && hasFinalizedPreviousPeriod)
+                ? ((Number(latestPeriodMetaQuarter || 0) > 0)
+                    ? Number(latestPeriodMetaQuarter || 0)
+                    : Math.max(1, Number(currentQuarter || 1) - 1))
+                : currentQuarter;
+            const backfillClockLabel = canBackfillEndedPeriodStats
+                ? '00:00'
+                : formatSecondsAsClock(periodClockSeconds);
             const liveGameplayControlDisplay = isLiveGameplayModalActive && liveGameplayControlSnapshotRef.current
                 ? liveGameplayControlSnapshotRef.current
                 : {
@@ -5201,6 +5221,9 @@
                 const benchB = teamBObj.players.slice(5).map(p => p.id);
                 const nextSessionInstanceId = generateLiveSessionInstanceId();
                 const nextSessionCreatedAt = Date.now();
+                const focusEventTs = Date.now();
+                const nextFocusRevision = Math.max(Number(adminFocusRevisionRef.current || 0) + 1, focusEventTs * 1000);
+                adminFocusRevisionRef.current = nextFocusRevision;
 
                 setTeamALineup(startersA);
                 setTeamABench(benchA);
@@ -5243,17 +5266,34 @@
                 setLivePlayerSeconds({});
                 setAwaitingOvertimeDecision(false);
                 setAwaitingPeriodStart(true);
+                setSharedAdminFocus('both');
+                setOperatorFocus('both');
                 clearTransientLiveActionState();
                 setLoggedHistory([]);
-                setGameLog([{
-                    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                    time: getWallClockTime(),
-                    text: 'Start Match',
-                    kind: 'meta',
-                    metaType: 'matchStart',
-                    quarter: 1,
-                    clockRemaining: formatSecondsAsClock(0)
-                }]);
+                setGameLog([
+                    {
+                        id: `${focusEventTs}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: 'Admin focus: BOTH',
+                        kind: 'meta',
+                        metaType: 'adminFocusSet',
+                        quarter: 1,
+                        clockRemaining: formatSecondsAsClock(0),
+                        role: 'admin',
+                        focus: 'both',
+                        focusRevision: nextFocusRevision,
+                        clientId: syncClientIdRef.current
+                    },
+                    {
+                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: 'Start Match',
+                        kind: 'meta',
+                        metaType: 'matchStart',
+                        quarter: 1,
+                        clockRemaining: formatSecondsAsClock(0)
+                    }
+                ]);
                 setLiveGameSnapshot(initialLiveSnapshot);
                 setLineupRevision(0);
                 lineupRevisionRef.current = 0;
@@ -5269,6 +5309,47 @@
                 if (!canUseLiveControls) return;
                 if (!ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
                 if (!activeAction) return;
+                const isTechnicalFoulAction = String(activeAction?.id || '') === 'pf_technical';
+                const isPrimaryAction = primaryActionIds.has(String(activeAction?.id || ''));
+                const isAutoResumeAction = autoResumeActionIds.has(String(activeAction?.id || ''));
+                const isStoppedClockAction = stoppedClockActionIds.has(String(activeAction?.id || ''));
+                const isManualPauseSource = latestPauseMetaType === 'manualPause';
+                const isTimeoutOrFoulPauseSource = isTeamTimeoutPauseActive || latestPauseMetaType === 'foulPause';
+                const canAutoResumeClockFromStat = !correctionMode
+                    && !canBackfillEndedPeriodStats
+                    && hasMatchStarted
+                    && hasCurrentQuarterStarted
+                    && !isAwaitingPeriodStart
+                    && !awaitingOvertimeDecision
+                    && Number(periodClockSeconds || 0) > 0
+                    && !isPeriodClockRunning
+                    && !isManualPauseSource
+                    && (!isTimeoutOrFoulPauseSource || isAutoResumeAction)
+                    && !isStoppedClockAction;
+
+                if (isTimeoutOrFoulPauseSource && !isAutoResumeAction && !isTechnicalFoulAction && !isStoppedClockAction && !canBackfillEndedPeriodStats) {
+                    showToast('Clock is stopped for timeout/stoppage. Resume play before logging this action.', 'info');
+                    return;
+                }
+
+                const shouldConfirmResumeForNonPrimary = !isAutoResumeAction
+                    && !isStoppedClockAction
+                    && canAutoResumeClockFromStat
+                    && !nonPrimaryResumeConfirmRef.current;
+                if (shouldConfirmResumeForNonPrimary) {
+                    setConfirmDialog({
+                        title: 'Resume Clock?',
+                        text: 'Clock is currently stopped. Resume the clock and record this stat?',
+                        cancelLabel: 'Cancel',
+                        confirmLabel: 'Resume & Record',
+                        onConfirm: () => {
+                            setConfirmDialog(null);
+                            nonPrimaryResumeConfirmRef.current = true;
+                            handlePlayerClick(playerId, isTeamA);
+                        }
+                    });
+                    return;
+                }
                 if (!hasMatchStarted && !canBackfillEndedPeriodStats && !canTriggerAlwaysAction(activeAction)) {
                     showToast('Press Start Match before logging stats.', 'info');
                     return;
@@ -5357,8 +5438,8 @@
                                 text: `Auto-removed on-court: ${playerObj?.name || 'Player'} fouled out (5 PF)`,
                                 kind: 'meta',
                                 metaType: 'onCourtRemove',
-                                quarter: currentQuarter,
-                                clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                                quarter: backfillTargetQuarter,
+                                clockRemaining: backfillClockLabel,
                                 isTeamA,
                                 playerId
                             };
@@ -5377,7 +5458,10 @@
                     }
                 }
 
-                const logWithTag = `${logText}${scoreSuffix}`;
+                const shouldAutoResumeFromStatTrigger = canAutoResumeClockFromStat && (isAutoResumeAction || nonPrimaryResumeConfirmRef.current);
+                const loggedWhileClockStopped = !isPeriodClockRunning && Number(periodClockSeconds || 0) > 0;
+                const pauseStateSuffix = loggedWhileClockStopped && !shouldAutoResumeFromStatTrigger ? ' [Clock Stopped]' : '';
+                const logWithTag = `${logText}${scoreSuffix}${pauseStateSuffix}`;
                 const isSelectedFoulAction = statField === 'pf';
                 const shouldAutoPauseForFoul = isSelectedFoulAction && !correctionMode && changeAmount > 0;
                 const logEntryId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -5422,8 +5506,8 @@
                     time: getWallClockTime(),
                     text: logWithTag,
                     kind: 'stat',
-                    quarter: currentQuarter,
-                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                    quarter: backfillTargetQuarter,
+                    clockRemaining: backfillClockLabel,
                     isTeamA,
                     actionId: activeAction.id,
                     countsTeamFoul,
@@ -5433,6 +5517,17 @@
                     attachedTrackingStat,
                     trackingDelta: 1 * multiplier
                 };
+                const autoResumeEvent = shouldAutoResumeFromStatTrigger
+                    ? {
+                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: `Play resumed (${getPeriodLabel(currentQuarter)})`,
+                        kind: 'meta',
+                        metaType: 'playResume',
+                        quarter: currentQuarter,
+                        clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                    }
+                    : null;
 
                 if (shouldAutoPauseForFoul) {
                     const foulPauseEvent = {
@@ -5441,8 +5536,8 @@
                         text: `Official stoppage: Foul on ${playerObj?.name || 'player'}`,
                         kind: 'meta',
                         metaType: 'foulPause',
-                        quarter: currentQuarter,
-                        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                        quarter: backfillTargetQuarter,
+                        clockRemaining: backfillClockLabel,
                         isTeamA
                     };
                     localFoulPauseTriggerIdRef.current = foulPauseEvent.id;
@@ -5451,9 +5546,11 @@
                         : [foulPauseEvent, statLogEvent];
                     setGameLog((prev) => [...prependedEvents, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
                 } else {
-                    const prependedEvents = foulOutRemovalEvent
-                        ? [foulOutRemovalEvent, statLogEvent]
-                        : [statLogEvent];
+                    const prependedEvents = [
+                        ...(foulOutRemovalEvent ? [foulOutRemovalEvent] : []),
+                        statLogEvent,
+                        ...(autoResumeEvent ? [autoResumeEvent] : [])
+                    ];
                     setGameLog((prev) => [...prependedEvents, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 }
                 triggerPlayerFlash(playerId);
@@ -5464,6 +5561,7 @@
 
                 if (shouldAutoPauseForFoul) {
                     pendingFoulActionPauseRef.current = false;
+                    nonPrimaryResumeConfirmRef.current = false;
                     markLocalSessionUpdated();
                     setIsPlayPaused(true);
                     setIsPeriodClockRunning(false);
@@ -5472,6 +5570,20 @@
                 }
 
                 pendingFoulActionPauseRef.current = false;
+                nonPrimaryResumeConfirmRef.current = false;
+
+                if (autoResumeEvent) {
+                    markLocalSessionUpdated();
+                    setPendingPeriodActionMode('pauseGame');
+                    setAwaitingPeriodStart(false);
+                    setAwaitingOvertimeDecision(false);
+                    armLocalResumeStabilityWindow();
+                    setIsPlayPaused(false);
+                    suppressPeriodAutoStopRef.current = true;
+                    suppressTimeoutAutoStopRef.current = true;
+                    setIsPeriodClockRunning(true);
+                    showToast('Clock auto-resumed on live action.', 'info');
+                }
             };
 
             const restoreClockFromLatestLog = (logs = [], fallbackQuarter = currentQuarter) => {
@@ -7496,91 +7608,6 @@
                 setEditingGame(null);
                 setExpandedEditPlayerId(null);
                 showToast("Box score updated and career averages recalculated!", "success");
-            };
-
-            const handleResetMatch = () => {
-                if (!canAdminControlClock) {
-                    showToast('Only admin can restart a match.', 'info');
-                    return;
-                }
-                setConfirmDialog({
-                    title: "Clear & Restart Match?",
-                    text: "This will wipe current scores, timeline logs, lineups, and active stats, then keep this matchup ready for a fresh start.",
-                    onConfirm: async () => {
-                        const resetTeamAId = teamAId;
-                        const resetTeamBId = teamBId;
-                        markLocalSessionUpdated();
-                        setConfirmDialog(null);
-                        // Reset event/sync queue state so old stats cannot replay after restart.
-                        pendingLiveEventsRef.current = [];
-                        persistPendingLiveEvents();
-                        lastLiveSeqRef.current = 0;
-                        try {
-                            localStorage.setItem(LIVE_EVENTS_LAST_SEQ_KEY, '0');
-                        } catch (e) {}
-                        processedGameLogIdsRef.current = new Set();
-                        remoteEventIdsRef.current = new Set();
-                        liveEventQueueReadyRef.current = false;
-                        lastRemoteGameLogIdsRef.current = new Set();
-                        lastObservedLogIdRef.current = null;
-                        pendingActiveSessionSyncRef.current = null;
-                        persistPendingActiveSessionSync();
-
-                        setIsGameLive(true);
-                        setTeamAId(resetTeamAId);
-                        setTeamBId(resetTeamBId);
-                        setLiveSessionInstanceId(generateLiveSessionInstanceId());
-                        setLiveSessionCreatedAt(Date.now());
-                        sessionRevisionRef.current = 0;
-                        setTeamALineup([]);
-                        setTeamABench([]);
-                        setTeamBLineup([]);
-                        setTeamBBench([]);
-                        setPlayedPlayers([]);
-                        setDnpPlayers([]);
-                        setShowHomeBenchAdder(false);
-                        setShowAwayBenchAdder(false);
-                        setShowSubstitutionModal(false);
-                        setSubTargetPlayer(null);
-                        setShowAddFromBenchModal(false);
-                        setAddFromBenchTeam(null);
-                        setAddFromBenchSelection([]);
-                        setFoulAlert(null);
-                        setShowLoggingModal(false);
-                        setShowLiveRunningBoxscore(true);
-                        setShowSyncClockEditor(false);
-                        setIsEditingClockInput(false);
-                        setPendingPeriodActionMode(null);
-                        setManualClockInput(formatSecondsAsClock(getPeriodDurationSeconds(1)));
-
-                        setLiveStats({});
-                        setLivePlayerSeconds({});
-                        setTeamAScore(0);
-                        setTeamBScore(0);
-                        setCurrentQuarter(1);
-                        setPeriodClockSeconds(getPeriodDurationSeconds(1));
-                        setIsPeriodClockRunning(false);
-                        setIsPlayPaused(false);
-                        setAwaitingOvertimeDecision(false);
-                        setAwaitingPeriodStart(false);
-                        setActiveAction(null);
-                        setCorrectionMode(false);
-                        setPeriodSnapshots([]);
-                        setLiveGameSnapshot(null);
-                        setLoggedHistory([]);
-                        setGameLog([]);
-                        setLineupRevision(0);
-                        lineupRevisionRef.current = 0;
-                        showToast("Match restarted. Press Start Match to begin fresh.", "info");
-
-                        apiRequest('/api/live-events/reset', {
-                            method: 'POST',
-                            body: JSON.stringify({ sourceClientId: syncClientIdRef.current })
-                        }).catch((error) => {
-                            console.error('Failed to clear live event history during match reset.', error);
-                        });
-                    }
-                });
             };
 
             const handleDiscardLiveMatch = () => {
@@ -9773,6 +9800,12 @@
                                                     Backfill Mode: clock has ended, but stat buttons stay enabled so you can log missed actions before finalizing the period.
                                                 </div>
                                             )}
+                                            {!displayIsPeriodClockRunning && hasMatchStarted && !canBackfillEndedPeriodStats && !isAwaitingPeriodStart && !awaitingOvertimeDecision && (
+                                                <div className="text-[10px] font-black text-red-200 bg-red-500/12 border border-red-500/45 rounded-lg px-2.5 py-2 inline-flex items-center gap-1.5 animate-pulse">
+                                                    <Icons.Timer />
+                                                    CLOCK STOPPED: Resume play or confirm auto-resume before continuing live stat logging.
+                                                </div>
+                                            )}
                                             {!displayCanTriggerStatLogging && (
                                                 <div className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
                                                     {(isAwaitingPeriodStart || awaitingOvertimeDecision)
@@ -10908,15 +10941,6 @@
                                             <div className="col-span-12 mt-2">
                                                 <div className="flex justify-end">
                                                     <div className="flex flex-wrap items-center justify-end gap-2">
-                                                    <button
-                                                        onClick={handleResetMatch}
-                                                        disabled={!canAdminControlClock}
-                                                        title={!canAdminControlClock ? 'Only admin can restart a match.' : undefined}
-                                                        className="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                                                    >
-                                                        <Icons.History />
-                                                        Restart Match
-                                                    </button>
                                                     <button
                                                         onClick={handleDiscardLiveMatch}
                                                         disabled={!canAdminControlClock}
@@ -13265,6 +13289,17 @@
                                 <div className={`text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? 'mb-2 text-[9px]' : 'mb-3 text-[10px]'}`}>
                                     Operator Handling: <span className="text-orange-300">{operatorHandledTeamLabel}</span>
                                 </div>
+                                {!displayIsPeriodClockRunning && hasMatchStarted && !canBackfillEndedPeriodStats && !isAwaitingPeriodStart && !awaitingOvertimeDecision && (
+                                    <div className={`mb-2 rounded-lg border border-red-500/45 bg-red-500/12 px-2.5 py-2 text-[10px] font-black text-red-200 ${isCompactRecordActionModal ? '' : 'mb-3'}`}>
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <Icons.Timer />
+                                            CLOCK STOPPED: this action may require clock resume.
+                                        </span>
+                                        {!isAutoResumeActionArmed && (
+                                            <span className="ml-1 text-amber-200">You will be asked to Resume & Record.</span>
+                                        )}
+                                    </div>
+                                )}
                                 <div className={`grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'} ${isCompactRecordActionModal ? 'gap-2.5' : 'gap-4'}`}>
                                     {showHomeLivePanel && <div className={`bg-slate-950/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
                                         <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{homeTeamLabel} On Court</div>
