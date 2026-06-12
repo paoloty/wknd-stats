@@ -290,6 +290,7 @@
             const liveSessionCreatedAtRef = useRef(liveSessionCreatedAt);
             const latestEndedGameTimestampRef = useRef(0);
             const sessionRevisionRef = useRef(0);
+            const clockControlRevisionRef = useRef(0);
             const discardedLiveSessionTombstoneRef = useRef({ sessionInstanceId: '', discardedAt: 0 });
             const lastRemoteGameLogIdsRef = useRef(new Set());
             const gameLogImportInputRef = useRef(null);
@@ -299,6 +300,7 @@
             const wasLiveGameModalOpenRef = useRef(false);
             const pendingModalSoftResumeRef = useRef(false);
             const liveGameplayControlSnapshotRef = useRef(null);
+            const lastClockControlReconcileEventIdRef = useRef('');
             const localFoulPauseTriggerIdRef = useRef('');
             const nonPrimaryResumeConfirmRef = useRef(false);
             const adminFocusRevisionRef = useRef(0);
@@ -803,6 +805,11 @@
                 if (event.kind === 'meta') {
                     const isPauseEvent = ['manualPause', 'foulPause', 'timeout', 'officialsTimeout'].includes(event.metaType);
                     const isResumeEvent = ['playResume', 'timeoutResume'].includes(event.metaType);
+                    const eventRevision = getEventTimestampFromId(event.id);
+                    clockControlRevisionRef.current = Math.max(
+                        Number(clockControlRevisionRef.current || 0),
+                        Number.isFinite(eventRevision) ? eventRevision : 0
+                    );
                     if (isPauseEvent) {
                         setIsPlayPaused(true);
                         setIsPeriodClockRunning(false);
@@ -1996,6 +2003,26 @@
                 return latest;
             };
 
+            const getClockControlRevisionFromLogs = (events = [], fallbackRevision = 0) => {
+                const fallback = Number.parseInt(fallbackRevision, 10) || 0;
+                const latestClockControlEvent = getLatestLogEvent(
+                    events,
+                    (event) => event?.kind === 'meta' && [
+                        'timeout',
+                        'officialsTimeout',
+                        'manualPause',
+                        'foulPause',
+                        'timeoutResume',
+                        'playResume',
+                        'quarterStart',
+                        'quarterEnd',
+                        'matchStart'
+                    ].includes(event.metaType)
+                );
+                const fromLog = getEventTimestampFromId(latestClockControlEvent?.id);
+                return Math.max(fallback, Number.isFinite(fromLog) ? fromLog : 0);
+            };
+
             const inferLiveTeamIdsFromSession = (session = {}, normalizedGameLog = []) => {
                 const explicitTeamAId = session.teamAId || session.liveGameSnapshot?.teamAId || '';
                 const explicitTeamBId = session.teamBId || session.liveGameSnapshot?.teamBId || '';
@@ -2142,13 +2169,19 @@
                 const remoteDnpUpdatedAt = Number.parseInt(session.dnpUpdatedAt, 10) || 0;
                 const localSessionUpdatedAt = Number(lastLocalSessionUpdatedAtRef.current || 0);
                 const localDnpUpdatedAt = Number(lastLocalDnpUpdatedAtRef.current || 0);
+                const localClockControlRevision = Number(clockControlRevisionRef.current || 0);
                 const remoteLogIds = new Set((normalized.gameLog || []).map((event) => event?.id).filter(Boolean));
+                const remoteClockControlRevision = Math.max(
+                    Number.parseInt(session.clockControlRevision, 10) || 0,
+                    getClockControlRevisionFromLogs(normalized.gameLog || [], 0)
+                );
                 const hasLocalOnlyLogEvents = isGameLiveRef.current
                     && (gameLogRef.current || []).some((event) => event?.id && !remoteLogIds.has(event.id));
                 if (
                     isGameLiveRef.current &&
                     localSessionUpdatedAt > 0 &&
                     !isDifferentLiveSession &&
+                    remoteClockControlRevision <= localClockControlRevision &&
                     (
                         (remoteSessionUpdatedAt > 0 && remoteSessionUpdatedAt < localSessionUpdatedAt)
                         || (hasLocalOnlyLogEvents && (remoteSessionUpdatedAt === 0 || remoteSessionUpdatedAt <= localSessionUpdatedAt))
@@ -2289,6 +2322,10 @@
                 setDnpPlayers(keepLocalDnpState ? (dnpPlayersRef.current || []) : (session.dnpPlayers || []));
                 setAwaitingPeriodStart(Boolean(session.awaitingPeriodStart));
                 sessionRevisionRef.current = Math.max(Number(sessionRevisionRef.current || 0), Number(session.sessionRevision || 0));
+                clockControlRevisionRef.current = Math.max(
+                    Number(clockControlRevisionRef.current || 0),
+                    remoteClockControlRevision
+                );
                 lastLocalSessionUpdatedAtRef.current = Math.max(localSessionUpdatedAt, remoteSessionUpdatedAt);
                 lastLocalDnpUpdatedAtRef.current = Math.max(localDnpUpdatedAt, remoteDnpUpdatedAt);
                 setLineupRevision((prev) => {
@@ -2329,6 +2366,7 @@
                 setLineupRevision(0);
                 lineupRevisionRef.current = 0;
                 sessionRevisionRef.current = 0;
+                clockControlRevisionRef.current = 0;
                 hadLiveSessionRef.current = false;
             };
 
@@ -3358,7 +3396,17 @@
                 if (!latestClockControlEvent?.metaType) return;
 
                 const timelineClockSeconds = parseClockInputToSeconds(latestClockControlEvent.clockRemaining);
-                if (timelineClockSeconds !== null && timelineClockSeconds !== Number(periodClockSeconds || 0)) {
+                const latestClockEventId = String(latestClockControlEvent.id || '');
+                const isNewClockControlEvent = latestClockEventId && latestClockEventId !== String(lastClockControlReconcileEventIdRef.current || '');
+                if (isNewClockControlEvent) {
+                    lastClockControlReconcileEventIdRef.current = latestClockEventId;
+                }
+
+                if (
+                    isNewClockControlEvent
+                    && timelineClockSeconds !== null
+                    && timelineClockSeconds !== Number(periodClockSeconds || 0)
+                ) {
                     setPeriodClockSeconds(timelineClockSeconds);
                 }
 
@@ -4141,11 +4189,16 @@
                 if (isGameLive) {
                     const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
                     const sessionUpdatedAt = Date.now();
+                    const clockControlRevision = Math.max(
+                        Number(clockControlRevisionRef.current || 0),
+                        getClockControlRevisionFromLogs(gameLog, 0)
+                    );
+                    clockControlRevisionRef.current = clockControlRevision;
                     const persistedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now());
                     const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
                     sessionRevisionRef.current = nextSessionRevision;
                     lastLocalSessionUpdatedAtRef.current = sessionUpdatedAt;
-                    const session = { teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
+                    const session = { teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, clockControlRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
                     localStorage.setItem('active_live_session', JSON.stringify(session));
                     hadLiveSessionRef.current = true;
                     setSyncDebug((prev) => ({
@@ -6474,6 +6527,10 @@
                 const adjustedExistingLog = remapCurrentQuarterClockHistory(gameLog, currentQuarter, periodClockSeconds, nextSeconds);
 
                 markLocalSessionUpdated();
+                clockControlRevisionRef.current = Math.max(
+                    Number(clockControlRevisionRef.current || 0),
+                    Date.now()
+                );
                 const recomputedPlayerSeconds = deriveTotalPlayerSecondsFromTimeline(adjustedExistingLog, currentQuarter, nextSeconds);
                 setLivePlayerSeconds(recomputedPlayerSeconds);
 
