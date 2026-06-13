@@ -5650,6 +5650,8 @@
                     });
                     return;
                 }
+                let targetQuarterForLog = backfillTargetQuarter;
+                let targetClockLabelForLog = backfillClockLabel;
                 if (!hasMatchStarted && !canBackfillEndedPeriodStats) {
                     if (periodActionMode === 'startMatch') {
                         handlePeriodAction();
@@ -5662,9 +5664,13 @@
                 if (isAwaitingPeriodStart && !hasCurrentQuarterStarted) {
                     if (periodActionMode === 'startPeriod') {
                         handleStartNextQuarter();
+                        targetQuarterForLog = nextPeriodToStart;
+                        targetClockLabelForLog = formatSecondsAsClock(getPeriodDurationSeconds(nextPeriodToStart));
                         showToast(`${nextPeriodStartLabel} auto-started from stat trigger.`, 'info');
                     } else if (periodActionMode === 'startOvertime') {
                         handleStartOvertime();
+                        targetQuarterForLog = nextPeriodToStart;
+                        targetClockLabelForLog = formatSecondsAsClock(getPeriodDurationSeconds(nextPeriodToStart));
                         showToast(`${nextPeriodStartLabel} auto-started from stat trigger.`, 'info');
                     } else {
                         showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
@@ -5751,8 +5757,8 @@
                                 text: `Auto-removed on-court: ${playerObj?.name || 'Player'} fouled out (5 PF)`,
                                 kind: 'meta',
                                 metaType: 'onCourtRemove',
-                                quarter: backfillTargetQuarter,
-                                clockRemaining: backfillClockLabel,
+                                quarter: targetQuarterForLog,
+                                clockRemaining: targetClockLabelForLog,
                                 isTeamA,
                                 playerId
                             };
@@ -5819,8 +5825,8 @@
                     time: getWallClockTime(),
                     text: logWithTag,
                     kind: 'stat',
-                    quarter: backfillTargetQuarter,
-                    clockRemaining: backfillClockLabel,
+                    quarter: targetQuarterForLog,
+                    clockRemaining: targetClockLabelForLog,
                     isTeamA,
                     actionId: activeAction.id,
                     countsTeamFoul,
@@ -5849,8 +5855,8 @@
                         text: `Official stoppage: Foul on ${playerObj?.name || 'player'}`,
                         kind: 'meta',
                         metaType: 'foulPause',
-                        quarter: backfillTargetQuarter,
-                        clockRemaining: backfillClockLabel,
+                        quarter: targetQuarterForLog,
+                        clockRemaining: targetClockLabelForLog,
                         isTeamA
                     };
                     localFoulPauseTriggerIdRef.current = foulPauseEvent.id;
@@ -13461,10 +13467,10 @@
                     )}
 
                     {showSubstitutionModal && subTargetPlayer && (
-                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-y-auto">
+                        <div className="fixed inset-0 z-50 bg-black/75 flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-hidden">
                                 <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-1"><Icons.ArrowRightLeft /> Substitute Athlete</h3>
-                                <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
+                                <div className="space-y-1 max-h-[min(60vh,320px)] overflow-y-auto pr-1" style={{ scrollbarGutter: 'stable' }}>
                                     {(() => {
                                         const benchIds = (subTargetPlayer.team === 'A' ? teamABench : teamBBench)
                                             .filter((benchId) => !dnpPlayers.includes(benchId));
@@ -13528,10 +13534,10 @@
                     )}
 
                     {showAddFromBenchModal && addFromBenchTeam && (
-                        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-y-auto">
+                        <div className="fixed inset-0 z-50 bg-black/75 flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-hidden">
                                 <h3 className="text-sm font-bold text-white mb-3">Add Player To On-Court</h3>
-                                <div className="space-y-1 max-h-[320px] overflow-y-auto pr-1">
+                                <div className="space-y-1 max-h-[min(60vh,320px)] overflow-y-auto pr-1" style={{ scrollbarGutter: 'stable' }}>
                                     {(() => {
                                         const isTeamA = addFromBenchTeam === 'A';
                                         const lineupIds = isTeamA ? teamALineup : teamBLineup;
