@@ -190,6 +190,7 @@
             const [liveBoxscoreTab, setLiveBoxscoreTab] = useState('home');
             const [pendingPeriodActionMode, setPendingPeriodActionMode] = useState(null);
             const [isPlayPaused, setIsPlayPaused] = useState(false);
+            const [isEndingGame, setIsEndingGame] = useState(false);
             const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
             const [pendingSharedGameId, setPendingSharedGameId] = useState(null);
             const [pendingSharedHistoryDetailTab, setPendingSharedHistoryDetailTab] = useState('');
@@ -232,6 +233,9 @@
             const flushLiveEventsInFlightRef = useRef(false);
             const pendingActiveSessionSyncRef = useRef(null);
             const sessionSyncRetryTimerRef = useRef(null);
+            const socketReconnectTimerRef = useRef(null);
+            const socketReconnectAttemptsRef = useRef(0);
+            const socketManualCloseRef = useRef(false);
             const flushActiveSessionSyncInFlightRef = useRef(false);
             const processedGameLogIdsRef = useRef(new Set());
             const remoteEventIdsRef = useRef(new Set());
@@ -302,8 +306,10 @@
             const pendingModalSoftResumeRef = useRef(false);
             const liveGameplayControlSnapshotRef = useRef(null);
             const lastClockControlReconcileEventIdRef = useRef('');
+            const lastPersistedQuarterEndIdRef = useRef('');
             const localFoulPauseTriggerIdRef = useRef('');
             const nonPrimaryResumeConfirmRef = useRef(false);
+            const pendingTechnicalFoulReasonRef = useRef('');
             const adminFocusRevisionRef = useRef(0);
             const lastRolePresenceEmitAtRef = useRef(0);
             const adminMissingToastAtRef = useRef(0);
@@ -314,6 +320,7 @@
 
             // Modal Alert System for 4th and 5th personal fouls
             const [foulAlert, setFoulAlert] = useState(null);
+            const [reasonInput, setReasonInput] = useState(null);
 
             const [confirmDialog, setConfirmDialog] = useState(null);
             const [isAdminSupervisorPresent, setIsAdminSupervisorPresent] = useState(false);
@@ -721,7 +728,7 @@
                     const shouldAutoTriggerStartAction = periodActionMode === 'startMatch'
                         || periodActionMode === 'startPeriod'
                         || periodActionMode === 'startOvertime';
-                    if (shouldAutoTriggerStartAction) {
+                    if (shouldAutoTriggerStartAction && !canBackfillEndedPeriodStats) {
                         handlePeriodAction();
                     }
                 }
@@ -864,11 +871,20 @@
 
                 const event = record?.event;
                 if (!event || typeof event !== 'object' || !event.id) return;
-
                 const eventSessionId = String(event.sessionInstanceId || '').trim();
+
+                // Self-heal hydration races: if events arrive before local session context,
+                // fetch the authoritative active session. Do not drop the event entirely,
+                // because this path is the normal cold-start case on the second device.
+                if (!isGameLiveRef.current && !hadLiveSessionRef.current) {
+                    pullActiveSessionSnapshot();
+                    if (!eventSessionId) return;
+                }
+
                 const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
                 const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
-                if (localSessionId && (!eventSessionId || eventSessionId !== localSessionId)) {
+                if (localSessionId && eventSessionId && eventSessionId !== localSessionId) {
+                    pullActiveSessionSnapshot();
                     return;
                 }
                 if (eventSessionId && eventSessionId === String(tombstone.sessionInstanceId || '').trim()) {
@@ -940,7 +956,7 @@
                         setIsPlayPaused(false);
                         // Only restart the clock if the resume event itself reports remaining time.
                         const resumeClockSecs = parseClockInputToSeconds(event.clockRemaining);
-                        if (resumeClockSecs === null || resumeClockSecs > 0) {
+                        if (resumeClockSecs !== null && resumeClockSecs > 0) {
                             setIsPeriodClockRunning(true);
                         }
                     }
@@ -969,11 +985,6 @@
             };
 
             const fetchMissingLiveEvents = async () => {
-                const hasPendingPut = pendingActiveSessionSyncRef.current?.mode === 'put';
-                if (!isGameLiveRef.current && !hadLiveSessionRef.current && !hasPendingPut) {
-                    return;
-                }
-
                 try {
                     const payload = await apiRequest(`/api/live-events?sinceSeq=${lastLiveSeqRef.current}`);
                     const events = Array.isArray(payload?.events) ? payload.events : [];
@@ -984,6 +995,21 @@
                 } catch (e) {}
             };
 
+            const pullActiveSessionSnapshot = async ({ apply = true } = {}) => {
+                try {
+                    const payload = await apiRequest('/api/active-session');
+                    if (payload?.session) {
+                        if (apply) {
+                            applyRemoteLiveSession(payload.session);
+                        }
+                        return payload.session;
+                    }
+                    return null;
+                } catch (e) {
+                    return undefined;
+                }
+            };
+
             const queueActiveSessionSync = (mode, session = null, options = {}) => {
                 const nextRequest = {
                     id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -992,7 +1018,8 @@
                     ...(mode === 'put' ? { session } : {}),
                     ...(mode === 'delete' && options?.clearLiveEvents ? { clearLiveEvents: true } : {}),
                     ...(mode === 'delete' && options?.discardedSessionInstanceId ? { discardedSessionInstanceId: options.discardedSessionInstanceId } : {}),
-                    ...(mode === 'delete' && Number(options?.discardedSessionCreatedAt || 0) > 0 ? { discardedSessionCreatedAt: Number(options.discardedSessionCreatedAt) } : {})
+                    ...(mode === 'delete' && Number(options?.discardedSessionCreatedAt || 0) > 0 ? { discardedSessionCreatedAt: Number(options.discardedSessionCreatedAt) } : {}),
+                    ...(mode === 'delete' && options?.terminationStatus ? { terminationStatus: String(options.terminationStatus) } : {})
                 };
                 pendingActiveSessionSyncRef.current = nextRequest;
                 persistPendingActiveSessionSync();
@@ -1017,15 +1044,65 @@
                 if (!navigator.onLine) return;
                 if (!pendingActiveSessionSyncRef.current) return;
 
+                const MAX_PENDING_SESSION_PUT_AGE_MS = 2 * 60 * 1000;
+                const isPendingPutFresh = (request) => {
+                    if (!request || request.mode !== 'put') return true;
+                    const session = request.session || {};
+                    const touchedAt = Number.parseInt(session.sessionUpdatedAt, 10)
+                        || Number.parseInt(session.sessionCreatedAt, 10)
+                        || 0;
+                    if (touchedAt <= 0) return false;
+                    return (Date.now() - touchedAt) <= MAX_PENDING_SESSION_PUT_AGE_MS;
+                };
+
                 flushActiveSessionSyncInFlightRef.current = true;
                 try {
                     while (pendingActiveSessionSyncRef.current) {
                         const nextRequest = pendingActiveSessionSyncRef.current;
                         if (nextRequest.mode === 'put') {
-                            await apiRequest('/api/active-session', {
+                            const queuedSessionId = getLiveSessionIdentity(nextRequest.session);
+                            const liveSessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                            if (!queuedSessionId || !liveSessionId || queuedSessionId !== liveSessionId) {
+                                pendingActiveSessionSyncRef.current = null;
+                                persistPendingActiveSessionSync();
+                                continue;
+                            }
+                            if (!isPendingPutFresh(nextRequest)) {
+                                pendingActiveSessionSyncRef.current = null;
+                                persistPendingActiveSessionSync();
+                                continue;
+                            }
+                        } else if (nextRequest.mode === 'delete') {
+                            const currentLiveSessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                            const queuedDeleteSessionId = String(nextRequest?.discardedSessionInstanceId || '').trim();
+
+                            if (!queuedDeleteSessionId) {
+                                pendingActiveSessionSyncRef.current = null;
+                                persistPendingActiveSessionSync();
+                                continue;
+                            }
+
+                            if (currentLiveSessionId && queuedDeleteSessionId !== currentLiveSessionId) {
+                                pendingActiveSessionSyncRef.current = null;
+                                persistPendingActiveSessionSync();
+                                continue;
+                            }
+                        }
+                        if (nextRequest.mode === 'put') {
+                            const putResult = await apiRequest('/api/active-session', {
                                 method: 'PUT',
                                 body: JSON.stringify({ session: nextRequest.session, sourceClientId: nextRequest.sourceClientId })
                             });
+                            if (putResult?.applied === false) {
+                                pendingActiveSessionSyncRef.current = null;
+                                persistPendingActiveSessionSync();
+                                setSyncDebug((prev) => ({
+                                    ...prev,
+                                    lastPersist: `REJECTED ${new Date().toLocaleTimeString()}`,
+                                    persistError: 'Server rejected stale live session update.'
+                                }));
+                                continue;
+                            }
                         } else {
                             await apiRequest('/api/active-session', {
                                 method: 'DELETE',
@@ -1033,7 +1110,8 @@
                                     sourceClientId: nextRequest.sourceClientId,
                                     clearLiveEvents: Boolean(nextRequest.clearLiveEvents),
                                     discardedSessionInstanceId: String(nextRequest.discardedSessionInstanceId || ''),
-                                    discardedSessionCreatedAt: Number(nextRequest.discardedSessionCreatedAt || 0)
+                                    discardedSessionCreatedAt: Number(nextRequest.discardedSessionCreatedAt || 0),
+                                    terminationStatus: String(nextRequest.terminationStatus || 'discarded')
                                 })
                             });
                         }
@@ -1080,6 +1158,11 @@
                             method: 'POST',
                             body: JSON.stringify({ event: nextEvent, sourceClientId: syncClientIdRef.current })
                         });
+                        if (response?.ignored) {
+                            // Server has not accepted/created the active session yet.
+                            // Keep this event queued and retry on next heartbeat/open.
+                            break;
+                        }
                         setLastLiveSeq(response?.seq);
                         pendingLiveEventsRef.current.shift();
                         persistPendingLiveEvents();
@@ -1094,7 +1177,12 @@
             const enqueueLiveEvent = (event) => {
                 if (!event || typeof event !== 'object' || !event.id) return;
                 if (pendingLiveEventsRef.current.some((queued) => queued.id === event.id)) return;
-                const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                const localSessionId = String(
+                    liveSessionInstanceIdRef.current
+                    || liveSessionInstanceId
+                    || event.sessionInstanceId
+                    || ''
+                ).trim();
                 const eventWithSession = localSessionId
                     ? { ...event, sessionInstanceId: localSessionId }
                     : event;
@@ -2250,68 +2338,41 @@
 
             const applyRemoteLiveSession = (session) => {
                 if (!session) return;
-                if (isLiveSessionStale(session)) return;
-                if (isLiveSessionOlderThanLatestEndedGame(session, latestEndedGameTimestampRef.current)) return;
+                // Accept remote session payloads even when local stale heuristics disagree.
+                // Overly strict client-side age checks can block legitimate cross-device sync.
+                const hasRemoteSessionIdentity = Boolean(getLiveSessionIdentity(session));
+                if (isLiveSessionStale(session) && !hasRemoteSessionIdentity) return;
 
                 const remoteSessionInstanceId = getLiveSessionIdentity(session);
                 if (!remoteSessionInstanceId) return;
+                const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
+                const tombstoneSessionId = String(tombstone.sessionInstanceId || '').trim();
+                const tombstoneDiscardedAt = Number(tombstone.discardedAt || 0);
+                if (tombstoneDiscardedAt > 0 && tombstoneSessionId && remoteSessionInstanceId === tombstoneSessionId) {
+                    // Ignore stale server/session echoes for a session we just ended/discarded.
+                    // A fresh pull will reconcile with the authoritative active-session value.
+                    pullActiveSessionSnapshot();
+                    return;
+                }
                 const localSessionInstanceId = String(liveSessionInstanceIdRef.current || '').trim();
                 const remoteSessionCreatedAt = Number.parseInt(session.sessionCreatedAt, 10) || 0;
                 const localSessionCreatedAt = Number(liveSessionCreatedAtRef.current || 0);
-                const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
-                const discardedSessionId = String(tombstone.sessionInstanceId || '').trim();
-                const discardedAt = Number(tombstone.discardedAt || 0);
                 const isDifferentLiveSession = Boolean(
                     isGameLiveRef.current
                     && localSessionInstanceId
                     && remoteSessionInstanceId
                     && remoteSessionInstanceId !== localSessionInstanceId
                 );
-                if (isGameLiveRef.current && localSessionInstanceId) {
-                    if (!remoteSessionInstanceId || remoteSessionInstanceId !== localSessionInstanceId) {
-                        const remoteSessionIsClearlyNewer = remoteSessionCreatedAt > localSessionCreatedAt;
-                        if (!remoteSessionIsClearlyNewer) {
-                            return;
-                        }
-                    }
-                }
-                if (remoteSessionInstanceId && discardedSessionId && remoteSessionInstanceId === discardedSessionId) {
-                    if (remoteSessionCreatedAt === 0 || remoteSessionCreatedAt <= discardedAt) {
-                        return;
-                    }
-                }
-                if (!remoteSessionInstanceId && discardedAt > 0) {
-                    const remoteSessionUpdatedAt = Number.parseInt(session.sessionUpdatedAt, 10) || 0;
-                    if (remoteSessionUpdatedAt > 0 && remoteSessionUpdatedAt <= discardedAt) {
-                        return;
-                    }
-                }
 
                 const normalized = normalizeLiveSessionEvents(session.gameLog || [], session.loggedHistory || []);
                 const remoteSessionUpdatedAt = Number.parseInt(session.sessionUpdatedAt, 10) || 0;
                 const remoteDnpUpdatedAt = Number.parseInt(session.dnpUpdatedAt, 10) || 0;
                 const localSessionUpdatedAt = Number(lastLocalSessionUpdatedAtRef.current || 0);
                 const localDnpUpdatedAt = Number(lastLocalDnpUpdatedAtRef.current || 0);
-                const localClockControlRevision = Number(clockControlRevisionRef.current || 0);
-                const remoteLogIds = new Set((normalized.gameLog || []).map((event) => event?.id).filter(Boolean));
                 const remoteClockControlRevision = Math.max(
                     Number.parseInt(session.clockControlRevision, 10) || 0,
                     getClockControlRevisionFromLogs(normalized.gameLog || [], 0)
                 );
-                const hasLocalOnlyLogEvents = isGameLiveRef.current
-                    && (gameLogRef.current || []).some((event) => event?.id && !remoteLogIds.has(event.id));
-                if (
-                    isGameLiveRef.current &&
-                    localSessionUpdatedAt > 0 &&
-                    !isDifferentLiveSession &&
-                    remoteClockControlRevision <= localClockControlRevision &&
-                    (
-                        (remoteSessionUpdatedAt > 0 && remoteSessionUpdatedAt < localSessionUpdatedAt)
-                        || (hasLocalOnlyLogEvents && (remoteSessionUpdatedAt === 0 || remoteSessionUpdatedAt <= localSessionUpdatedAt))
-                    )
-                ) {
-                    return;
-                }
 
                 if (isDifferentLiveSession) {
                     pendingLiveEventsRef.current = [];
@@ -2361,7 +2422,52 @@
                 const hasAdminFocusEvent = (effectiveGameLog || []).some((event) => event?.kind === 'meta' && event?.metaType === 'adminFocusSet');
                 const pauseActiveFromLog = isTimeoutCurrentlyActive(effectiveGameLog);
                 const hasActiveLocalResumeLock = Date.now() < Number(localResumeLockUntilRef.current || 0);
-                const remoteClockSeconds = Math.max(0, Number.parseInt(session.periodClockSeconds, 10) || getPeriodDurationSeconds(replayed?.currentQuarter || session.currentQuarter || 1));
+                const effectiveQuarter = Number.parseInt(replayed?.currentQuarter, 10)
+                    || Number.parseInt(session.currentQuarter, 10)
+                    || 1;
+                const latestPeriodBoundaryEvent = getLatestLogEvent(
+                    effectiveGameLog,
+                    (event) => event?.kind === 'meta' && [
+                        'quarterStart',
+                        'quarterEnd',
+                        'quarterClockExpired'
+                    ].includes(event?.metaType)
+                );
+                const latestBoundaryQuarter = Number.parseInt(latestPeriodBoundaryEvent?.quarter, 10) || 0;
+                const shouldPinQuarterToBoundary = ['quarterEnd', 'quarterClockExpired'].includes(latestPeriodBoundaryEvent?.metaType);
+                const resolvedRemoteQuarter = shouldPinQuarterToBoundary && latestBoundaryQuarter > 0
+                    ? latestBoundaryQuarter
+                    : effectiveQuarter;
+                const latestQuarterClockControlEvent = getLatestLogEvent(
+                    effectiveGameLog,
+                    (event) => event?.kind === 'meta'
+                        && getQuarterFromEvent(event) === resolvedRemoteQuarter
+                        && [
+                            'matchStart',
+                            'quarterStart',
+                            'timeout',
+                            'officialsTimeout',
+                            'manualPause',
+                            'foulPause',
+                            'timeoutResume',
+                            'playResume',
+                            'quarterClockExpired',
+                            'quarterEnd',
+                            'clockAdjust'
+                        ].includes(event?.metaType)
+                );
+                const parsedRemoteClockSeconds = Number.parseInt(session.periodClockSeconds, 10);
+                const parsedClockFromLatestQuarterControl = parseClockInputToSeconds(latestQuarterClockControlEvent?.clockRemaining);
+                const fallbackClockSeconds = getPeriodDurationSeconds(resolvedRemoteQuarter);
+                const shouldForceExpiredQuarterClock = ['quarterClockExpired', 'quarterEnd'].includes(latestQuarterClockControlEvent?.metaType);
+                const remoteClockSeconds = shouldForceExpiredQuarterClock
+                    ? 0
+                    : Math.max(
+                        0,
+                        Number.isFinite(parsedRemoteClockSeconds)
+                            ? parsedRemoteClockSeconds
+                            : (parsedClockFromLatestQuarterControl !== null ? parsedClockFromLatestQuarterControl : fallbackClockSeconds)
+                    );
                 const remoteAwaitingPeriodStart = Boolean(session.awaitingPeriodStart);
                 const remoteAwaitingOvertimeDecision = Boolean(session.awaitingOvertimeDecision);
                 const shouldForceRunningDuringResumeLock = hasActiveLocalResumeLock
@@ -2409,7 +2515,7 @@
                 setLiveSessionCreatedAt(remoteSessionCreatedAt);
                 setTeamAScore(replayed?.teamAScore || session.teamAScore || 0);
                 setTeamBScore(replayed?.teamBScore || session.teamBScore || 0);
-                setCurrentQuarter(replayed?.currentQuarter || session.currentQuarter || 1);
+                setCurrentQuarter(resolvedRemoteQuarter);
                 setTeamALineup(teamARotation.lineup);
                 setTeamABench(teamARotation.bench);
                 setTeamBLineup(teamBRotation.lineup);
@@ -2461,36 +2567,9 @@
             };
 
             const clearRemoteLiveSession = () => {
-                suppressLiveSessionSyncRef.current = true;
-                lastRemoteGameLogIdsRef.current = new Set();
-                setIsGameLive(false);
-                setTeamAId('');
-                setTeamBId('');
-                setLiveSessionInstanceId('');
-                setLiveSessionCreatedAt(0);
-                setTeamAScore(0);
-                setTeamBScore(0);
-                setCurrentQuarter(1);
-                setPeriodClockSeconds(getPeriodDurationSeconds(1));
-                setIsPeriodClockRunning(false);
-                setTeamALineup([]);
-                setTeamABench([]);
-                setTeamBLineup([]);
-                setTeamBBench([]);
-                setLiveStats({});
-                setLivePlayerSeconds({});
-                setLiveGameSnapshot(null);
-                setPeriodSnapshots([]);
-                setGameLog([]);
-                setLoggedHistory([]);
-                setPlayedPlayers([]);
-                setDnpPlayers([]);
-                setAwaitingPeriodStart(false);
-                setLineupRevision(0);
-                lineupRevisionRef.current = 0;
-                sessionRevisionRef.current = 0;
-                clockControlRevisionRef.current = 0;
-                hadLiveSessionRef.current = false;
+                // Remote discard/end must also purge local cache so refresh cannot
+                // rehydrate a stale live session and resurrect the game.
+                clearLocalLiveSessionArtifacts({ keepTeamSelection: false });
             };
 
             const customFoulActions = [
@@ -2569,8 +2648,9 @@
             };
             const isTieGame = teamAScore === teamBScore;
             const canStartOvertime = isTieGame;
+            const hasLiveSessionIdentity = Boolean(String(liveSessionInstanceId || '').trim());
             const homepageGameSummaries = [
-                ...(isGameLive && liveHomeTeam && liveAwayTeam
+                ...(isGameLive && hasLiveSessionIdentity && liveHomeTeam && liveAwayTeam
                     ? [{
                         id: `live_${teamAId}_${teamBId}`,
                         status: 'LIVE',
@@ -3069,15 +3149,20 @@
                 && !awaitingOvertimeDecision;
             const hasQuarterEndedFromLog = latestPeriodMetaEvent?.metaType === 'quarterEnd'
                 && latestPeriodMetaQuarter === currentQuarter;
+            const hasQuarterClockExpiredFromLog = currentLiveGameLog.some(
+                (event) => event?.kind === 'meta'
+                    && event?.metaType === 'quarterClockExpired'
+                    && getQuarterFromEvent(event) === currentQuarter
+            );
             const hasEndedPeriodBackfillWindow = isGameLive
                 && !awaitingOvertimeDecision
-                && !isPeriodClockRunning
                 && (
-                    (hasCurrentQuarterStarted && Number(periodClockSeconds || 0) <= 0)
-                    || hasQuarterEndedFromLog
+                    (hasQuarterClockExpiredFromLog && Number(periodClockSeconds || 0) <= 0)
+                    ||
+                    hasQuarterEndedFromLog
                     || hasFinalizedPreviousPeriod
                 );
-            const isBackfillMode = hasEndedPeriodBackfillWindow;
+            const isBackfillMode = hasEndedPeriodBackfillWindow && !isPeriodClockRunning;
             const canBackfillEndedPeriodStats = isBackfillMode;
             const backfillTargetQuarter = (canBackfillEndedPeriodStats && hasFinalizedPreviousPeriod)
                 ? ((Number(latestPeriodMetaQuarter || 0) > 0)
@@ -3301,10 +3386,32 @@
             const awayCanAddOnCourt = isGameLive && teamBLineup.length < 5 && hasAvailableBenchPlayer(false);
 
             const handlePeriodClockExpired = () => {
+                markLocalSessionUpdated();
                 setPeriodClockSeconds(0);
                 setIsPeriodClockRunning(false);
 
                 const periodLabel = getPeriodLabel(currentQuarter);
+                setGameLog((prev) => {
+                    const alreadyLoggedForQuarter = (prev || []).some(
+                        (event) => event?.kind === 'meta'
+                            && event?.metaType === 'quarterClockExpired'
+                            && getQuarterFromEvent(event) === currentQuarter
+                    );
+                    if (alreadyLoggedForQuarter) return prev;
+
+                    const quarterClockExpiredEvent = {
+                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: `${periodLabel} reached 00:00`,
+                        kind: 'meta',
+                        metaType: 'quarterClockExpired',
+                        quarter: currentQuarter,
+                        clockRemaining: '00:00',
+                        hiddenFromLog: true
+                    };
+
+                    return [quarterClockExpiredEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES);
+                });
                 showToast(`${periodLabel} reached 00:00. Press End ${periodLabel} to finalize period stats.`, 'info');
             };
 
@@ -3312,8 +3419,13 @@
                 if (!isGameLive) return;
                 if (suppressPeriodAutoStopRef.current) return;
 
-                const shouldForceZeroClock = awaitingOvertimeDecision || (isAwaitingPeriodStart && hasCurrentQuarterStarted);
-                const hasInactivePeriodState = !hasMatchStarted || isAwaitingPeriodStart || awaitingOvertimeDecision;
+                const shouldForceZeroClock = hasQuarterClockExpiredFromLog
+                    || awaitingOvertimeDecision
+                    || (isAwaitingPeriodStart && hasCurrentQuarterStarted);
+                const hasInactivePeriodState = !hasMatchStarted
+                    || isAwaitingPeriodStart
+                    || awaitingOvertimeDecision
+                    || hasQuarterClockExpiredFromLog;
                 if (!hasInactivePeriodState) return;
 
                 if (isPlayPaused) {
@@ -3326,7 +3438,7 @@
                 if (shouldForceZeroClock && periodClockSeconds !== 0) {
                     setPeriodClockSeconds(0);
                 }
-            }, [isGameLive, hasMatchStarted, hasCurrentQuarterStarted, isAwaitingPeriodStart, awaitingOvertimeDecision, isPeriodClockRunning, periodClockSeconds, isPlayPaused]);
+            }, [isGameLive, hasMatchStarted, hasCurrentQuarterStarted, isAwaitingPeriodStart, awaitingOvertimeDecision, hasQuarterClockExpiredFromLog, isPeriodClockRunning, periodClockSeconds, isPlayPaused]);
 
             useEffect(() => {
                 if (!isGameLive) return;
@@ -3485,6 +3597,7 @@
                 if (!isGameLive) return;
                 if (Date.now() >= Number(localResumeLockUntilRef.current || 0)) return;
                 if (timeoutIsActive) return;
+                if (hasQuarterClockExpiredFromLog) return;
                 if (isAwaitingPeriodStart || awaitingOvertimeDecision) return;
                 if (Number(periodClockSeconds) <= 0) return;
                 if (isPeriodClockRunning) return;
@@ -3496,6 +3609,7 @@
             }, [
                 isGameLive,
                 timeoutIsActive,
+                hasQuarterClockExpiredFromLog,
                 isAwaitingPeriodStart,
                 awaitingOvertimeDecision,
                 periodClockSeconds,
@@ -3508,12 +3622,16 @@
                 const latestClockControlEvent = getLatestLogEvent(
                     currentLiveGameLog,
                     (event) => event?.kind === 'meta' && [
+                        'matchStart',
+                        'quarterStart',
                         'timeout',
                         'officialsTimeout',
                         'manualPause',
                         'foulPause',
                         'timeoutResume',
-                        'playResume'
+                        'playResume',
+                        'quarterClockExpired',
+                        'quarterEnd'
                     ].includes(event.metaType)
                 );
 
@@ -3522,16 +3640,43 @@
                 const timelineClockSeconds = parseClockInputToSeconds(latestClockControlEvent.clockRemaining);
                 const latestClockEventId = String(latestClockControlEvent.id || '');
                 const isNewClockControlEvent = latestClockEventId && latestClockEventId !== String(lastClockControlReconcileEventIdRef.current || '');
+                const isStartBoundaryEvent = ['matchStart', 'quarterStart'].includes(latestClockControlEvent.metaType);
                 if (isNewClockControlEvent) {
                     lastClockControlReconcileEventIdRef.current = latestClockEventId;
                 }
 
                 if (
                     isNewClockControlEvent
+                    && !isStartBoundaryEvent
                     && timelineClockSeconds !== null
                     && timelineClockSeconds !== Number(periodClockSeconds || 0)
                 ) {
                     setPeriodClockSeconds(timelineClockSeconds);
+                }
+
+                if (['quarterClockExpired', 'quarterEnd'].includes(latestClockControlEvent.metaType)) {
+                    if (periodClockSeconds !== 0) {
+                        setPeriodClockSeconds(0);
+                    }
+                    if (isPeriodClockRunning) {
+                        setIsPeriodClockRunning(false);
+                    }
+                    return;
+                }
+
+                if (['matchStart', 'quarterStart'].includes(latestClockControlEvent.metaType)) {
+                    if (!isNewClockControlEvent) {
+                        return;
+                    }
+                    if (isPlayPaused) {
+                        setIsPlayPaused(false);
+                    }
+                    if (!isAwaitingPeriodStart && !awaitingOvertimeDecision && Number(periodClockSeconds || 0) > 0 && !isPeriodClockRunning) {
+                        suppressPeriodAutoStopRef.current = true;
+                        suppressTimeoutAutoStopRef.current = true;
+                        setIsPeriodClockRunning(true);
+                    }
+                    return;
                 }
 
                 const isPauseTimelineEvent = [
@@ -3552,11 +3697,12 @@
                 }
 
                 if (localSoftPauseActive) return;
+                if (hasQuarterClockExpiredFromLog) return;
                 if (isAwaitingPeriodStart || awaitingOvertimeDecision) return;
 
-                const hasTimeRemaining = timelineClockSeconds === null
-                    ? Number(periodClockSeconds || 0) > 0
-                    : timelineClockSeconds > 0;
+                // Do not auto-resume from stale timeline clock values.
+                // Once local countdown reaches 00:00, only a new start/resume action should restart it.
+                const hasTimeRemaining = Number(periodClockSeconds || 0) > 0;
 
                 if (isPlayPaused) {
                     setIsPlayPaused(false);
@@ -3570,6 +3716,7 @@
                 isGameLive,
                 currentLiveGameLog,
                 localSoftPauseActive,
+                hasQuarterClockExpiredFromLog,
                 isAwaitingPeriodStart,
                 awaitingOvertimeDecision,
                 periodClockSeconds,
@@ -3584,7 +3731,11 @@
                     suppressPeriodAutoStopRef.current = false;
                 }
                 if (pendingPeriodActionMode) {
-                    setPendingPeriodActionMode(null);
+                    const pendingIsStartTransition = pendingPeriodActionMode === 'pauseGame';
+                    const startTransitionSettled = !isAwaitingPeriodStart && hasCurrentQuarterStarted;
+                    if (!pendingIsStartTransition || startTransitionSettled) {
+                        setPendingPeriodActionMode(null);
+                    }
                 }
 
                 const timerId = window.setInterval(() => {
@@ -3598,7 +3749,18 @@
                 }, 1000);
 
                 return () => window.clearInterval(timerId);
-            }, [isGameLive, isPeriodClockRunning, currentQuarter, teamAScore, teamBScore, teamALineup, teamBLineup, pendingPeriodActionMode]);
+            }, [
+                isGameLive,
+                isPeriodClockRunning,
+                currentQuarter,
+                teamAScore,
+                teamBScore,
+                teamALineup,
+                teamBLineup,
+                pendingPeriodActionMode,
+                isAwaitingPeriodStart,
+                hasCurrentQuarterStarted
+            ]);
 
             useEffect(() => {
                 if (!isGameLive) return;
@@ -3645,7 +3807,10 @@
                 setHistoryWriteupInput(selectedHistoryGame?.gameWriteup || '');
             }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.gameWriteup : '']);
 
+            const AUTO_GENERATE_POTG_WRITEUP = false;
+
             useEffect(() => {
+                if (!AUTO_GENERATE_POTG_WRITEUP) return;
                 if (activeTab !== 'history' || historyDetailTab !== 'potg') return;
                 if (!selectedHistoryGame) return;
                 if (String(selectedHistoryGame.potgWriteup || '').trim()) return;
@@ -3852,10 +4017,29 @@
                     applyRemoteLiveSession(session);
                 };
 
+                const readBootstrapLocalCachedSession = () => {
+                    try {
+                        const activeSession = localStorage.getItem('active_live_session');
+                        if (!activeSession) return null;
+                        const parsedSession = JSON.parse(activeSession);
+                        if (!parsedSession || typeof parsedSession !== 'object') return null;
+                        return parsedSession;
+                    } catch (e) {
+                        return null;
+                    }
+                };
+
+                const bootstrapLocalCachedSession = readBootstrapLocalCachedSession();
+                const bootstrapLocalSessionId = getLiveSessionIdentity(bootstrapLocalCachedSession);
+
                 try {
                     const savedPending = localStorage.getItem(LIVE_EVENTS_QUEUE_KEY);
                     const parsedPending = savedPending ? JSON.parse(savedPending) : [];
-                    pendingLiveEventsRef.current = Array.isArray(parsedPending) ? parsedPending : [];
+                    const normalizedPending = Array.isArray(parsedPending) ? parsedPending : [];
+                    pendingLiveEventsRef.current = bootstrapLocalSessionId
+                        ? normalizedPending.filter((event) => String(event?.sessionInstanceId || '').trim() === bootstrapLocalSessionId)
+                        : [];
+                    persistPendingLiveEvents();
                 } catch (e) {
                     pendingLiveEventsRef.current = [];
                 }
@@ -3863,7 +4047,21 @@
                 try {
                     const savedSessionSync = localStorage.getItem(ACTIVE_SESSION_SYNC_KEY);
                     const parsedSessionSync = savedSessionSync ? JSON.parse(savedSessionSync) : null;
-                    pendingActiveSessionSyncRef.current = parsedSessionSync && typeof parsedSessionSync === 'object' ? parsedSessionSync : null;
+                    const normalizedSessionSync = parsedSessionSync && typeof parsedSessionSync === 'object' ? parsedSessionSync : null;
+                    if (normalizedSessionSync?.mode === 'put') {
+                        const queuedSessionId = getLiveSessionIdentity(normalizedSessionSync?.session);
+                        pendingActiveSessionSyncRef.current = (queuedSessionId && queuedSessionId === bootstrapLocalSessionId)
+                            ? normalizedSessionSync
+                            : null;
+                    } else if (normalizedSessionSync?.mode === 'delete') {
+                        const queuedDeleteSessionId = String(normalizedSessionSync?.discardedSessionInstanceId || '').trim();
+                        pendingActiveSessionSyncRef.current = (queuedDeleteSessionId && bootstrapLocalSessionId && queuedDeleteSessionId === bootstrapLocalSessionId)
+                            ? normalizedSessionSync
+                            : null;
+                    } else {
+                        pendingActiveSessionSyncRef.current = normalizedSessionSync;
+                    }
+                    persistPendingActiveSessionSync();
                 } catch (e) {
                     pendingActiveSessionSyncRef.current = null;
                 }
@@ -3891,6 +4089,9 @@
                 const loadActiveSession = async () => {
                     const purgeStaleLocalSessionArtifacts = () => {
                         localStorage.removeItem('active_live_session');
+                        localStorage.removeItem(LIVE_EVENTS_QUEUE_KEY);
+                        localStorage.removeItem(ACTIVE_SESSION_SYNC_KEY);
+                        localStorage.removeItem(LIVE_EVENTS_LAST_SEQ_KEY);
                         pendingActiveSessionSyncRef.current = null;
                         persistPendingActiveSessionSync();
                         pendingLiveEventsRef.current = [];
@@ -3899,81 +4100,66 @@
 
                     const readLocalCachedSession = () => {
                         try {
-                            const activeSession = localStorage.getItem('active_live_session');
-                            if (!activeSession) return null;
-                            const parsedSession = JSON.parse(activeSession);
-                            if (!parsedSession || typeof parsedSession !== 'object') return null;
-                            return parsedSession;
-                        } catch (e) {
-                            return null;
-                        }
+                            const raw = localStorage.getItem('active_live_session');
+                            if (!raw) return null;
+                            const parsed = JSON.parse(raw);
+                            return parsed && typeof parsed === 'object' ? parsed : null;
+                        } catch (e) { return null; }
                     };
 
                     const localCachedSession = readLocalCachedSession();
                     const localCachedSessionId = getLiveSessionIdentity(localCachedSession);
+                    const isLocalSessionTombstoned = () => {
+                        if (!localCachedSessionId) return false;
+                        const tombstone = discardedLiveSessionTombstoneRef.current || {};
+                        const tid = String(tombstone.sessionInstanceId || '').trim();
+                        const tts = Number(tombstone.discardedAt || 0);
+                        if (!tid || tts <= 0 || tid !== localCachedSessionId) return false;
+                        const touched = getLiveSessionLastTouchedAt(localCachedSession);
+                        return touched <= 0 || touched <= tts;
+                    };
+                    const canHydrateLocalCachedSession = () => (
+                        Boolean(localCachedSession)
+                        && Boolean(localCachedSessionId)
+                        && !isLocalSessionTombstoned()
+                        && !isLiveSessionStale(localCachedSession)
+                        && !isLiveSessionOlderThanLatestEndedGame(localCachedSession, latestEndedGameTimestampRef.current)
+                    );
+                    const isRecentLocalCachedSession = () => {
+                        const touched = getLiveSessionLastTouchedAt(localCachedSession);
+                        if (touched <= 0) return false;
+                        return (Date.now() - touched) <= 2 * 60 * 1000;
+                    };
 
                     let hydratedFromRemote = false;
-                    let remoteSessionCheckSucceeded = false;
-                    let remoteSessionExplicitlyMissing = false;
+                    let serverReachable = false;
                     try {
                         const payload = await apiRequest('/api/active-session');
-                        remoteSessionCheckSucceeded = true;
+                        serverReachable = true;
                         if (payload?.session) {
-                            const remoteSessionId = getLiveSessionIdentity(payload.session);
-                            const remoteSessionTouchedAt = getLiveSessionLastTouchedAt(payload.session);
-                            const localCachedTouchedAt = getLiveSessionLastTouchedAt(localCachedSession);
-                            const shouldRejectForIdentity = !remoteSessionId
-                                || (localCachedSessionId && remoteSessionId !== localCachedSessionId && remoteSessionTouchedAt <= localCachedTouchedAt);
-                            const shouldDiscardOldSession = shouldRejectForIdentity
-                                || isLiveSessionStale(payload.session)
-                                || isLiveSessionOlderThanLatestEndedGame(payload.session, latestEndedGameTimestampRef.current);
-                            if (shouldDiscardOldSession) {
-                                const staleSessionInstanceId = remoteSessionId;
-                                if (staleSessionInstanceId) {
-                                    markDiscardedSessionTombstone(staleSessionInstanceId, Date.now());
-                                }
-                                try {
-                                    await apiRequest('/api/active-session', {
-                                        method: 'DELETE',
-                                        body: JSON.stringify({
-                                            sourceClientId: syncClientIdRef.current,
-                                            clearLiveEvents: true,
-                                            discardedSessionInstanceId: staleSessionInstanceId,
-                                            discardedSessionCreatedAt: Number(payload.session.sessionCreatedAt || 0)
-                                        })
-                                    });
-                                } catch (clearError) {
-                                    // If cleanup fails, keep startup flow running and avoid hydration.
-                                }
-                                purgeStaleLocalSessionArtifacts();
-                            } else {
-                                hydrateSession(payload.session);
-                                hydratedFromRemote = true;
-                            }
+                            // Server has an active session — always use it unconditionally.
+                            // Server is the source of truth; we write there on every boundary.
+                            hydrateSession(payload.session);
+                            hydratedFromRemote = true;
                         } else {
-                            remoteSessionExplicitlyMissing = true;
+                            // Server has no active session and is reachable.
+                            // Do NOT recover local cache here, or ended/discarded matches can
+                            // resurrect after refresh from stale local storage.
                             purgeStaleLocalSessionArtifacts();
                         }
                     } catch (e) {
-                        // Fall back to local browser cache if DB temp cache is unavailable.
+                        // Cannot reach server — use localStorage as offline fallback only.
                     }
 
-                    if (!hydratedFromRemote && !(remoteSessionCheckSucceeded && remoteSessionExplicitlyMissing)) {
-                        try {
-                            if (localCachedSession) {
-                                const cachedSessionId = getLiveSessionIdentity(localCachedSession);
-                                if (!cachedSessionId
-                                    || isLiveSessionStale(localCachedSession)
-                                    || isLiveSessionOlderThanLatestEndedGame(localCachedSession, latestEndedGameTimestampRef.current)) {
-                                    if (cachedSessionId) {
-                                        markDiscardedSessionTombstone(cachedSessionId, Date.now());
-                                    }
-                                    purgeStaleLocalSessionArtifacts();
-                                } else {
-                                    hydrateSession(localCachedSession);
-                                }
+                    if (!serverReachable && !hydratedFromRemote) {
+                        if (canHydrateLocalCachedSession()) {
+                            hydrateSession(localCachedSession);
+                        } else {
+                            if (localCachedSessionId) {
+                                markDiscardedSessionTombstone(localCachedSessionId, Date.now());
                             }
-                        } catch (e) {}
+                            purgeStaleLocalSessionArtifacts();
+                        }
                     }
 
                     const runSyncWarmup = () => {
@@ -3993,50 +4179,132 @@
             }, []);
 
             useEffect(() => {
+                if (!isGameLive) return;
+                if (!latestPeriodMetaEvent || latestPeriodMetaEvent.metaType !== 'quarterEnd') return;
+
+                const quarterEndId = String(latestPeriodMetaEvent.id || '');
+                if (!quarterEndId) return;
+                if (lastPersistedQuarterEndIdRef.current === quarterEndId) return;
+                lastPersistedQuarterEndIdRef.current = quarterEndId;
+
+                const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
+                const sessionUpdatedAt = markLocalSessionUpdated();
+                const clockControlRevision = Math.max(
+                    Number(clockControlRevisionRef.current || 0),
+                    getClockControlRevisionFromLogs(gameLog, 0)
+                );
+                clockControlRevisionRef.current = clockControlRevision;
+                const persistedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now());
+                const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+                sessionRevisionRef.current = nextSessionRevision;
+
+                const checkpointSession = {
+                    teamAId,
+                    teamBId,
+                    teamAScore,
+                    teamBScore,
+                    liveSessionInstanceId,
+                    sessionCreatedAt: persistedSessionCreatedAt,
+                    sessionRevision: nextSessionRevision,
+                    clockControlRevision,
+                    currentQuarter,
+                    periodClockSeconds,
+                    isPeriodClockRunning,
+                    isPlayPaused,
+                    livePlayerSeconds,
+                    teamALineup,
+                    teamABench,
+                    teamBLineup,
+                    teamBBench,
+                    lineupRevision: persistedLineupRevision,
+                    liveStats,
+                    liveGameSnapshot,
+                    periodSnapshots,
+                    gameLog,
+                    loggedHistory,
+                    playedPlayers,
+                    dnpPlayers,
+                    dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+                    awaitingPeriodStart,
+                    sessionUpdatedAt
+                };
+
+                queueActiveSessionSync('put', checkpointSession);
+                flushPendingLiveEvents();
+                flushPendingActiveSessionSync();
+            }, [
+                isGameLive,
+                latestPeriodMetaEvent,
+                teamAId,
+                teamBId,
+                teamAScore,
+                teamBScore,
+                liveSessionInstanceId,
+                liveSessionCreatedAt,
+                currentQuarter,
+                periodClockSeconds,
+                isPeriodClockRunning,
+                isPlayPaused,
+                livePlayerSeconds,
+                teamALineup,
+                teamABench,
+                teamBLineup,
+                teamBBench,
+                lineupRevision,
+                liveStats,
+                liveGameSnapshot,
+                periodSnapshots,
+                gameLog,
+                loggedHistory,
+                playedPlayers,
+                dnpPlayers,
+                awaitingPeriodStart
+            ]);
+
+            useEffect(() => {
                 latestEndedGameTimestampRef.current = getLatestEndedGameTimestamp(games);
             }, [games]);
 
             useEffect(() => {
-                if (!isGameLive) return;
-                const latestEndedGameTimestamp = Number(latestEndedGameTimestampRef.current || 0);
-                if (latestEndedGameTimestamp <= 0) return;
-
-                const currentLiveSession = {
-                    sessionCreatedAt: Number(liveSessionCreatedAtRef.current || 0),
-                    sessionUpdatedAt: Number(lastLocalSessionUpdatedAtRef.current || 0)
-                };
-
-                if (!isLiveSessionOlderThanLatestEndedGame(currentLiveSession, latestEndedGameTimestamp)) {
-                    return;
-                }
-
-                clearLiveSessionEverywhere({ keepTeamSelection: false }).catch(() => {});
-                showToast('Detected an older live session than the latest finished game. Cleared stale live game.', 'info');
-            }, [games, isGameLive, liveSessionCreatedAt]);
-
-            useEffect(() => {
                 const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const socketHost = window.location.host || 'localhost:3000';
-                let socket = null;
+                const connectSocket = () => {
+                    if (socketManualCloseRef.current) return;
 
-                try {
-                    socket = new WebSocket(`${socketProtocol}//${socketHost}`);
-                } catch (error) {
-                    // Opening from file:// can have an empty host; fail soft so UI still renders.
-                    return () => {};
-                }
+                    let socket = null;
+                    try {
+                        socket = new WebSocket(`${socketProtocol}//${socketHost}`);
+                    } catch (error) {
+                        // Opening from file:// can have an empty host; fail soft so UI still renders.
+                        scheduleReconnect();
+                        return;
+                    }
 
-                syncSocketRef.current = socket;
+                    syncSocketRef.current = socket;
 
-                socket.addEventListener('message', (event) => {
+                    socket.addEventListener('message', (event) => {
                     try {
                         const payload = JSON.parse(event.data);
-                        if (payload?.type === 'live_event') {
+                        if (payload?.type === 'session_cleared') {
                             if (payload.sourceClientId && payload.sourceClientId === syncClientIdRef.current) {
                                 return;
                             }
-                            const hasPendingPut = pendingActiveSessionSyncRef.current?.mode === 'put';
-                            if (!isGameLiveRef.current && !hadLiveSessionRef.current && !hasPendingPut) {
+
+                            const clearedSessionId = String(payload.sessionInstanceId || '').trim();
+                            const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                            if (localSessionId && clearedSessionId && localSessionId !== clearedSessionId) {
+                                // Ignore stale clear events from older sessions.
+                                // WS ordering can deliver an old clear after a new match start.
+                                pullActiveSessionSnapshot();
+                                return;
+                            }
+
+                            clearRemoteLiveSession();
+                            return;
+                        }
+
+                        if (payload?.type === 'live_event') {
+                            if (payload.sourceClientId && payload.sourceClientId === syncClientIdRef.current) {
                                 return;
                             }
                             applyIncomingLiveEvent(payload);
@@ -4095,18 +4363,11 @@
                                 if (payload.session) {
                                     applyRemoteLiveSession(payload.session);
                                 } else {
-                                    // Only clear if the broadcast came from an identified client
-                                    // (i.e. another tab intentionally ended the game via DELETE).
-                                    // A null sourceClientId means a server-side write (team/statAction
-                                    // save) triggered the broadcast; the DB may simply not have our
-                                    // session yet (e.g. after a server restart). In that case keep
-                                    // the local session alive and re-queue a PUT to restore it.
-                                    const broadcastFromIdentifiedClient = payload.sourceClientId && payload.sourceClientId !== syncClientIdRef.current;
-                                    if (broadcastFromIdentifiedClient) {
-                                        clearRemoteLiveSession();
-                                    } else if (isGameLiveRef.current) {
-                                        // Re-push our session to the server so it's back in the DB.
+                                    if (isGameLiveRef.current) {
+                                        // Never clear on null sync snapshot alone.
+                                        // Session clear is signaled via explicit 'session_cleared' event.
                                         flushPendingActiveSessionSync();
+                                        pullActiveSessionSnapshot();
                                     }
                                 }
                             }
@@ -4116,18 +4377,53 @@
                     }
                 });
 
-                socket.addEventListener('open', () => {
-                    fetchMissingLiveEvents();
-                    flushPendingLiveEvents();
-                    flushPendingActiveSessionSync();
-                });
+                    socket.addEventListener('open', () => {
+                        socketReconnectAttemptsRef.current = 0;
+                        fetchMissingLiveEvents();
+                        flushPendingLiveEvents();
+                        flushPendingActiveSessionSync();
+                    });
 
-                socket.addEventListener('error', () => {
-                    // Keep the app functional even if realtime is unavailable.
-                });
+                    socket.addEventListener('error', () => {
+                        // Keep the app functional even if realtime is unavailable.
+                    });
+
+                    socket.addEventListener('close', () => {
+                        if (syncSocketRef.current === socket) {
+                            syncSocketRef.current = null;
+                        }
+                        scheduleReconnect();
+                    });
+                };
+
+                const scheduleReconnect = () => {
+                    if (socketManualCloseRef.current) return;
+                    if (socketReconnectTimerRef.current) return;
+
+                    const attempt = Number(socketReconnectAttemptsRef.current || 0) + 1;
+                    socketReconnectAttemptsRef.current = attempt;
+                    const delayMs = Math.min(10000, 500 * (2 ** Math.min(attempt - 1, 5)));
+
+                    socketReconnectTimerRef.current = window.setTimeout(() => {
+                        socketReconnectTimerRef.current = null;
+                        connectSocket();
+                    }, delayMs);
+                };
+
+                socketManualCloseRef.current = false;
+                connectSocket();
 
                 return () => {
-                    socket.close();
+                    socketManualCloseRef.current = true;
+                    if (socketReconnectTimerRef.current) {
+                        window.clearTimeout(socketReconnectTimerRef.current);
+                        socketReconnectTimerRef.current = null;
+                    }
+                    const socket = syncSocketRef.current;
+                    syncSocketRef.current = null;
+                    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+                        socket.close();
+                    }
                 };
             }, []);
 
@@ -4136,6 +4432,11 @@
             // dropped WS message doesn't leave the app desynced indefinitely.
             useEffect(() => {
                 const heartbeat = window.setInterval(() => {
+                    const socket = syncSocketRef.current;
+                    const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
+                    if (!socketIsOpen) {
+                        pullActiveSessionSnapshot();
+                    }
                     fetchMissingLiveEvents();
                     flushPendingLiveEvents();
                     flushPendingActiveSessionSync();
@@ -4143,8 +4444,22 @@
                 return () => window.clearInterval(heartbeat);
             }, []);
 
+            // Near-realtime HTTP fallback for environments where WS upgrade is
+            // unavailable/intermittent (some proxies/mobile paths). This keeps
+            // session + action sync flowing across devices without manual refresh.
+            useEffect(() => {
+                const fallback = window.setInterval(() => {
+                    pullActiveSessionSnapshot();
+                    fetchMissingLiveEvents();
+                    flushPendingLiveEvents();
+                    flushPendingActiveSessionSync();
+                }, 2500);
+                return () => window.clearInterval(fallback);
+            }, []);
+
             useEffect(() => {
                 const handleOnline = () => {
+                    pullActiveSessionSnapshot();
                     fetchMissingLiveEvents();
                     flushPendingLiveEvents();
                     flushPendingActiveSessionSync();
@@ -4324,7 +4639,9 @@
                     suppressLiveSessionSyncRef.current = false;
                 }
 
-                if (isGameLive) {
+                const hasValidLiveIdentity = Boolean(isGameLive && liveSessionInstanceId && teamAId && teamBId);
+
+                if (hasValidLiveIdentity) {
                     const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
                     const sessionUpdatedAt = Date.now();
                     const clockControlRevision = Math.max(
@@ -4680,10 +4997,18 @@
             };
 
             const saveNewGameState = async (newGame, updatedTeams) => {
-                const updatedGames = [newGame, ...games];
-                setGames(updatedGames);
-                setTeams(normalizeTeamsForStorage(updatedTeams));
-                await saveFullState(updatedTeams, updatedGames);
+                const updatedGames = [newGame, ...games.filter((game) => game?.id !== newGame?.id)];
+                const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
+                const isOnline = navigator.onLine !== false;
+
+                // Finalizing a game must be server-confirmed. If offline, fail fast so
+                // the live session stays open and the user can retry once connected.
+                if (!isOnline) {
+                    return false;
+                }
+
+                const didPersist = await saveFullState(normalizedTeams, updatedGames);
+                return didPersist;
             };
 
             const handleSaveGameVideoLink = async (gameId) => {
@@ -5389,6 +5714,11 @@
 
             const clearLocalLiveSessionArtifacts = ({ keepTeamSelection = false } = {}) => {
                 localStorage.removeItem('active_live_session');
+                localStorage.removeItem(LIVE_EVENTS_QUEUE_KEY);
+                localStorage.removeItem(ACTIVE_SESSION_SYNC_KEY);
+                try {
+                    localStorage.removeItem(LIVE_EVENTS_LAST_SEQ_KEY);
+                } catch (err) {}
 
                 pendingLiveEventsRef.current = [];
                 persistPendingLiveEvents();
@@ -5413,6 +5743,9 @@
                 }));
 
                 hadLiveSessionRef.current = false;
+                isGameLiveRef.current = false;
+                liveSessionInstanceIdRef.current = '';
+                liveSessionCreatedAtRef.current = 0;
                 setIsGameLive(false);
                 setIsPlayPaused(false);
                 setActiveAction(null);
@@ -5461,7 +5794,7 @@
                 sessionRevisionRef.current = 0;
             };
 
-            const clearLiveSessionEverywhere = async ({ keepTeamSelection = false } = {}) => {
+            const clearLiveSessionEverywhere = async ({ keepTeamSelection = false, terminationStatus = 'discarded' } = {}) => {
                 let clearedOnServer = false;
                 const discardedSessionInstanceId = String(liveSessionInstanceIdRef.current || '').trim();
                 const discardedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || 0);
@@ -5469,18 +5802,59 @@
                     markDiscardedSessionTombstone(discardedSessionInstanceId, Date.now());
                 }
 
+                // Clear local live state immediately so a hard refresh during remote cleanup
+                // cannot revive stale in-browser session data.
+                clearLocalLiveSessionArtifacts({ keepTeamSelection });
+
                 if (navigator.onLine) {
                     try {
-                        await apiRequest('/api/active-session', {
+                        const deleteResult = await apiRequest('/api/active-session', {
                             method: 'DELETE',
                             body: JSON.stringify({
                                 sourceClientId: syncClientIdRef.current,
                                 clearLiveEvents: true,
                                 discardedSessionInstanceId,
-                                discardedSessionCreatedAt
+                                discardedSessionCreatedAt,
+                                terminationStatus
                             })
                         });
-                        clearedOnServer = true;
+
+                        if (deleteResult?.applied === false) {
+                            // If targeted delete was rejected by stale-session guards,
+                            // force-clear whichever active session currently exists.
+                            const forcedDeleteResult = await apiRequest('/api/active-session', {
+                                method: 'DELETE',
+                                body: JSON.stringify({
+                                    sourceClientId: syncClientIdRef.current,
+                                    clearLiveEvents: true,
+                                    terminationStatus
+                                })
+                            });
+                            clearedOnServer = forcedDeleteResult?.applied !== false;
+                        } else {
+                            clearedOnServer = true;
+                        }
+
+                        if (clearedOnServer) {
+                            const verifyAfterDelete = await apiRequest('/api/active-session');
+                            if (verifyAfterDelete?.session) {
+                                const forceVerifyDelete = await apiRequest('/api/active-session', {
+                                    method: 'DELETE',
+                                    body: JSON.stringify({
+                                        sourceClientId: syncClientIdRef.current,
+                                        clearLiveEvents: true,
+                                        terminationStatus
+                                    })
+                                });
+
+                                if (forceVerifyDelete?.applied === false) {
+                                    clearedOnServer = false;
+                                } else {
+                                    const verifyAfterForceDelete = await apiRequest('/api/active-session');
+                                    clearedOnServer = !Boolean(verifyAfterForceDelete?.session);
+                                }
+                            }
+                        }
                     } catch (error) {
                         clearedOnServer = false;
                     }
@@ -5490,13 +5864,117 @@
                     queueActiveSessionSync('delete', null, {
                         clearLiveEvents: true,
                         discardedSessionInstanceId,
-                        discardedSessionCreatedAt
+                        discardedSessionCreatedAt,
+                        terminationStatus
                     });
                     flushPendingActiveSessionSync();
                 }
-
-                clearLocalLiveSessionArtifacts({ keepTeamSelection });
                 return clearedOnServer;
+            };
+
+            const clearAnyRemoteActiveSessionBeforeStart = async () => {
+                if (navigator.onLine === false) return false;
+
+                try {
+                    const payload = await apiRequest('/api/active-session');
+                    const activeSession = payload?.session;
+                    if (!activeSession || typeof activeSession !== 'object') {
+                        return true;
+                    }
+
+                    const activeSessionId = String(activeSession.liveSessionInstanceId || activeSession.sessionInstanceId || '').trim();
+                    const activeSessionCreatedAt = Number(activeSession.sessionCreatedAt || 0);
+
+                    const targetedDelete = await apiRequest('/api/active-session', {
+                        method: 'DELETE',
+                        body: JSON.stringify({
+                            sourceClientId: syncClientIdRef.current,
+                            clearLiveEvents: true,
+                            discardedSessionInstanceId: activeSessionId,
+                            discardedSessionCreatedAt: activeSessionCreatedAt,
+                            terminationStatus: 'discarded'
+                        })
+                    });
+
+                    if (targetedDelete?.applied === false) {
+                        const forcedDelete = await apiRequest('/api/active-session', {
+                            method: 'DELETE',
+                            body: JSON.stringify({
+                                sourceClientId: syncClientIdRef.current,
+                                clearLiveEvents: true,
+                                terminationStatus: 'discarded'
+                            })
+                        });
+                        return forcedDelete?.applied !== false;
+                    }
+
+                    return true;
+                } catch (error) {
+                    return false;
+                }
+            };
+
+            // Immediately PUT the current live session to the DB, bypassing the async queue.
+            // Called at every critical boundary (match start, period end/start) so the server
+            // is always the authoritative source of truth and localhost cache is secondary.
+            const saveSessionToServer = async (sessionOverride = null) => {
+                const sessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                if (!sessionId) return;
+
+                const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
+                const sessionUpdatedAt = markLocalSessionUpdated();
+                const clockControlRevision = Math.max(
+                    Number(clockControlRevisionRef.current || 0),
+                    getClockControlRevisionFromLogs(gameLog, 0)
+                );
+                clockControlRevisionRef.current = clockControlRevision;
+                const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+                sessionRevisionRef.current = nextSessionRevision;
+                const session = sessionOverride || {
+                    teamAId,
+                    teamBId,
+                    teamAScore,
+                    teamBScore,
+                    liveSessionInstanceId: sessionId,
+                    sessionCreatedAt: Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now()),
+                    sessionRevision: nextSessionRevision,
+                    clockControlRevision,
+                    currentQuarter,
+                    periodClockSeconds,
+                    isPeriodClockRunning,
+                    isPlayPaused,
+                    livePlayerSeconds,
+                    teamALineup,
+                    teamABench,
+                    teamBLineup,
+                    teamBBench,
+                    lineupRevision: persistedLineupRevision,
+                    liveStats,
+                    liveGameSnapshot,
+                    periodSnapshots,
+                    gameLog,
+                    loggedHistory,
+                    playedPlayers,
+                    dnpPlayers,
+                    dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+                    awaitingPeriodStart,
+                    sessionUpdatedAt
+                };
+                localStorage.setItem('active_live_session', JSON.stringify(session));
+                hadLiveSessionRef.current = true;
+                try {
+                    const putResult = await apiRequest('/api/active-session', {
+                        method: 'PUT',
+                        body: JSON.stringify({ session, sourceClientId: syncClientIdRef.current })
+                    });
+                    if (putResult?.applied === false) {
+                        queueActiveSessionSync('put', session);
+                        flushPendingActiveSessionSync();
+                    }
+                } catch (_) {
+                    queueActiveSessionSync('put', session);
+                    flushPendingActiveSessionSync();
+                }
             };
 
             const handleStartMatch = async (e) => {
@@ -5505,13 +5983,27 @@
                     showToast('Only admin can create a live game.', 'info');
                     return;
                 }
+                if (navigator.onLine === false) {
+                    showToast('Internet connection is required to start a new match.', 'error');
+                    return;
+                }
                 if (!teamAId || !teamBId || teamAId === teamBId) return;
 
                 const teamAObj = teams.find(t => t.id === teamAId);
                 const teamBObj = teams.find(t => t.id === teamBId);
                 if (!teamAObj || !teamBObj || teamAObj.players.length === 0 || teamBObj.players.length === 0) return;
 
-                await clearLiveSessionEverywhere({ keepTeamSelection: true });
+                const didClearRemoteSession = await clearAnyRemoteActiveSessionBeforeStart();
+                if (!didClearRemoteSession) {
+                    showToast('Could not clear previous active session on server. Please retry Start Match.', 'error');
+                    return;
+                }
+
+                await clearLiveSessionEverywhere({ keepTeamSelection: true, terminationStatus: 'discarded' });
+
+                // Starting a brand-new match should not carry forward prior discard markers.
+                discardedLiveSessionTombstoneRef.current = { sessionInstanceId: '', discardedAt: 0 };
+                persistDiscardedSessionTombstone();
 
                 const startersA = teamAObj.players.slice(0, 5).map(p => p.id);
                 const benchA = teamAObj.players.slice(5).map(p => p.id);
@@ -5568,7 +6060,7 @@
                 setOperatorFocus('both');
                 clearTransientLiveActionState();
                 setLoggedHistory([]);
-                setGameLog([
+                const initialGameLog = [
                     {
                         id: `${focusEventTs}_${Math.random().toString(36).slice(2, 8)}`,
                         time: getWallClockTime(),
@@ -5591,10 +6083,55 @@
                         quarter: 1,
                         clockRemaining: formatSecondsAsClock(0)
                     }
-                ]);
+                ];
+                setGameLog(initialGameLog);
                 setLiveGameSnapshot(initialLiveSnapshot);
                 setLineupRevision(0);
                 lineupRevisionRef.current = 0;
+
+                // Persist immediately to DB so the server is the source of truth from moment 0.
+                const sessionUpdatedAt = markLocalSessionUpdated();
+                const nextSessionRevision = 1;
+                const initialClockControlRevision = Math.max(
+                    Number(clockControlRevisionRef.current || 0),
+                    focusEventTs
+                );
+                clockControlRevisionRef.current = initialClockControlRevision;
+                sessionRevisionRef.current = nextSessionRevision;
+                liveSessionInstanceIdRef.current = nextSessionInstanceId;
+                liveSessionCreatedAtRef.current = nextSessionCreatedAt;
+                const initialSession = {
+                    teamAId,
+                    teamBId,
+                    teamAScore: 0,
+                    teamBScore: 0,
+                    liveSessionInstanceId: nextSessionInstanceId,
+                    sessionCreatedAt: nextSessionCreatedAt,
+                    sessionRevision: nextSessionRevision,
+                    clockControlRevision: initialClockControlRevision,
+                    currentQuarter: 1,
+                    periodClockSeconds: 0,
+                    isPeriodClockRunning: false,
+                    isPlayPaused: false,
+                    livePlayerSeconds: {},
+                    teamALineup: startersA,
+                    teamABench: benchA,
+                    teamBLineup: startersB,
+                    teamBBench: benchB,
+                    lineupRevision: 0,
+                    liveStats: initializedStats,
+                    liveGameSnapshot: initialLiveSnapshot,
+                    periodSnapshots: [],
+                    gameLog: initialGameLog,
+                    loggedHistory: [],
+                    playedPlayers: [...startersA, ...startersB],
+                    dnpPlayers: [],
+                    dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+                    awaitingPeriodStart: true,
+                    sessionUpdatedAt
+                };
+                await saveSessionToServer(initialSession);
+
                 setIsGameLive(true);
                 trackAnalyticsEvent('start_match', {
                     team_a_id: teamAId,
@@ -5631,6 +6168,22 @@
                     return;
                 }
 
+                // Get player object early for technical foul modal
+                const playerObjForModal = teams.flatMap(t => t.players).find(p => p.id === playerId);
+
+                // Prompt for technical foul reason if needed (before other checks)
+                if (isTechnicalFoulAction && !pendingTechnicalFoulReasonRef.current) {
+                    setReasonInput({
+                        type: 'technicalFoul',
+                        playerName: playerObjForModal?.name || 'Player',
+                        playerId,
+                        isTeamA,
+                        selectedReason: '',
+                        customReason: ''
+                    });
+                    return;
+                }
+
                 const shouldConfirmResumeForNonPrimary = !isAutoResumeAction
                     && !isStoppedClockAction
                     && !isFoulLikeSelectedAction
@@ -5650,6 +6203,7 @@
                     });
                     return;
                 }
+
                 let targetQuarterForLog = backfillTargetQuarter;
                 let targetClockLabelForLog = backfillClockLabel;
                 if (!hasMatchStarted && !canBackfillEndedPeriodStats) {
@@ -5661,7 +6215,7 @@
                     }
                     return;
                 }
-                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted) {
+                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted && !canBackfillEndedPeriodStats) {
                     if (periodActionMode === 'startPeriod') {
                         handleStartNextQuarter();
                         targetQuarterForLog = nextPeriodToStart;
@@ -5849,16 +6403,25 @@
                     : null;
 
                 if (shouldAutoPauseForFoul) {
+                    const technicalFoulReason = isTechnicalFoulAction ? pendingTechnicalFoulReasonRef.current : '';
+                    const foulText = isTechnicalFoulAction 
+                        ? (technicalFoulReason 
+                            ? `Technical Foul on ${playerObj?.name || 'player'}: ${technicalFoulReason}`
+                            : `Technical Foul on ${playerObj?.name || 'player'}`)
+                        : `Official stoppage: Foul on ${playerObj?.name || 'player'}`;
                     const foulPauseEvent = {
                         id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                         time: getWallClockTime(),
-                        text: `Official stoppage: Foul on ${playerObj?.name || 'player'}`,
+                        text: foulText,
                         kind: 'meta',
                         metaType: 'foulPause',
                         quarter: targetQuarterForLog,
                         clockRemaining: targetClockLabelForLog,
-                        isTeamA
+                        isTeamA,
+                        ...(isTechnicalFoulAction && { isTechnicalFoul: true }),
+                        ...(technicalFoulReason && { reason: technicalFoulReason })
                     };
+                    pendingTechnicalFoulReasonRef.current = '';
                     localFoulPauseTriggerIdRef.current = foulPauseEvent.id;
                     const prependedEvents = foulOutRemovalEvent
                         ? [foulPauseEvent, foulOutRemovalEvent, statLogEvent]
@@ -6297,6 +6860,12 @@
             };
 
             const autoFinalizeEndedPeriodAndStartNextPeriod = () => {
+                markLocalSessionUpdated();
+                clockControlRevisionRef.current = Math.max(
+                    Number(clockControlRevisionRef.current || 0),
+                    Date.now()
+                );
+
                 const periodLabel = getPeriodLabel(currentQuarter);
                 const quarterEndLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 const checkpointSnapshot = createLiveCheckpointSnapshot(currentQuarter);
@@ -6323,6 +6892,11 @@
                     quarter: currentQuarter,
                     clockRemaining: '00:00'
                 };
+
+                [checkpointEvent, quarterEndEvent].forEach((event) => {
+                    processedGameLogIdsRef.current.add(event.id);
+                    enqueueLiveEvent(event);
+                });
 
                 setPendingPeriodActionMode(null);
                 setActiveAction(null);
@@ -6365,6 +6939,8 @@
                     setAwaitingOvertimeDecision(false);
                     setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
                     showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, 'info');
+                    // Persist to DB immediately at period boundary.
+                    setTimeout(() => saveSessionToServer(), 0);
                     return true;
                 }
 
@@ -6383,6 +6959,7 @@
                     setAwaitingOvertimeDecision(false);
                     setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
                     showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, 'info');
+                    setTimeout(() => saveSessionToServer(), 0);
                     return true;
                 }
 
@@ -7426,37 +8003,47 @@
             const handleEndGame = async (options = {}) => {
                 if (!canUseLiveControls) return;
                 if (!teamAId || !teamBId) return;
+                if (isEndingGame) return;
 
-                setPendingPeriodActionMode(null);
+                setIsEndingGame(true);
 
-                const teamAObj = teams.find(t => t.id === teamAId);
-                const teamBObj = teams.find(t => t.id === teamBId);
-                if (!teamAObj || !teamBObj) return;
+                try {
+                    if (navigator.onLine === false) {
+                        showToast('Internet connection is required to end and save the game.', 'error');
+                        return;
+                    }
 
-                const gameId = `game_${Date.now()}`;
-                const gameDate = `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                    setPendingPeriodActionMode(null);
 
-                const sourceGameLog = Array.isArray(options.finalGameLogOverride)
-                    ? options.finalGameLogOverride
-                    : gameLog;
-                const shouldFinalizeRemainingClock = hasMatchStarted && hasCurrentQuarterStarted && isPeriodClockRunning && periodClockSeconds > 0;
-                let finalizedGameLog = [...sourceGameLog];
-                let finalizedClockSeconds = periodClockSeconds;
+                    const teamAObj = teams.find(t => t.id === teamAId);
+                    const teamBObj = teams.find(t => t.id === teamBId);
+                    if (!teamAObj || !teamBObj) return;
 
-                if (shouldFinalizeRemainingClock) {
-                    finalizedGameLog = remapCurrentQuarterClockHistory(sourceGameLog, currentQuarter, periodClockSeconds, 0, { forceShift: true });
-                    finalizedClockSeconds = 0;
-                }
+                    const finalizedSessionId = String(liveSessionInstanceIdRef.current || liveSessionInstanceId || '').trim();
+                    const gameId = finalizedSessionId ? `game_${finalizedSessionId}` : `game_${Date.now()}`;
+                    const gameDate = `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
-                const finalizedLivePlayerSeconds = deriveTotalPlayerSecondsFromTimeline(
-                    finalizedGameLog,
-                    currentQuarter,
-                    finalizedClockSeconds
-                );
+                    const sourceGameLog = Array.isArray(options.finalGameLogOverride)
+                        ? options.finalGameLogOverride
+                        : gameLog;
+                    const shouldFinalizeRemainingClock = hasMatchStarted && hasCurrentQuarterStarted && isPeriodClockRunning && periodClockSeconds > 0;
+                    let finalizedGameLog = [...sourceGameLog];
+                    let finalizedClockSeconds = periodClockSeconds;
 
-                const participantStats = {};
+                    if (shouldFinalizeRemainingClock) {
+                        finalizedGameLog = remapCurrentQuarterClockHistory(sourceGameLog, currentQuarter, periodClockSeconds, 0, { forceShift: true });
+                        finalizedClockSeconds = 0;
+                    }
 
-                const updatedTeams = teams.map(team => {
+                    const finalizedLivePlayerSeconds = deriveTotalPlayerSecondsFromTimeline(
+                        finalizedGameLog,
+                        currentQuarter,
+                        finalizedClockSeconds
+                    );
+
+                    const participantStats = {};
+
+                    const updatedTeams = teams.map(team => {
                     if (team.id !== teamAId && team.id !== teamBId) return team;
 
                     const updatedPlayers = team.players.map(player => {
@@ -7493,9 +8080,9 @@
                     });
 
                     return { ...team, players: updatedPlayers };
-                });
+                    });
 
-                const newGame = {
+                    const newGame = {
                     id: gameId,
                     date: gameDate,
                     teamAId,
@@ -7509,16 +8096,27 @@
                     dnpPlayers: [...dnpPlayers],
                     periodSnapshots: [...periodSnapshots],
                     gameLog: [...finalizedGameLog]
-                };
+                    };
 
-                await saveNewGameState(newGame, updatedTeams);
+                    const didSaveGame = await saveNewGameState(newGame, updatedTeams);
+                    if (!didSaveGame) {
+                        showToast('Could not save game to database. Match is still live, please retry End Game.', 'error');
+                        return;
+                    }
 
-                // End the active live session immediately when a game is finalized.
-                await clearLiveSessionEverywhere({ keepTeamSelection: false });
+                    // End the active live session immediately when a game is finalized.
+                    const didClearLiveSession = await clearLiveSessionEverywhere({ keepTeamSelection: false, terminationStatus: 'ended' });
 
-                setActiveTab('history');
-                setSelectedHistoryGameId(newGame.id);
-                showToast("Live statistics committed to system database successfully!", "success");
+                    setActiveTab('history');
+                    setSelectedHistoryGameId(newGame.id);
+                    if (didClearLiveSession) {
+                        showToast("Live statistics committed to system database successfully!", "success");
+                    } else {
+                        showToast('Game was saved, but active session clear is still pending. Please retry discard/end on active devices.', 'error');
+                    }
+                } finally {
+                    setIsEndingGame(false);
+                }
             };
 
             const openFinalizePeriodConfirm = () => {
@@ -7585,7 +8183,6 @@
 
                 if (periodActionMode === 'startPeriod') {
                     clearTransientLiveActionState();
-                    setPendingPeriodActionMode(null);
                     setIsPlayPaused(false);
                     handleStartNextQuarter();
                     return;
@@ -7594,7 +8191,6 @@
                 if (periodActionMode === 'startOvertime' || periodActionMode === 'pauseGame' || periodActionMode === 'endGame') {
                     if (periodActionMode === 'startOvertime') {
                         clearTransientLiveActionState();
-                        setPendingPeriodActionMode(null);
                         setIsPlayPaused(false);
                         handleStartOvertime();
                     } else if (periodActionMode === 'endGame') {
@@ -7743,20 +8339,43 @@
                     return;
                 }
 
+                // Prompt for reason
+                setReasonInput({
+                    type: 'officialsTimeout',
+                    selectedReason: '',
+                    customReason: ''
+                });
+            };
+
+            const commitOfficialsTimeoutWithReason = (reason = '') => {
+                const reasonText = (reason || '').trim();
                 const officialsLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 markLocalSessionUpdated();
                 setIsPlayPaused(true);
                 setIsPeriodClockRunning(false);
+                const displayText = reasonText
+                    ? `Officials Timeout: ${reasonText}`
+                    : 'Officials Timeout';
                 setGameLog((prev) => [{
                     id: officialsLogId,
                     time: getWallClockTime(),
-                    text: 'Officials Timeout',
+                    text: displayText,
                     kind: 'meta',
                     metaType: 'officialsTimeout',
                     quarter: currentQuarter,
-                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
+                    clockRemaining: formatSecondsAsClock(periodClockSeconds),
+                    ...(reasonText && { reason: reasonText })
                 }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
                 showToast('Officials timeout called.', 'info');
+                setReasonInput(null);
+            };
+
+            const commitTechnicalFoulWithReason = (reason = '', playerId, isTeamA) => {
+                const reasonText = (reason || '').trim();
+                pendingTechnicalFoulReasonRef.current = reasonText;
+                setReasonInput(null);
+                // Re-trigger the handlePlayerClick with the reason stored in ref
+                handlePlayerClick(playerId, isTeamA);
             };
 
             const PLAYER_STAT_FIELDS = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg2m_miss', 'fg3m_miss', 'ftm', 'ft_miss'];
@@ -13761,6 +14380,83 @@
                                 <div className="flex gap-3 text-xs font-bold">
                                     <button onClick={() => setConfirmDialog(null)} className="flex-1 py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer">{confirmDialog.cancelLabel || 'Cancel'}</button>
                                     <button onClick={confirmDialog.onConfirm} className="flex-1 py-2 bg-red-600 text-white rounded-xl cursor-pointer">{confirmDialog.confirmLabel || 'Confirm'}</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {reasonInput && (
+                        <div className="fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto">
+                                <h3 className="text-md font-extrabold text-white mb-2">
+                                    {reasonInput.type === 'technicalFoul' 
+                                        ? `Technical Foul - ${reasonInput.playerName}` 
+                                        : 'Officials Timeout'}
+                                </h3>
+                                <p className="text-xs text-slate-300 mb-4">
+                                    {reasonInput.type === 'technicalFoul'
+                                        ? 'Select or enter a reason for the technical foul:'
+                                        : 'Select or enter a reason for the officials timeout:'}
+                                </p>
+                                <select
+                                    value={reasonInput.selectedReason || ''}
+                                    onChange={(e) => setReasonInput({...reasonInput, selectedReason: e.target.value, customReason: ''})}
+                                    className="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 text-slate-100 rounded-lg mb-3 focus:outline-none focus:border-blue-500 cursor-pointer"
+                                >
+                                    <option value="">-- Select a reason --</option>
+                                    {reasonInput.type === 'technicalFoul' ? (
+                                        <>
+                                            <option value="Excessive timeouts">Excessive timeouts</option>
+                                            <option value="Abusive language">Abusive language</option>
+                                            <option value="Unsporting conduct">Unsporting conduct</option>
+                                            <option value="Other">Other (specify below)</option>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <option value="Injury timeout">Injury timeout</option>
+                                            <option value="Equipment issue">Equipment issue</option>
+                                            <option value="Delay of game">Delay of game</option>
+                                            <option value="Other">Other (specify below)</option>
+                                        </>
+                                    )}
+                                </select>
+                                {(reasonInput.selectedReason === 'Other' || !reasonInput.selectedReason) && (
+                                    <input
+                                        type="text"
+                                        value={reasonInput.customReason || ''}
+                                        onChange={(e) => setReasonInput({...reasonInput, customReason: e.target.value})}
+                                        placeholder="Enter custom reason or leave blank..."
+                                        className="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 text-slate-100 rounded-lg mb-4 focus:outline-none focus:border-blue-500 placeholder:text-slate-500"
+                                        autoFocus
+                                    />
+                                )}
+                                <div className="flex gap-3 text-xs font-bold">
+                                    <button 
+                                        onClick={() => {
+                                            setReasonInput(null);
+                                            if (reasonInput.type === 'technicalFoul') {
+                                                pendingTechnicalFoulReasonRef.current = '';
+                                            }
+                                        }} 
+                                        className="flex-1 py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer hover:bg-slate-925"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            const finalReason = reasonInput.selectedReason === 'Other' 
+                                                ? (reasonInput.customReason || '')
+                                                : (reasonInput.selectedReason || reasonInput.customReason || '');
+                                            if (reasonInput.type === 'technicalFoul') {
+                                                commitTechnicalFoulWithReason(finalReason, reasonInput.playerId, reasonInput.isTeamA);
+                                            } else if (reasonInput.type === 'officialsTimeout') {
+                                                commitOfficialsTimeoutWithReason(finalReason);
+                                            }
+                                        }} 
+                                        className="flex-1 py-2 bg-blue-600 text-white rounded-xl cursor-pointer hover:bg-blue-500"
+                                    >
+                                        Confirm
+                                    </button>
                                 </div>
                             </div>
                         </div>

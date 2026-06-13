@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wknd-stats-offline-v4';
+const CACHE_NAME = 'wknd-stats-offline-v5';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -27,7 +27,14 @@ self.addEventListener('fetch', (event) => {
 
   const requestUrl = new URL(event.request.url);
   const isSameOrigin = requestUrl.origin === self.location.origin;
+  const isApiRequest = isSameOrigin && requestUrl.pathname.startsWith('/api/');
   const isNavigationRequest = event.request.mode === 'navigate';
+
+  if (isApiRequest) {
+    // Live sync endpoints must always hit network to avoid stale match/session/event payloads.
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   if (isNavigationRequest) {
     event.respondWith((async () => {

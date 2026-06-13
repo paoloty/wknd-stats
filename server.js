@@ -34,6 +34,8 @@ let lastActiveSessionSourceId = null;
 let lastActiveSessionClearedAt = 0;
 let lastDiscardedSessionInstanceId = '';
 let lastDiscardedSessionClearedAt = 0;
+const LIVE_SESSION_GUARDS_KEY = 'liveSessionGuards';
+const LIVE_SESSION_CLOCK_SKEW_TOLERANCE_MS = 10 * 60 * 1000;
 
 const AUTH_PASSWORDS = {
   operator: process.env.WKND_OPERATOR_PASSWORD || 'operator123!!!',
@@ -596,6 +598,15 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS match_sessions (
+    session_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    ended_at INTEGER NOT NULL DEFAULT 0,
+    discarded_at INTEGER NOT NULL DEFAULT 0
+  );
+
   -- Legacy tables kept for migration compatibility.
   CREATE TABLE IF NOT EXISTS app_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -627,6 +638,13 @@ ensureGamePlayerStatsMinutesColumn();
 
 const selectLegacyStateStmt = db.prepare('SELECT teams_json, games_json FROM app_state WHERE id = 1');
 const selectLegacyConfigStmt = db.prepare('SELECT value_json FROM config_values WHERE key = ?');
+const upsertConfigValueStmt = db.prepare(`
+  INSERT INTO config_values (key, value_json)
+  VALUES (?, ?)
+  ON CONFLICT(key) DO UPDATE SET
+    value_json = excluded.value_json,
+    updated_at = CURRENT_TIMESTAMP
+`);
 
 const clearPlayersStmt = db.prepare('DELETE FROM players');
 const clearPlayerTotalsStmt = db.prepare('DELETE FROM player_totals');
@@ -779,6 +797,35 @@ const upsertActiveSessionStmt = db.prepare(`
     updated_at = CURRENT_TIMESTAMP
 `);
 const deleteActiveSessionStmt = db.prepare('DELETE FROM active_sessions WHERE id = 1');
+const selectMatchSessionByIdStmt = db.prepare(`
+  SELECT session_id, status, created_at, updated_at, ended_at, discarded_at
+  FROM match_sessions
+  WHERE session_id = ?
+`);
+const upsertMatchSessionRunningStmt = db.prepare(`
+  INSERT INTO match_sessions (session_id, status, created_at, updated_at, ended_at, discarded_at)
+  VALUES (@session_id, 'running', @created_at, @updated_at, 0, 0)
+  ON CONFLICT(session_id) DO UPDATE SET
+    status = CASE WHEN match_sessions.status IN ('ended', 'discarded') THEN match_sessions.status ELSE 'running' END,
+    created_at = CASE WHEN match_sessions.created_at > 0 THEN match_sessions.created_at ELSE excluded.created_at END,
+    updated_at = excluded.updated_at
+`);
+const upsertMatchSessionEndedStmt = db.prepare(`
+  INSERT INTO match_sessions (session_id, status, created_at, updated_at, ended_at, discarded_at)
+  VALUES (@session_id, 'ended', @created_at, @updated_at, @ended_at, 0)
+  ON CONFLICT(session_id) DO UPDATE SET
+    status = CASE WHEN match_sessions.status = 'discarded' THEN 'discarded' ELSE 'ended' END,
+    updated_at = excluded.updated_at,
+    ended_at = CASE WHEN match_sessions.ended_at > 0 THEN match_sessions.ended_at ELSE excluded.ended_at END
+`);
+const upsertMatchSessionDiscardedStmt = db.prepare(`
+  INSERT INTO match_sessions (session_id, status, created_at, updated_at, ended_at, discarded_at)
+  VALUES (@session_id, 'discarded', @created_at, @updated_at, 0, @discarded_at)
+  ON CONFLICT(session_id) DO UPDATE SET
+    status = 'discarded',
+    updated_at = excluded.updated_at,
+    discarded_at = CASE WHEN match_sessions.discarded_at > 0 THEN match_sessions.discarded_at ELSE excluded.discarded_at END
+`);
 const selectLiveEventsSinceStmt = db.prepare(`
   SELECT seq, event_id, event_json, created_at
   FROM live_events
@@ -803,6 +850,42 @@ function parseJsonSafe(value, fallback) {
 
 function toInt(value) {
   return Number.isFinite(value) ? value : Number.parseInt(value || 0, 10) || 0;
+}
+
+function isClearlyBeforeClearBoundary(timestampMs, clearBoundaryMs) {
+  const ts = toInt(timestampMs);
+  const boundary = toInt(clearBoundaryMs);
+  if (ts <= 0 || boundary <= 0) return false;
+  return (ts + LIVE_SESSION_CLOCK_SKEW_TOLERANCE_MS) < boundary;
+}
+
+function normalizeTerminationStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'ended' ? 'ended' : 'discarded';
+}
+
+function markMatchSessionStatus(sessionId, status, sessionCreatedAt = 0) {
+  const safeSessionId = String(sessionId || '').trim();
+  if (!safeSessionId) return;
+  const now = Date.now();
+  const safeCreatedAt = toInt(sessionCreatedAt) > 0 ? toInt(sessionCreatedAt) : now;
+
+  if (status === 'ended') {
+    upsertMatchSessionEndedStmt.run({
+      session_id: safeSessionId,
+      created_at: safeCreatedAt,
+      updated_at: now,
+      ended_at: now
+    });
+    return;
+  }
+
+  upsertMatchSessionDiscardedStmt.run({
+    session_id: safeSessionId,
+    created_at: safeCreatedAt,
+    updated_at: now,
+    discarded_at: now
+  });
 }
 
 function parseImageDataUrl(dataUrl) {
@@ -1979,12 +2062,44 @@ function broadcastLiveEvent(record, sourceClientId = null) {
   });
 }
 
+function broadcastSessionCleared(sessionInstanceId = '', sourceClientId = null, clearedAt = Date.now()) {
+  if (!wss) return;
+  const payload = JSON.stringify({
+    type: 'session_cleared',
+    sourceClientId,
+    sessionInstanceId: String(sessionInstanceId || '').trim(),
+    clearedAt: toInt(clearedAt)
+  });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(payload);
+    }
+  });
+}
+
 function appendLiveEvent(event, sourceClientId = null) {
   if (!event || typeof event !== 'object') {
     throw new Error('Invalid event payload');
   }
   if (!event.id) {
     throw new Error('Event id is required');
+  }
+
+  const activeSession = readActiveSession();
+  const activeSessionId = String(activeSession?.liveSessionInstanceId || activeSession?.sessionInstanceId || '').trim();
+  const eventSessionId = String(event?.sessionInstanceId || activeSessionId || '').trim();
+  if (!activeSessionId || !eventSessionId || eventSessionId !== activeSessionId) {
+    return null;
+  }
+
+  const activeSessionStatusRow = selectMatchSessionByIdStmt.get(activeSessionId);
+  const activeSessionStatus = String(activeSessionStatusRow?.status || '').trim().toLowerCase();
+  if (activeSessionStatus === 'ended' || activeSessionStatus === 'discarded') {
+    return null;
+  }
+
+  if (!event?.sessionInstanceId) {
+    event = { ...event, sessionInstanceId: activeSessionId };
   }
 
   let row = selectLiveEventByIdStmt.get(event.id);
@@ -2002,6 +2117,50 @@ function appendLiveEvent(event, sourceClientId = null) {
 
   if (record.event && typeof record.event === 'object') {
     broadcastLiveEvent(record, sourceClientId);
+
+    // Sync fallback: persist accepted live events into active session so clients
+    // that miss live_event transport can still converge via sync/session polling.
+    const currentSession = readActiveSession();
+    const currentSessionId = String(currentSession?.liveSessionInstanceId || currentSession?.sessionInstanceId || '').trim();
+    const recordSessionId = String(record?.event?.sessionInstanceId || '').trim();
+    if (
+      currentSession
+      && currentSessionId
+      && recordSessionId
+      && currentSessionId === recordSessionId
+    ) {
+      const existingGameLog = Array.isArray(currentSession.gameLog) ? currentSession.gameLog : [];
+      const hasGameLogEvent = existingGameLog.some((item) => item?.id === record.event.id);
+      const nextGameLog = hasGameLogEvent
+        ? existingGameLog
+        : [record.event, ...existingGameLog].slice(0, 5000);
+
+      const existingLoggedHistory = Array.isArray(currentSession.loggedHistory) ? currentSession.loggedHistory : [];
+      const shouldAddHistory = record.event.kind === 'stat' && !record.event.isUndoCompensation;
+      const hasHistoryEvent = existingLoggedHistory.some((item) => item?.id === record.event.id);
+      const nextLoggedHistory = (shouldAddHistory && !hasHistoryEvent)
+        ? [record.event, ...existingLoggedHistory].slice(0, 5000)
+        : existingLoggedHistory;
+
+      const nextSessionRevision = Math.max(toInt(currentSession.sessionRevision), 0) + 1;
+      const nextSession = {
+        ...currentSession,
+        gameLog: nextGameLog,
+        loggedHistory: nextLoggedHistory,
+        sessionUpdatedAt: Date.now(),
+        sessionRevision: nextSessionRevision
+      };
+
+      upsertActiveSessionStmt.run({
+        session_json: JSON.stringify(nextSession)
+      });
+      upsertMatchSessionRunningStmt.run({
+        session_id: currentSessionId,
+        created_at: toInt(nextSession.sessionCreatedAt) || Date.now(),
+        updated_at: Date.now()
+      });
+      broadcastSync({ sourceClientId });
+    }
   }
 
   return record;
@@ -2009,13 +2168,29 @@ function appendLiveEvent(event, sourceClientId = null) {
 
 function writeActiveSession(session, sourceClientId = null) {
   const existingSession = readActiveSession();
+  const existingSessionInstanceId = String(existingSession?.liveSessionInstanceId || existingSession?.sessionInstanceId || '').trim();
   const incomingSessionUpdatedAt = toInt(session?.sessionUpdatedAt);
   const incomingSessionRevision = toInt(session?.sessionRevision);
   const existingSessionRevision = toInt(existingSession?.sessionRevision);
   const incomingSessionInstanceId = String(session?.liveSessionInstanceId || session?.sessionInstanceId || '').trim();
   const incomingSessionCreatedAt = toInt(session?.sessionCreatedAt);
+  const isSameSessionInstance = Boolean(
+    existingSessionInstanceId
+    && incomingSessionInstanceId
+    && existingSessionInstanceId === incomingSessionInstanceId
+  );
 
-  if (existingSession && incomingSessionRevision > 0 && incomingSessionRevision < existingSessionRevision) {
+  if (!incomingSessionInstanceId) {
+    return false;
+  }
+
+  const incomingSessionStatusRow = selectMatchSessionByIdStmt.get(incomingSessionInstanceId);
+  const incomingSessionStatus = String(incomingSessionStatusRow?.status || '').trim().toLowerCase();
+  if (incomingSessionStatus === 'ended' || incomingSessionStatus === 'discarded') {
+    return false;
+  }
+
+  if (isSameSessionInstance && incomingSessionRevision > 0 && incomingSessionRevision < existingSessionRevision) {
     return false;
   }
 
@@ -2028,26 +2203,26 @@ function writeActiveSession(session, sourceClientId = null) {
     return false;
   }
 
-  if (incomingSessionUpdatedAt <= toInt(lastActiveSessionClearedAt)) {
-    return false;
-  }
-
-  // If the session was recently cleared, prevent older log streams from
-  // recreating a discarded game through delayed/in-flight PUT requests.
-  if (!existingSession && toInt(lastActiveSessionClearedAt) > 0) {
-    const newestIncomingEventTs = getNewestEventTimestamp(Array.isArray(session?.gameLog) ? session.gameLog : []);
-    if (newestIncomingEventTs > 0 && newestIncomingEventTs <= toInt(lastActiveSessionClearedAt)) {
-      return false;
-    }
+  // Keep compatibility with clients that may omit sessionUpdatedAt.
+  // If missing, synthesize a monotonic timestamp for merge persistence.
+  if (incomingSessionUpdatedAt <= 0) {
+    session = { ...session, sessionUpdatedAt: Date.now() };
   }
 
   lastActiveSessionSourceId = sourceClientId;
   const mergedSession = mergeActiveSession(existingSession, session || {});
-  const nextSessionRevision = Math.max(existingSessionRevision, incomingSessionRevision, existingSessionRevision + 1);
+  const nextSessionRevision = isSameSessionInstance
+    ? Math.max(existingSessionRevision, incomingSessionRevision, existingSessionRevision + 1)
+    : Math.max(incomingSessionRevision, 1);
   mergedSession.sessionRevision = nextSessionRevision;
   if (toInt(mergedSession.sessionCreatedAt) <= 0) {
     mergedSession.sessionCreatedAt = incomingSessionCreatedAt > 0 ? incomingSessionCreatedAt : Date.now();
   }
+  upsertMatchSessionRunningStmt.run({
+    session_id: incomingSessionInstanceId,
+    created_at: toInt(mergedSession.sessionCreatedAt),
+    updated_at: Date.now()
+  });
   upsertActiveSessionStmt.run({
     session_json: JSON.stringify(mergedSession)
   });
@@ -2057,23 +2232,94 @@ function writeActiveSession(session, sourceClientId = null) {
 
 function clearActiveSession(sourceClientId = null, options = {}) {
   lastActiveSessionSourceId = sourceClientId;
-  const discardedSessionInstanceId = String(options?.discardedSessionInstanceId || '').trim();
+  const existingSession = readActiveSession();
+  const existingSessionInstanceId = String(existingSession?.liveSessionInstanceId || existingSession?.sessionInstanceId || '').trim();
+  const discardedSessionInstanceId = String(options?.discardedSessionInstanceId || existingSessionInstanceId || '').trim();
+  const terminationStatus = normalizeTerminationStatus(options?.terminationStatus);
+  const terminatedSessionInstanceId = String(existingSessionInstanceId || discardedSessionInstanceId || '').trim();
+  const terminatedSessionCreatedAt = toInt(options?.discardedSessionCreatedAt)
+    || toInt(existingSession?.sessionCreatedAt)
+    || 0;
+  if (terminatedSessionInstanceId) {
+    markMatchSessionStatus(terminatedSessionInstanceId, terminationStatus, terminatedSessionCreatedAt);
+  }
   if (discardedSessionInstanceId) {
     lastDiscardedSessionInstanceId = discardedSessionInstanceId;
     lastDiscardedSessionClearedAt = Date.now();
   }
   lastActiveSessionClearedAt = Date.now();
+  persistLiveSessionGuards();
   deleteActiveSessionStmt.run();
-  // NOTE: live_events are intentionally NOT deleted here. They serve as a
-  // durable secondary log that clients can replay after a server restart or
-  // reconnect. Live events are only cleared when a new game is explicitly
-  // started via POST /api/live-events/reset.
+  broadcastSessionCleared(terminatedSessionInstanceId, sourceClientId, lastActiveSessionClearedAt);
+  // NOTE: live_events cleanup is controlled by callers (e.g. DELETE /api/active-session)
+  // so they can choose whether to preserve or clear replay history.
   broadcastSync({ sourceClientId });
 }
 
 function clearLiveEvents(sourceClientId = null) {
   lastActiveSessionSourceId = sourceClientId;
   deleteLiveEventsStmt.run();
+}
+
+function shouldApplyActiveSessionDelete(options = {}) {
+  const existingSession = readActiveSession();
+  if (!existingSession) return true;
+
+  const existingSessionId = String(existingSession?.liveSessionInstanceId || existingSession?.sessionInstanceId || '').trim();
+  const existingSessionCreatedAt = toInt(existingSession?.sessionCreatedAt);
+  const requestedSessionId = String(options?.discardedSessionInstanceId || '').trim();
+  const requestedSessionCreatedAt = toInt(options?.discardedSessionCreatedAt);
+
+  if (!existingSessionId || existingSessionCreatedAt <= 0) {
+    return true;
+  }
+
+  // If a client explicitly targets an older/different session, ignore the clear.
+  if (requestedSessionId && requestedSessionId !== existingSessionId) {
+    if (requestedSessionCreatedAt > 0 && requestedSessionCreatedAt < existingSessionCreatedAt) {
+      return false;
+    }
+  }
+
+  // If timestamps indicate the request is for an older session generation, ignore it.
+  if (requestedSessionCreatedAt > 0 && requestedSessionCreatedAt < existingSessionCreatedAt) {
+    return false;
+  }
+
+  return true;
+}
+
+function persistLiveSessionGuards() {
+  const payload = {
+    lastActiveSessionClearedAt: toInt(lastActiveSessionClearedAt),
+    lastDiscardedSessionInstanceId: String(lastDiscardedSessionInstanceId || '').trim(),
+    lastDiscardedSessionClearedAt: toInt(lastDiscardedSessionClearedAt)
+  };
+  upsertConfigValueStmt.run(LIVE_SESSION_GUARDS_KEY, JSON.stringify(payload));
+}
+
+function hydrateLiveSessionGuards() {
+  const raw = parseJsonSafe((selectLegacyConfigStmt.get(LIVE_SESSION_GUARDS_KEY) || {}).value_json, null);
+  if (!raw || typeof raw !== 'object') return;
+  lastActiveSessionClearedAt = Math.max(
+    toInt(lastActiveSessionClearedAt),
+    toInt(raw.lastActiveSessionClearedAt)
+  );
+  const persistedDiscardedSessionId = String(raw.lastDiscardedSessionInstanceId || '').trim();
+  if (persistedDiscardedSessionId) {
+    lastDiscardedSessionInstanceId = persistedDiscardedSessionId;
+  }
+  lastDiscardedSessionClearedAt = Math.max(
+    toInt(lastDiscardedSessionClearedAt),
+    toInt(raw.lastDiscardedSessionClearedAt)
+  );
+}
+
+function clearOrphanedLiveEvents() {
+  const hasActiveSession = Boolean(readActiveSession());
+  if (!hasActiveSession) {
+    clearLiveEvents(null);
+  }
 }
 
 function migrateLegacyIfNeeded() {
@@ -2100,6 +2346,8 @@ function migrateLegacyIfNeeded() {
 }
 
 migrateLegacyIfNeeded();
+hydrateLiveSessionGuards();
+clearOrphanedLiveEvents();
 
 function getCanonicalRequestHost(req) {
   const rawForwardedHost = String(req.headers['x-forwarded-host'] || '').trim().toLowerCase();
@@ -3052,10 +3300,16 @@ app.delete('/api/games/:gameId/social-cover', (req, res) => {
 });
 
 app.get('/api/active-session', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.json({ session: readActiveSession() });
 });
 
 app.get('/api/live-events', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const sinceSeq = toInt(req.query.sinceSeq);
   res.json({ events: readLiveEventsSince(sinceSeq) });
 });
@@ -3073,6 +3327,22 @@ app.post('/api/live-events', (req, res) => {
 
   try {
     const record = appendLiveEvent(event, sourceClientId || null);
+    if (!record) {
+      console.log('[live-events] ignored', {
+        eventId: String(event?.id || ''),
+        eventSessionId: String(event?.sessionInstanceId || ''),
+        activeSessionId: String(readActiveSession()?.liveSessionInstanceId || readActiveSession()?.sessionInstanceId || ''),
+        sourceClientId: sourceClientId || null
+      });
+      res.json({ ok: true, ignored: true });
+      return;
+    }
+    console.log('[live-events] accepted', {
+      seq: record.seq,
+      eventId: record.eventId,
+      eventSessionId: String(record?.event?.sessionInstanceId || ''),
+      sourceClientId: sourceClientId || null
+    });
     res.json({ ok: true, seq: record.seq, eventId: record.eventId });
   } catch (error) {
     res.status(500).json({ error: 'Failed to append live event' });
@@ -3093,6 +3363,16 @@ app.put('/api/active-session', (req, res) => {
   }
 
   const applied = writeActiveSession(session, sourceClientId || null);
+  console.log('[active-session] put', {
+    applied,
+    incomingSessionId: String(session?.liveSessionInstanceId || session?.sessionInstanceId || ''),
+    incomingRevision: toInt(session?.sessionRevision),
+    incomingCreatedAt: toInt(session?.sessionCreatedAt),
+    activeSessionId: String(readActiveSession()?.liveSessionInstanceId || readActiveSession()?.sessionInstanceId || ''),
+    lastDiscardedSessionInstanceId,
+    lastDiscardedSessionClearedAt: toInt(lastDiscardedSessionClearedAt),
+    sourceClientId: sourceClientId || null
+  });
   res.json({ ok: true, applied });
 });
 
@@ -3101,16 +3381,27 @@ app.delete('/api/active-session', (req, res) => {
     sourceClientId,
     clearLiveEvents: shouldClearLiveEvents,
     discardedSessionInstanceId,
-    discardedSessionCreatedAt
+    discardedSessionCreatedAt,
+    terminationStatus
   } = req.body || {};
-  clearActiveSession(sourceClientId || null, {
+  const applied = shouldApplyActiveSessionDelete({
     discardedSessionInstanceId,
     discardedSessionCreatedAt
   });
-  if (shouldClearLiveEvents) {
+  if (!applied) {
+    res.json({ ok: true, applied: false });
+    return;
+  }
+  const clearLiveEventsOnDelete = shouldClearLiveEvents !== false;
+  clearActiveSession(sourceClientId || null, {
+    discardedSessionInstanceId,
+    discardedSessionCreatedAt,
+    terminationStatus
+  });
+  if (clearLiveEventsOnDelete) {
     clearLiveEvents(sourceClientId || null);
   }
-  res.json({ ok: true });
+  res.json({ ok: true, applied: true });
 });
 
 wss = new WebSocketServer({ server });
