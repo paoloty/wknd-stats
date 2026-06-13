@@ -193,6 +193,7 @@
             const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
             const [pendingSharedGameId, setPendingSharedGameId] = useState(null);
             const [pendingSharedHistoryDetailTab, setPendingSharedHistoryDetailTab] = useState('');
+            const [pendingSharedRosterPlayer, setPendingSharedRosterPlayer] = useState(null);
             const [historyDetailTab, setHistoryDetailTab] = useState('potg');
             const [historyVideoInput, setHistoryVideoInput] = useState('');
             const [historyWriteupInput, setHistoryWriteupInput] = useState('');
@@ -416,13 +417,118 @@
             }, []);
 
             useEffect(() => {
-                const historySuffix = (activeTab === 'history' && selectedHistoryGameId)
-                    ? `?gameId=${encodeURIComponent(selectedHistoryGameId)}`
-                    : '';
-                const pagePath = `/app/${activeTab}${historySuffix}`;
-                const pageTitle = `WKND League Stats - ${String(activeTab || 'live').toUpperCase()}`;
+                const selectedGame = selectedHistoryGameId
+                    ? (games.find((game) => game.id === selectedHistoryGameId) || null)
+                    : null;
+                const selectedProfile = (() => {
+                    if (!selectedRosterPlayer?.teamId || !selectedRosterPlayer?.playerId) return null;
+                    const team = teams.find((item) => item.id === selectedRosterPlayer.teamId) || null;
+                    const player = team ? ((team.players || []).find((item) => item.id === selectedRosterPlayer.playerId) || null) : null;
+                    return team && player ? { team, player } : null;
+                })();
+
+                const pageTitle = activeTab === 'live'
+                    ? 'WKND League Stats - Live Console'
+                    : activeTab === 'history'
+                        ? (selectedGame
+                            ? `WKND League Stats - ${selectedGame.teamAName || 'Home'} vs ${selectedGame.teamBName || 'Away'}`
+                            : 'WKND League Stats - Game Log')
+                        : activeTab === 'teams'
+                            ? (selectedProfile
+                                ? `WKND League Stats - #${selectedProfile.player.number} ${selectedProfile.player.name}`
+                                : 'WKND League Stats - Rosters')
+                            : activeTab === 'standings'
+                                ? 'WKND League Stats - Standings'
+                                : activeTab === 'leaders'
+                                    ? 'WKND League Stats - League Leaders'
+                                    : 'WKND League Stats';
+
+                document.title = pageTitle;
+                const pagePath = `${window.location.pathname || '/'}${window.location.search || ''}`;
                 trackAnalyticsPageView(pagePath, pageTitle);
-            }, [activeTab, selectedHistoryGameId]);
+            }, [activeTab, selectedHistoryGameId, selectedRosterPlayer, games, teams]);
+
+            const parseRouteFromLocation = () => {
+                try {
+                    const url = new URL(window.location.href);
+                    const rawPath = String(url.pathname || '/').replace(/\/+$/, '') || '/';
+                    const pathParts = rawPath.split('/').filter(Boolean);
+
+                    if (pathParts[0] === 'history' && pathParts[1] === 'game' && pathParts[2]) {
+                        return {
+                            type: 'history-game',
+                            gameId: decodeURIComponent(pathParts[2]),
+                            historyTab: String(url.searchParams.get('tab') || '').trim()
+                        };
+                    }
+
+                    if (pathParts[0] === 'teams' && pathParts[1] === 'player' && pathParts[2] && pathParts[3]) {
+                        return {
+                            type: 'teams-player',
+                            teamId: decodeURIComponent(pathParts[2]),
+                            playerId: decodeURIComponent(pathParts[3])
+                        };
+                    }
+
+                    const tabFromPath = pathParts[0] || '';
+                    if (['live', 'teams', 'standings', 'history', 'leaders'].includes(tabFromPath)) {
+                        return {
+                            type: 'tab',
+                            activeTab: tabFromPath
+                        };
+                    }
+
+                    // Backward compatibility for old query-based links.
+                    const view = String(url.searchParams.get('view') || '').trim().toLowerCase();
+                    const gameId = String(url.searchParams.get('gameId') || '').trim();
+                    const historyTab = String(url.searchParams.get('tab') || '').trim();
+                    const teamId = String(url.searchParams.get('teamId') || '').trim();
+                    const playerId = String(url.searchParams.get('playerId') || '').trim();
+
+                    if (view === 'game' && gameId) {
+                        return { type: 'history-game', gameId, historyTab };
+                    }
+                    if (view === 'player' && teamId && playerId) {
+                        return { type: 'teams-player', teamId, playerId };
+                    }
+                    if (['live', 'teams', 'standings', 'history', 'leaders'].includes(view)) {
+                        return { type: 'tab', activeTab: view };
+                    }
+
+                    return { type: 'tab', activeTab: 'live' };
+                } catch (e) {
+                    return { type: 'tab', activeTab: 'live' };
+                }
+            };
+
+            const buildAppUrl = ({ tab, historyGameId, historyTabValue, rosterPlayer }) => {
+                const url = new URL(window.location.href);
+                const safeTab = ['live', 'teams', 'standings', 'history', 'leaders'].includes(String(tab || ''))
+                    ? String(tab)
+                    : 'live';
+                if (safeTab === 'history' && historyGameId) {
+                    url.pathname = `/history/game/${encodeURIComponent(historyGameId)}`;
+                    if (historyTabValue) {
+                        url.searchParams.set('tab', historyTabValue);
+                    } else {
+                        url.searchParams.delete('tab');
+                    }
+                } else if (safeTab === 'teams' && rosterPlayer?.teamId && rosterPlayer?.playerId) {
+                    url.pathname = `/teams/player/${encodeURIComponent(rosterPlayer.teamId)}/${encodeURIComponent(rosterPlayer.playerId)}`;
+                    url.searchParams.delete('tab');
+                } else {
+                    url.pathname = `/${safeTab}`;
+                    url.searchParams.delete('tab');
+                }
+
+                // Remove legacy query-state params from modern URLs.
+                url.searchParams.delete('view');
+                url.searchParams.delete('gameId');
+                url.searchParams.delete('teamId');
+                url.searchParams.delete('playerId');
+
+                return url.toString();
+            };
 
             useEffect(() => {
                 try {
@@ -439,16 +545,18 @@
 
             useEffect(() => {
                 try {
-                    const params = new URLSearchParams(window.location.search || '');
-                    const view = params.get('view');
-                    const sharedGameId = params.get('gameId');
-                    const sharedTab = String(params.get('tab') || '').trim();
-                    if (view === 'game' && sharedGameId) {
+                    const route = parseRouteFromLocation();
+                    if (route.type === 'history-game' && route.gameId) {
                         setActiveTab('history');
-                        setPendingSharedGameId(sharedGameId);
-                        if (sharedTab) {
-                            setPendingSharedHistoryDetailTab(sharedTab);
+                        setPendingSharedGameId(route.gameId);
+                        if (route.historyTab) {
+                            setPendingSharedHistoryDetailTab(route.historyTab);
                         }
+                    } else if (route.type === 'teams-player' && route.teamId && route.playerId) {
+                        setActiveTab('teams');
+                        setPendingSharedRosterPlayer({ teamId: route.teamId, playerId: route.playerId });
+                    } else if (route.type === 'tab') {
+                        setActiveTab(route.activeTab || 'live');
                     }
                 } catch (e) {}
             }, []);
@@ -460,7 +568,8 @@
                         __wkndNav: true,
                         activeTab,
                         selectedHistoryGameId: selectedHistoryGameId || null,
-                        historyDetailTab: activeTab === 'history' ? historyDetailTab : null
+                        historyDetailTab: activeTab === 'history' ? historyDetailTab : null,
+                        selectedRosterPlayer: activeTab === 'teams' ? selectedRosterPlayer : null
                     };
                     window.history.replaceState(initialState, '', url.toString());
                     lastNavUrlRef.current = url.toString();
@@ -475,6 +584,7 @@
                     suppressNextNavHistoryPushRef.current = true;
                     setActiveTab(state.activeTab || 'live');
                     setSelectedHistoryGameId(state.selectedHistoryGameId || null);
+                    setSelectedRosterPlayer(state.selectedRosterPlayer || null);
                     if (state.activeTab === 'history' && state.historyDetailTab) {
                         setHistoryDetailTab(String(state.historyDetailTab));
                     }
@@ -8253,10 +8363,11 @@
 
             const buildShareableGameLogUrl = (gameId) => {
                 if (!gameId) return '';
-                const url = new URL(window.location.href);
-                url.searchParams.set('view', 'game');
-                url.searchParams.set('gameId', gameId);
-                return url.toString();
+                return buildAppUrl({
+                    tab: 'history',
+                    historyGameId: gameId,
+                    historyTabValue: historyDetailTab
+                });
             };
 
             const handleCopyGameLogShareLink = async (gameId) => {
@@ -9010,26 +9121,19 @@
 
             const syncHistoryShareUrl = (gameId, mode = 'replace') => {
                 try {
-                    const url = new URL(window.location.href);
-                    if (activeTab === 'history' && gameId) {
-                        url.searchParams.set('view', 'game');
-                        url.searchParams.set('gameId', gameId);
-                        if (historyDetailTab) {
-                            url.searchParams.set('tab', historyDetailTab);
-                        } else {
-                            url.searchParams.delete('tab');
-                        }
-                    } else {
-                        url.searchParams.delete('view');
-                        url.searchParams.delete('gameId');
-                        url.searchParams.delete('tab');
-                    }
-                    const nextUrl = url.toString();
+                    const rosterPlayer = activeTab === 'teams' ? selectedRosterPlayer : null;
+                    const nextUrl = buildAppUrl({
+                        tab: activeTab,
+                        historyGameId: activeTab === 'history' ? gameId : null,
+                        historyTabValue: activeTab === 'history' ? historyDetailTab : '',
+                        rosterPlayer
+                    });
                     const nextState = {
                         __wkndNav: true,
                         activeTab,
                         selectedHistoryGameId: gameId || null,
-                        historyDetailTab: activeTab === 'history' ? historyDetailTab : null
+                        historyDetailTab: activeTab === 'history' ? historyDetailTab : null,
+                        selectedRosterPlayer: activeTab === 'teams' ? rosterPlayer : null
                     };
 
                     if (mode === 'push') {
@@ -9061,6 +9165,22 @@
             }, [pendingSharedGameId, pendingSharedHistoryDetailTab, games]);
 
             useEffect(() => {
+                if (!pendingSharedRosterPlayer) return;
+                const team = teams.find((item) => item.id === pendingSharedRosterPlayer.teamId);
+                if (!team) return;
+                const playerExists = (team.players || []).some((player) => player.id === pendingSharedRosterPlayer.playerId);
+                if (!playerExists) {
+                    setPendingSharedRosterPlayer(null);
+                    return;
+                }
+                setSelectedRosterPlayer({
+                    teamId: pendingSharedRosterPlayer.teamId,
+                    playerId: pendingSharedRosterPlayer.playerId
+                });
+                setPendingSharedRosterPlayer(null);
+            }, [pendingSharedRosterPlayer, teams]);
+
+            useEffect(() => {
                 if (suppressNextNavHistoryPushRef.current) {
                     suppressNextNavHistoryPushRef.current = false;
                     syncHistoryShareUrl(selectedHistoryGameId, 'replace');
@@ -9068,31 +9188,27 @@
                 }
 
                 const nextGameId = (activeTab === 'history') ? selectedHistoryGameId : null;
+                const nextRosterPlayer = (activeTab === 'teams') ? selectedRosterPlayer : null;
                 let nextUrl = '';
                 try {
-                    const url = new URL(window.location.href);
-                    if (activeTab === 'history' && nextGameId) {
-                        url.searchParams.set('view', 'game');
-                        url.searchParams.set('gameId', nextGameId);
-                        if (historyDetailTab) {
-                            url.searchParams.set('tab', historyDetailTab);
-                        } else {
-                            url.searchParams.delete('tab');
-                        }
-                    } else {
-                        url.searchParams.delete('view');
-                        url.searchParams.delete('gameId');
-                        url.searchParams.delete('tab');
-                    }
-                    nextUrl = url.toString();
+                    nextUrl = buildAppUrl({
+                        tab: activeTab,
+                        historyGameId: activeTab === 'history' ? nextGameId : null,
+                        historyTabValue: activeTab === 'history' ? historyDetailTab : '',
+                        rosterPlayer: nextRosterPlayer
+                    });
                 } catch (e) {}
 
                 const currentState = window.history.state;
                 const currentTab = currentState?.__wkndNav ? String(currentState.activeTab || 'live') : null;
                 const currentGameId = currentState?.__wkndNav ? (currentState.selectedHistoryGameId || null) : null;
                 const currentHistoryDetailTab = currentState?.__wkndNav ? (currentState.historyDetailTab || null) : null;
+                const currentRosterPlayer = currentState?.__wkndNav ? (currentState.selectedRosterPlayer || null) : null;
                 const nextHistoryDetailTab = activeTab === 'history' ? historyDetailTab : null;
-                const stateMatches = currentTab === activeTab && currentGameId === nextGameId && currentHistoryDetailTab === nextHistoryDetailTab;
+                const stateMatches = currentTab === activeTab
+                    && currentGameId === nextGameId
+                    && currentHistoryDetailTab === nextHistoryDetailTab
+                    && JSON.stringify(currentRosterPlayer || null) === JSON.stringify(nextRosterPlayer || null);
                 const currentUrl = (() => {
                     try {
                         return new URL(window.location.href).toString();
@@ -9107,7 +9223,7 @@
                 }
 
                 syncHistoryShareUrl(nextGameId, 'push');
-            }, [activeTab, selectedHistoryGameId, historyDetailTab]);
+            }, [activeTab, selectedHistoryGameId, selectedRosterPlayer, historyDetailTab]);
 
             const getTopTeamPerformers = (team, game, limit = 3) => {
                 if (!team || !game) return [];
@@ -13182,14 +13298,14 @@
                                 <p className="text-[11px] text-slate-400 mb-3">#{advancedEditingPlayer.number} {advancedEditingPlayer.name}</p>
                                 <form onSubmit={handleSaveAdvancedPlayerProfile} className="space-y-3 text-xs">
                                     <input
-                                        type="url"
+                                        type="text"
                                         value={advancedEditingPlayer.pictureUrl}
                                         onChange={(e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, pictureUrl: e.target.value })}
-                                        placeholder="Picture URL"
+                                        placeholder="Picture URL or filename (e.g. player-1.jpg)"
                                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
                                     />
                                     <p className="text-[10px] text-slate-500 -mt-1">
-                                        External image URLs are downloaded and stored locally on save.
+                                        Use an external image URL, or type a filename for an image you manually placed in data/player-images.
                                     </p>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         <input

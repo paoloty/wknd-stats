@@ -842,8 +842,24 @@ function isLocallyHostedPlayerImageUrl(urlValue) {
   }
 }
 
+function normalizeManualPlayerImageValue(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) return '';
+  if (value.startsWith('data:image/')) return value;
+  if (isLocallyHostedPlayerImageUrl(value)) return value;
+
+  // Allow users to type only a file name (e.g. "player-1.jpg") for files
+  // manually placed under data/player-images.
+  const simpleNamePattern = /^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp)$/i;
+  if (simpleNamePattern.test(value)) {
+    return `/data/player-images/${value}`;
+  }
+
+  return value;
+}
+
 async function cacheRemotePlayerImage(profileImageUrl, playerIdentityHint = 'player') {
-  const value = String(profileImageUrl || '').trim();
+  const value = normalizeManualPlayerImageValue(profileImageUrl);
   if (!value) return '';
   if (value.startsWith('data:image/')) return value;
   if (isLocallyHostedPlayerImageUrl(value)) return value;
@@ -2137,8 +2153,16 @@ function renderInjectedIndex(req, res) {
   const requestHostname = getCanonicalRequestHostname(req);
 
   try {
-    const gameId = String(req.query.gameId || '').trim();
-    const isGameView = String(req.query.view || '').toLowerCase() === 'game' && gameId;
+    const pathParts = String(req.path || '/').split('/').filter(Boolean);
+    const pathGameId = pathParts[0] === 'history' && pathParts[1] === 'game' && pathParts[2]
+      ? decodeURIComponent(String(pathParts[2] || '').trim())
+      : '';
+    const queryGameId = String(req.query.gameId || '').trim();
+    const gameId = pathGameId || queryGameId;
+    const isGameView = Boolean(gameId) && (
+      (String(req.query.view || '').toLowerCase() === 'game')
+      || (pathParts[0] === 'history' && pathParts[1] === 'game')
+    );
     const state = readState();
     const game = isGameView ? ((state.games || []).find((item) => item.id === gameId) || null) : null;
     const indexPath = path.join(__dirname, 'index.html');
@@ -2177,6 +2201,18 @@ app.get('/', (req, res) => {
 });
 
 app.get('/index.html', (req, res) => {
+  renderInjectedIndex(req, res);
+});
+
+app.get([
+  '/live',
+  '/teams',
+  '/standings',
+  '/leaders',
+  '/history',
+  '/history/game/:gameId',
+  '/teams/player/:teamId/:playerId'
+], (req, res) => {
   renderInjectedIndex(req, res);
 });
 
