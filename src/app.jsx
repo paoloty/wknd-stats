@@ -354,6 +354,10 @@
             const liveLogEditTarget = editingLiveLogId
                 ? ((gameLog || []).find((entry) => entry?.id === editingLiveLogId) || null)
                 : null;
+            const isLiveLogEditModalOpen = Boolean(liveLogEditTarget);
+            const isAdvancedPlayerModalOpen = Boolean(advancedEditingPlayer);
+            const isConfirmDialogOpen = Boolean(confirmDialog);
+            const isFoulAlertOpen = Boolean(foulAlert);
             const isLiveGameplayModalActive = Boolean(
                 (showLoggingModal && !!activeAction)
                 || showSubstitutionModal
@@ -711,6 +715,15 @@
                 if (stoppedClockActionIds.has(action?.id) && isPeriodClockRunning) {
                     showToast('Free Throw and Free Throw Missed are only available when the clock is stopped or paused.', 'info');
                     return;
+                }
+
+                if (isGameLive) {
+                    const shouldAutoTriggerStartAction = periodActionMode === 'startMatch'
+                        || periodActionMode === 'startPeriod'
+                        || periodActionMode === 'startOvertime';
+                    if (shouldAutoTriggerStartAction) {
+                        handlePeriodAction();
+                    }
                 }
 
                 const isTrueFoulAction = action?.stat === 'pf';
@@ -2576,6 +2589,7 @@
                     homeScore: g.teamAScore,
                     awayTeam: g.teamBName,
                     awayScore: g.teamBScore,
+                    underReview: Boolean(g.underReview),
                     writeupSnippet: String(g.gameWriteup || '').trim().slice(0, 140)
                 }))
             ];
@@ -3059,7 +3073,7 @@
                 && !awaitingOvertimeDecision
                 && !isPeriodClockRunning
                 && (
-                    Number(periodClockSeconds || 0) <= 0
+                    (hasCurrentQuarterStarted && Number(periodClockSeconds || 0) <= 0)
                     || hasQuarterEndedFromLog
                     || hasFinalizedPreviousPeriod
                 );
@@ -3338,7 +3352,7 @@
 
                 const foulActionModalOpen = showLoggingModal && !!activeAction && isFoulLikeAction(activeAction);
                 const actionModalOpen = showLoggingModal && !!activeAction && !isFoulLikeAction(activeAction);
-                const liveEditModalOpen = Boolean(liveLogEditTarget);
+                const liveEditModalOpen = isLiveLogEditModalOpen;
 
                 if (foulActionModalOpen) {
                     pendingFoulActionPauseRef.current = true;
@@ -3376,7 +3390,7 @@
                 activeAction,
                 showSubstitutionModal,
                 showAddFromBenchModal,
-                liveLogEditTarget
+                isLiveLogEditModalOpen
             ]);
 
             const tryApplyPendingModalSoftResume = (liveGameplayModalOpen) => {
@@ -3400,7 +3414,7 @@
                     (showLoggingModal && !!activeAction)
                     || showSubstitutionModal
                     || showAddFromBenchModal
-                    || liveLogEditTarget
+                    || isLiveLogEditModalOpen
                 );
 
                 const wasOpen = wasLiveGameModalOpenRef.current;
@@ -3433,7 +3447,7 @@
                 activeAction,
                 showSubstitutionModal,
                 showAddFromBenchModal,
-                liveLogEditTarget,
+                isLiveLogEditModalOpen,
                 timeoutIsActive,
                 isAwaitingPeriodStart,
                 awaitingOvertimeDecision,
@@ -3445,7 +3459,7 @@
                     (showLoggingModal && !!activeAction)
                     || showSubstitutionModal
                     || showAddFromBenchModal
-                    || liveLogEditTarget
+                    || isLiveLogEditModalOpen
                 );
 
                 if (!isGameLive || !liveGameplayModalOpen) {
@@ -3459,7 +3473,7 @@
                 activeAction,
                 showSubstitutionModal,
                 showAddFromBenchModal,
-                liveLogEditTarget,
+                isLiveLogEditModalOpen,
                 localSoftPauseActive,
                 timeoutIsActive,
                 isAwaitingPeriodStart,
@@ -3659,7 +3673,16 @@
 
             /* Managing body scrolling locks */
             useEffect(() => {
-                const isAnyModalOpen = showNewTeamModal || showNewPlayerModal || showSubstitutionModal || showAddFromBenchModal || showLoggingModal || !!advancedEditingPlayer || !!confirmDialog || !!foulAlert || showAuthModal || !!liveLogEditTarget;
+                const isAnyModalOpen = showNewTeamModal
+                    || showNewPlayerModal
+                    || showSubstitutionModal
+                    || showAddFromBenchModal
+                    || showLoggingModal
+                    || isAdvancedPlayerModalOpen
+                    || isConfirmDialogOpen
+                    || isFoulAlertOpen
+                    || showAuthModal
+                    || isLiveLogEditModalOpen;
                 if (isAnyModalOpen) {
                     if (!bodyScrollLockedRef.current) {
                         bodyScrollLockYRef.current = window.scrollY || window.pageYOffset || 0;
@@ -3695,7 +3718,7 @@
                         bodyScrollLockedRef.current = false;
                     }
                 };
-            }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, showLoggingModal, advancedEditingPlayer, confirmDialog, foulAlert, showAuthModal, liveLogEditTarget]);
+            }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, showLoggingModal, isAdvancedPlayerModalOpen, isConfirmDialogOpen, isFoulAlertOpen, showAuthModal, isLiveLogEditModalOpen]);
 
             const handleImportCSV = (e) => {
                 const file = e.target.files[0];
@@ -3794,7 +3817,12 @@
                         const loadedActions = Array.isArray(bootstrap?.statActions) ? bootstrap.statActions : [];
 
                         const normalizedTeams = normalizeTeamsForStorage(loadedTeams);
-                        const normalizedGames = loadedGames.sort((a, b) => b.id.localeCompare(a.id));
+                        const normalizedGames = loadedGames
+                            .map((game) => ({
+                                ...game,
+                                underReview: Boolean(game?.underReview)
+                            }))
+                            .sort((a, b) => b.id.localeCompare(a.id));
 
                         setTeams(normalizedTeams);
                         setGames(normalizedGames);
@@ -4516,6 +4544,7 @@
                     teamBName: game?.teamBName || '',
                     teamAScore: Number(game?.teamAScore || 0),
                     teamBScore: Number(game?.teamBScore || 0),
+                    underReview: Boolean(game?.underReview),
                     playerStats: game?.playerStats || {},
                     gameWriteup: game?.gameWriteup || '',
                     potgWriteup: game?.potgWriteup || '',
@@ -4594,6 +4623,7 @@
                             teamBName: resolvedTeamBName || fallbackTeamBName,
                             teamAScore: Number(importedGameMeta?.teamAScore || 0),
                             teamBScore: Number(importedGameMeta?.teamBScore || 0),
+                            underReview: Boolean(importedGameMeta?.underReview),
                             playerStats: importedPlayerStats,
                             dnpPlayers: Array.isArray(parsed?.dnpPlayers) ? parsed.dnpPlayers : [],
                             periodSnapshots: Array.isArray(parsed?.periodSnapshots) ? parsed.periodSnapshots : [],
@@ -4759,6 +4789,24 @@
                 setGames(updatedGames);
                 await saveFullState(teams, updatedGames);
                 showToast(writeupText.trim() ? 'Game recap saved.' : 'Game recap removed.', 'success');
+            };
+
+            const handleToggleGameUnderReview = async (gameId) => {
+                if (!gameId || !isLoggedIn) return;
+
+                const updatedGames = games.map((existingGame) => {
+                    if (existingGame.id !== gameId) return existingGame;
+                    return {
+                        ...existingGame,
+                        underReview: !Boolean(existingGame?.underReview)
+                    };
+                });
+
+                setGames(updatedGames);
+                await saveFullState(teams, updatedGames);
+
+                const updated = updatedGames.find((game) => game.id === gameId);
+                showToast(updated?.underReview ? 'Marked as pending stats review.' : 'Marked as review complete.', 'success');
             };
 
             const handleGenerateGameWriteup = async ({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers }) => {
@@ -5560,6 +5608,7 @@
                 if (!ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
                 if (!activeAction) return;
                 const isTechnicalFoulAction = String(activeAction?.id || '') === 'pf_technical';
+                const isFoulLikeSelectedAction = isFoulLikeAction(activeAction);
                 const isPrimaryAction = primaryActionIds.has(String(activeAction?.id || ''));
                 const isAutoResumeAction = autoResumeActionIds.has(String(activeAction?.id || ''));
                 const isStoppedClockAction = stoppedClockActionIds.has(String(activeAction?.id || ''));
@@ -5577,13 +5626,14 @@
                     && (!isTimeoutOrFoulPauseSource || isAutoResumeAction)
                     && !isStoppedClockAction;
 
-                if (isTimeoutOrFoulPauseSource && !isAutoResumeAction && !isTechnicalFoulAction && !isStoppedClockAction && !canBackfillEndedPeriodStats) {
+                if (isTimeoutOrFoulPauseSource && !isAutoResumeAction && !isTechnicalFoulAction && !isFoulLikeSelectedAction && !isStoppedClockAction && !canBackfillEndedPeriodStats) {
                     showToast('Clock is stopped for timeout/stoppage. Resume play before logging this action.', 'info');
                     return;
                 }
 
                 const shouldConfirmResumeForNonPrimary = !isAutoResumeAction
                     && !isStoppedClockAction
+                    && !isFoulLikeSelectedAction
                     && canAutoResumeClockFromStat
                     && !nonPrimaryResumeConfirmRef.current;
                 if (shouldConfirmResumeForNonPrimary) {
@@ -5600,13 +5650,26 @@
                     });
                     return;
                 }
-                if (!hasMatchStarted && !canBackfillEndedPeriodStats && !canTriggerAlwaysAction(activeAction)) {
-                    showToast('Press Start Match before logging stats.', 'info');
+                if (!hasMatchStarted && !canBackfillEndedPeriodStats) {
+                    if (periodActionMode === 'startMatch') {
+                        handlePeriodAction();
+                        showToast('Match auto-started from stat trigger.', 'info');
+                    } else {
+                        showToast('Match has not started yet.', 'info');
+                    }
                     return;
                 }
-                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted && !canTriggerAlwaysAction(activeAction) && !canBackfillEndedPeriodStats) {
-                    showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
-                    return;
+                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted) {
+                    if (periodActionMode === 'startPeriod') {
+                        handleStartNextQuarter();
+                        showToast(`${nextPeriodStartLabel} auto-started from stat trigger.`, 'info');
+                    } else if (periodActionMode === 'startOvertime') {
+                        handleStartOvertime();
+                        showToast(`${nextPeriodStartLabel} auto-started from stat trigger.`, 'info');
+                    } else {
+                        showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
+                        return;
+                    }
                 }
                 if (stoppedClockActionIds.has(activeAction?.id) && isPeriodClockRunning) {
                     showToast('Free Throw and Free Throw Missed are only allowed when the clock is stopped or paused.', 'info');
@@ -7435,6 +7498,7 @@
                     teamBName: teamBObj.name,
                     teamAScore,
                     teamBScore,
+                    underReview: false,
                     playerStats: participantStats,
                     dnpPlayers: [...dnpPlayers],
                     periodSnapshots: [...periodSnapshots],
@@ -11877,9 +11941,16 @@
                                                         className={`w-full text-left bg-slate-950/60 border rounded-xl p-3 cursor-pointer transition-colors ${isSelected ? 'border-orange-400/70' : 'border-slate-800 hover:border-orange-400/60'}`}
                                                     >
                                                         <div className="flex items-center justify-between gap-2">
-                                                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${game.status === 'LIVE' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'}`}>
-                                                                {game.status}
-                                                            </span>
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${game.status === 'LIVE' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'}`}>
+                                                                    {game.status}
+                                                                </span>
+                                                                {game.status === 'ENDED' && Boolean(game.underReview) && (
+                                                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/40">
+                                                                        Stats Review Pending
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                             <span className="text-[10px] text-slate-500 font-mono truncate">{game.date}</span>
                                                         </div>
                                                         <div className="mt-2 text-sm font-extrabold text-white">
@@ -12027,8 +12098,21 @@
                                                     </div>
                                                     <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
                                                         <span className="font-mono text-xs font-bold text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">{game.date}</span>
+                                                        {Boolean(game.underReview) && (
+                                                            <span className="font-mono text-xs font-bold text-amber-200 bg-amber-500/15 border border-amber-500/45 px-2.5 py-1 rounded-lg">Stats Review Pending</span>
+                                                        )}
                                                         {isLoggedIn && (
                                                             <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleToggleGameUnderReview(game.id)}
+                                                                    className={`px-2.5 py-1 font-bold text-xs rounded-lg cursor-pointer transition-colors border ${game.underReview
+                                                                        ? 'bg-emerald-500/12 hover:bg-emerald-500/22 border-emerald-500/40 text-emerald-300'
+                                                                        : 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/35 text-amber-300'}`}
+                                                                    title={game.underReview ? 'Mark this game log as review complete after stats validation' : 'Mark this game log for stats validation and missing-stat checks'}
+                                                                >
+                                                                    {game.underReview ? 'Mark Review Complete' : 'Mark Stats Review Pending'}
+                                                                </button>
                                                                 {/* EDIT SYSTEM INITIATOR TRIGGER BUTTON */}
                                                                 <button 
                                                                     onClick={() => {

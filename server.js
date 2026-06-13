@@ -329,6 +329,13 @@ function ensureGamesDnpColumn() {
   }
 }
 
+function ensureGamesUnderReviewColumn() {
+  const columns = db.prepare('PRAGMA table_info(games)').all();
+  if (!columns.some((column) => column.name === 'under_review')) {
+    db.exec('ALTER TABLE games ADD COLUMN under_review INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
 function ensurePlayerProfileColumns() {
   const columns = db.prepare('PRAGMA table_info(players)').all();
   const wanted = [
@@ -540,6 +547,7 @@ db.exec(`
     potg_writeup TEXT NOT NULL DEFAULT '',
     social_cover_data_url TEXT NOT NULL DEFAULT '',
     dnp_players_json TEXT NOT NULL DEFAULT '[]',
+    under_review INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0
   );
 
@@ -610,6 +618,7 @@ ensureGamesPotgWriteupColumn();
 ensureGamesPeriodSnapshotsColumn();
 ensureGamesSocialCoverColumn();
 ensureGamesDnpColumn();
+ensureGamesUnderReviewColumn();
 ensurePlayerProfileColumns();
 ensurePlayerTotalsTable();
 ensurePlayersTableWithoutLegacyStats();
@@ -660,9 +669,9 @@ const upsertPlayerTotalsStmt = db.prepare(`
 
 const insertGameStmt = db.prepare(`
   INSERT INTO games (
-    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, social_cover_data_url, dnp_players_json, sort_order
+    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, social_cover_data_url, dnp_players_json, under_review, sort_order
   ) VALUES (
-    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @social_cover_data_url, @dnp_players_json, @sort_order
+    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @social_cover_data_url, @dnp_players_json, @under_review, @sort_order
   )
 `);
 
@@ -712,7 +721,7 @@ const selectPlayersStmt = db.prepare(`
   ORDER BY p.sort_order ASC, p.id ASC
 `);
 const selectGamesStmt = db.prepare(`
-  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, social_cover_data_url, dnp_players_json
+  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, social_cover_data_url, dnp_players_json, under_review
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
@@ -1623,6 +1632,7 @@ function readState() {
     gameLog: parseJsonSafe(game.game_log_json, []),
     periodSnapshots: parseJsonSafe(game.period_snapshots_json, []),
     dnpPlayers: parseJsonSafe(game.dnp_players_json, []),
+    underReview: toInt(game.under_review) === 1,
     youtubeUrl: game.youtube_url || '',
     gameWriteup: game.game_writeup || '',
     potgWriteup: game.potg_writeup || '',
@@ -1703,6 +1713,7 @@ const writeGamesTransaction = db.transaction((nextGames) => {
       game_log_json: JSON.stringify(Array.isArray(game.gameLog) ? game.gameLog : []),
       period_snapshots_json: JSON.stringify(Array.isArray(game.periodSnapshots) ? game.periodSnapshots : []),
       dnp_players_json: JSON.stringify(Array.isArray(game.dnpPlayers) ? game.dnpPlayers : []),
+      under_review: game?.underReview ? 1 : 0,
       youtube_url: typeof game.youtubeUrl === 'string' ? game.youtubeUrl : '',
       game_writeup: typeof game.gameWriteup === 'string' ? game.gameWriteup : '',
       potg_writeup: typeof game.potgWriteup === 'string' ? game.potgWriteup : '',
