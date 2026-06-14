@@ -2470,11 +2470,22 @@
                     );
                 const remoteAwaitingPeriodStart = Boolean(session.awaitingPeriodStart);
                 const remoteAwaitingOvertimeDecision = Boolean(session.awaitingOvertimeDecision);
+                const localClockSeconds = Number(periodClockSeconds || 0);
+                const shouldPreserveLocalClockDuringResumeLock = hasActiveLocalResumeLock
+                    && !pauseActiveFromLog
+                    && !remoteAwaitingPeriodStart
+                    && !remoteAwaitingOvertimeDecision
+                    && localClockSeconds > 0
+                    && remoteClockSeconds <= 0
+                    && resolvedRemoteQuarter === currentQuarter;
+                const effectiveRemoteClockSeconds = shouldPreserveLocalClockDuringResumeLock
+                    ? localClockSeconds
+                    : remoteClockSeconds;
                 const shouldForceRunningDuringResumeLock = hasActiveLocalResumeLock
                     && !pauseActiveFromLog
                     && !remoteAwaitingPeriodStart
                     && !remoteAwaitingOvertimeDecision
-                    && remoteClockSeconds > 0;
+                    && effectiveRemoteClockSeconds > 0;
                 const shouldForceLocalResumeState = hasActiveLocalResumeLock && (pauseActiveFromLog || shouldForceRunningDuringResumeLock);
                 const hasLocalOnly = (gameLogRef.current || []).some((event) => event?.id && !lastRemoteGameLogIdsRef.current.has(event.id));
                 setSyncDebug((prev) => ({
@@ -2522,7 +2533,7 @@
                 setTeamBBench(teamBRotation.bench);
                 setLiveStats(replayed?.liveStats || session.liveStats || {});
                 setPeriodSnapshots(Array.isArray(session.periodSnapshots) ? session.periodSnapshots : []);
-                setPeriodClockSeconds(remoteClockSeconds);
+                setPeriodClockSeconds(effectiveRemoteClockSeconds);
                 // Only let log-derived pause state override session state when the session also
                 // agrees the clock is paused. If the server explicitly says running (e.g. admin
                 // resumed but the playResume event is still uploading), trust the session.
@@ -4322,13 +4333,21 @@
 
                             if (payload.state) {
                                 setTeams(normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []));
-                                setGames(() => {
+                                setGames((prevGames) => {
                                     const remoteGames = Array.isArray(payload.state.games)
                                         ? payload.state.games.sort((a, b) => b.id.localeCompare(a.id))
                                         : [];
+                                    // If the remote snapshot is missing games that exist locally (e.g. a
+                                    // just-imported game whose PUT is still in-flight), keep those local
+                                    // games so a sync broadcast can't wipe them before the server persists.
+                                    const remoteGameIds = new Set(remoteGames.map((g) => String(g?.id || '')));
+                                    const pendingLocalGames = (prevGames || []).filter((g) => g?.id && !remoteGameIds.has(String(g.id)));
+                                    const merged = pendingLocalGames.length
+                                        ? [...pendingLocalGames, ...remoteGames].sort((a, b) => String(b.id || '').localeCompare(String(a.id || '')))
+                                        : remoteGames;
                                     const now = Date.now();
 
-                                    return remoteGames.map((remoteGame) => {
+                                    return merged.map((remoteGame) => {
                                         const gameId = String(remoteGame?.id || '');
                                         const pending = pendingYoutubeSaveRef.current[gameId];
                                         if (!pending) return remoteGame;
