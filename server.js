@@ -29,6 +29,7 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+const REQUEST_BODY_LIMIT = String(process.env.WKND_REQUEST_BODY_LIMIT || '64mb').trim() || '64mb';
 let wss = null;
 let lastActiveSessionSourceId = null;
 let lastActiveSessionClearedAt = 0;
@@ -2407,7 +2408,19 @@ function buildGaHeadSnippet(req) {
   ].join('\n    ');
 }
 
-app.use(express.json({ limit: '12mb' }));
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: REQUEST_BODY_LIMIT }));
+
+app.use((error, _req, res, next) => {
+  if (error?.type === 'entity.too.large' || error?.status === 413) {
+    res.status(413).json({
+      error: 'Request body too large.',
+      limit: REQUEST_BODY_LIMIT
+    });
+    return;
+  }
+  next(error);
+});
 
 app.use((req, res, next) => {
   const canonicalHost = getCanonicalRequestHost(req);
