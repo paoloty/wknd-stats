@@ -12712,7 +12712,6 @@
                                                                 <th className="py-2 px-2 text-left">Date</th>
                                                                 <th className="py-2 px-2 text-left">Opp</th>
                                                                 <th className="py-2 px-2 text-center">Score</th>
-                                                                    <th className="py-2 px-2 text-center text-emerald-300">MIN</th>
                                                                 <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                 <th className="py-2 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                 <th className="py-2 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
@@ -12748,7 +12747,6 @@
                                                                     <td className="py-2 px-2 text-slate-400 whitespace-nowrap">{game.date || '-'}</td>
                                                                     <td className="py-2 px-2 font-bold text-slate-200 whitespace-nowrap">vs {game.opponentName}</td>
                                                                     <td className="py-2 px-2 text-center text-slate-400 whitespace-nowrap">{selectedRosterTeam.name} {game.teamScore} - {game.opponentScore}</td>
-                                                                    <td className="py-2 px-2 text-center text-emerald-300 font-bold">{game.didPlay ? (String(game.stats?.min || '').trim() || '-') : '-'}</td>
                                                                     <td className="py-2 px-2 text-center font-black text-orange-400">{game.didPlay ? (game.stats?.pts || 0) : '-'}</td>
                                                                     <td className="py-2 px-2 text-center text-emerald-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0) + Number(game.stats?.fg2m_miss || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
                                                                     <td className="py-2 px-2 text-center text-cyan-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg3m || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
@@ -14033,7 +14031,6 @@
                                                                 <tr className="bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800">
                                                                     <th className="py-2.5 px-3">Player</th>
                                                                     <th className="py-2.5 px-2 text-center text-rose-300">Status</th>
-                                                                    <th className="py-2.5 px-2 text-center text-emerald-300">MIN</th>
                                                                     <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
@@ -14088,7 +14085,6 @@
                                                                                         )}
                                                                                     </div>
                                                                                 </td>
-                                                                                <td className="py-2 px-2 text-center text-emerald-300 font-bold">{isDnp ? '-' : (String(pstats.min || '').trim() || '-')}</td>
                                                                                 <td className="py-2 px-2 text-center text-orange-400 font-black">{isDnp ? '—' : pstats.pts}</td>
                                                                                 <td className="py-2 px-2 text-center text-emerald-400 font-bold">{isDnp ? '—' : pPct.fgMadeAtt}</td>
                                                                                 <td className="py-2 px-2 text-center text-cyan-400 font-bold">{isDnp ? '—' : pPct.fg3MadeAtt}</td>
@@ -14121,7 +14117,6 @@
                                                                 <tr className="bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800">
                                                                     <th className="py-2.5 px-3">Player</th>
                                                                     <th className="py-2.5 px-2 text-center text-rose-300">Status</th>
-                                                                    <th className="py-2.5 px-2 text-center text-emerald-300">MIN</th>
                                                                     <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
@@ -14176,7 +14171,6 @@
                                                                                         )}
                                                                                     </div>
                                                                                 </td>
-                                                                                <td className="py-2 px-2 text-center text-emerald-300 font-bold">{isDnp ? '-' : (String(pstats.min || '').trim() || '-')}</td>
                                                                                 <td className="py-2 px-2 text-center text-orange-400 font-black">{isDnp ? '—' : pstats.pts}</td>
                                                                                 <td className="py-2 px-2 text-center text-emerald-400 font-bold">{isDnp ? '—' : pPct.fgMadeAtt}</td>
                                                                                 <td className="py-2 px-2 text-center text-cyan-400 font-bold">{isDnp ? '—' : pPct.fg3MadeAtt}</td>
