@@ -328,6 +328,7 @@
             const [sharedAdminFocus, setSharedAdminFocus] = useState(null);
             const [isRoleCapacityExceeded, setIsRoleCapacityExceeded] = useState(false);
             const hadLiveSessionRef = useRef(false);
+            const gamesBootstrappedRef = useRef(false);
 
             const [authRole, setAuthRole] = useState('viewer');
             const [showAuthModal, setShowAuthModal] = useState(false);
@@ -3991,11 +3992,23 @@
             useEffect(() => {
                 const loadState = async () => {
                     const cachedState = readCachedAppState();
-                    if (cachedState?.dirty) {
+                    // If the URL is a direct shared-game link, always fetch from the server
+                    // so the latest DB state is used. A dirty-cache shortcut can miss games
+                    // that were imported on another device or in a different browser session.
+                    const isSharedGameUrl = (() => {
+                        try {
+                            const pathParts = String(window.location.pathname || '').split('/').filter(Boolean);
+                            if (pathParts[0] === 'history' && pathParts[1] === 'game' && pathParts[2]) return true;
+                            const params = new URL(window.location.href).searchParams;
+                            return params.get('view') === 'game' && Boolean(params.get('gameId'));
+                        } catch { return false; }
+                    })();
+                    if (cachedState?.dirty && !isSharedGameUrl) {
                         setTeams(normalizeTeamsForStorage(cachedState.teams));
                         setGames(Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : []);
                         setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
-                        return;
+                        // Do not return here. Dirty cache is only a temporary local snapshot;
+                        // still fetch bootstrap so refreshed/shared pages reflect DB state.
                     }
 
                     try {
@@ -4016,11 +4029,13 @@
                         setGames(normalizedGames);
                         setStatActions(loadedActions);
                         writeCachedAppState(normalizedTeams, normalizedGames, loadedActions, { dirty: false });
+                        gamesBootstrappedRef.current = true;
                     } catch (e) {
                         if (cachedState) {
                             setTeams(normalizeTeamsForStorage(cachedState.teams));
                             setGames(Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : []);
                             setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
+                            gamesBootstrappedRef.current = true;
                             return;
                         }
 
@@ -4028,6 +4043,7 @@
                         setTeams([]);
                         setGames([]);
                         setStatActions([]);
+                        gamesBootstrappedRef.current = true;
                     }
                 };
 
@@ -9107,11 +9123,13 @@
 
             const buildShareableGameLogUrl = (gameId) => {
                 if (!gameId) return '';
-                return buildAppUrl({
-                    tab: 'history',
-                    historyGameId: gameId,
-                    historyTabValue: historyDetailTab
-                });
+                const url = new URL(window.location.origin + '/');
+                url.searchParams.set('view', 'game');
+                url.searchParams.set('gameId', String(gameId));
+                if (historyDetailTab) {
+                    url.searchParams.set('tab', historyDetailTab);
+                }
+                return url.toString();
             };
 
             const handleCopyGameLogShareLink = async (gameId) => {
@@ -9899,7 +9917,14 @@
             useEffect(() => {
                 if (!pendingSharedGameId) return;
                 const targetGame = games.find((game) => game.id === pendingSharedGameId);
-                if (!targetGame) return;
+                if (!targetGame) {
+                    // Games have been loaded from the server but the game still isn't found —
+                    // clear the pending state so the history list renders instead of a blank screen.
+                    if (gamesBootstrappedRef.current) {
+                        setPendingSharedGameId(null);
+                    }
+                    return;
+                }
                 openHistoryGame(targetGame.id);
                 if (pendingSharedHistoryDetailTab) {
                     setHistoryDetailTab(pendingSharedHistoryDetailTab);
