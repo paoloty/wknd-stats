@@ -4334,8 +4334,10 @@
                         } catch { return false; }
                     })();
                     if (cachedState?.dirty && !isSharedGameUrl) {
-                        setTeams(normalizeTeamsForStorage(cachedState.teams));
-                        setGames(Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : []);
+                        const cachedGames = Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : [];
+                        const cachedTeams = rebuildCareerStatsFromGames(normalizeTeamsForStorage(cachedState.teams), cachedGames);
+                        setTeams(cachedTeams);
+                        setGames(cachedGames);
                         setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
                         // Do not return here. Dirty cache is only a temporary local snapshot;
                         // still fetch bootstrap so refreshed/shared pages reflect DB state.
@@ -4354,16 +4356,19 @@
                                 underReview: Boolean(game?.underReview)
                             }))
                             .sort((a, b) => b.id.localeCompare(a.id));
+                        const rebuiltTeams = rebuildCareerStatsFromGames(normalizedTeams, normalizedGames);
 
-                        setTeams(normalizedTeams);
+                        setTeams(rebuiltTeams);
                         setGames(normalizedGames);
                         setStatActions(loadedActions);
-                        writeCachedAppState(normalizedTeams, normalizedGames, loadedActions, { dirty: false });
+                        writeCachedAppState(rebuiltTeams, normalizedGames, loadedActions, { dirty: false });
                         gamesBootstrappedRef.current = true;
                     } catch (e) {
                         if (cachedState) {
-                            setTeams(normalizeTeamsForStorage(cachedState.teams));
-                            setGames(Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : []);
+                            const cachedGames = Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : [];
+                            const cachedTeams = rebuildCareerStatsFromGames(normalizeTeamsForStorage(cachedState.teams), cachedGames);
+                            setTeams(cachedTeams);
+                            setGames(cachedGames);
                             setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
                             gamesBootstrappedRef.current = true;
                             return;
@@ -4690,7 +4695,7 @@
                             }
 
                             if (payload.state) {
-                                setTeams(normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []));
+                                const normalizedRemoteTeams = normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []);
                                 setGames((prevGames) => {
                                     const remoteGames = Array.isArray(payload.state.games)
                                         ? payload.state.games.sort((a, b) => b.id.localeCompare(a.id))
@@ -4705,7 +4710,7 @@
                                         : remoteGames;
                                     const now = Date.now();
 
-                                    return merged.map((remoteGame) => {
+                                    const resolvedGames = merged.map((remoteGame) => {
                                         const gameId = String(remoteGame?.id || '');
                                         const pending = pendingYoutubeSaveRef.current[gameId];
                                         if (!pending) return remoteGame;
@@ -4733,6 +4738,9 @@
                                         delete nextGame.youtubeUrl;
                                         return nextGame;
                                     });
+
+                                    setTeams(rebuildCareerStatsFromGames(normalizedRemoteTeams, resolvedGames));
+                                    return resolvedGames;
                                 });
                             }
 
@@ -5191,9 +5199,10 @@
                         const persistedGames = Array.isArray(payload?.games)
                             ? payload.games
                             : updatedGames;
-                        setTeams(persistedTeams);
+                        const rebuiltTeams = rebuildCareerStatsFromGames(persistedTeams, persistedGames);
+                        setTeams(rebuiltTeams);
                         setGames(persistedGames);
-                        writeCachedAppState(persistedTeams, persistedGames, statActions, { dirty: false });
+                        writeCachedAppState(rebuiltTeams, persistedGames, statActions, { dirty: false });
                     }
                     return true;
                 } catch (error) {
