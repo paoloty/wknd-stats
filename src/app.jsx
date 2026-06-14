@@ -3066,20 +3066,30 @@
                 { id: 'pf', label: 'PF', tabLabel: 'Fouls' }
             ];
             const getTeamTotalValue = (team, key) => {
-                const players = Array.isArray(team?.players) ? team.players : [];
-                const totals = players.reduce((acc, player) => {
-                    const s = player?.totalStats || {};
-                    acc.pts += Number(s.pts || 0);
-                    acc.reb += Number(s.reb || 0);
-                    acc.ast += Number(s.ast || 0);
-                    acc.stl += Number(s.stl || 0);
-                    acc.blk += Number(s.blk || 0);
-                    acc.to += Number(s.to || 0);
-                    acc.pf += Number(s.pf || 0);
-                    acc.fg2m += Number(s.fg2m || 0);
-                    acc.fg2m_miss += Number(s.fg2m_miss || 0);
-                    acc.fg3m += Number(s.fg3m || 0);
-                    acc.fg3m_miss += Number(s.fg3m_miss || 0);
+                const teamId = String(team?.id || '').trim();
+                const playerIds = new Set((Array.isArray(team?.players) ? team.players : []).map((player) => String(player?.id || '').trim()).filter(Boolean));
+                const totals = (games || []).reduce((acc, game) => {
+                    if (!game || (game.teamAId !== teamId && game.teamBId !== teamId)) {
+                        return acc;
+                    }
+
+                    const playerStats = game?.playerStats || {};
+                    Object.entries(playerStats).forEach(([playerId, stats]) => {
+                        if (!playerIds.has(String(playerId || '').trim())) return;
+                        const s = stats || {};
+                        acc.pts += Number(s.pts || 0);
+                        acc.reb += Number(s.reb || 0);
+                        acc.ast += Number(s.ast || 0);
+                        acc.stl += Number(s.stl || 0);
+                        acc.blk += Number(s.blk || 0);
+                        acc.to += Number(s.to || 0);
+                        acc.pf += Number(s.pf || 0);
+                        acc.fg2m += Number(s.fg2m || 0);
+                        acc.fg2m_miss += Number(s.fg2m_miss || 0);
+                        acc.fg3m += Number(s.fg3m || 0);
+                        acc.fg3m_miss += Number(s.fg3m_miss || 0);
+                    });
+
                     return acc;
                 }, {
                     pts: 0,
@@ -9274,6 +9284,54 @@
                 };
             };
 
+            const createDerivedLeaderboardTotals = () => ({
+                pts: 0,
+                ast: 0,
+                reb: 0,
+                stl: 0,
+                blk: 0,
+                to: 0,
+                pf: 0,
+                fg2m: 0,
+                fg3m: 0,
+                fg2m_miss: 0,
+                fg3m_miss: 0,
+                ftm: 0,
+                ft_miss: 0
+            });
+
+            const getArchivedPlayerAggregate = (teamId, playerId) => {
+                const normalizedTeamId = String(teamId || '').trim();
+                const normalizedPlayerId = String(playerId || '').trim();
+                const totalStats = createDerivedLeaderboardTotals();
+                let gamesPlayed = 0;
+
+                (games || []).forEach((game) => {
+                    if (!game || (game.teamAId !== normalizedTeamId && game.teamBId !== normalizedTeamId)) return;
+                    if (Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(normalizedPlayerId)) return;
+
+                    const statLine = game?.playerStats?.[normalizedPlayerId];
+                    if (!statLine) return;
+
+                    gamesPlayed += 1;
+                    totalStats.pts += Number(statLine.pts || 0);
+                    totalStats.ast += Number(statLine.ast || 0);
+                    totalStats.reb += Number(statLine.reb || 0);
+                    totalStats.stl += Number(statLine.stl || 0);
+                    totalStats.blk += Number(statLine.blk || 0);
+                    totalStats.to += Number(statLine.to || 0);
+                    totalStats.pf += Number(statLine.pf || 0);
+                    totalStats.fg2m += Number(statLine.fg2m || 0);
+                    totalStats.fg3m += Number(statLine.fg3m || 0);
+                    totalStats.fg2m_miss += Number(statLine.fg2m_miss || 0);
+                    totalStats.fg3m_miss += Number(statLine.fg3m_miss || 0);
+                    totalStats.ftm += Number(statLine.ftm || 0);
+                    totalStats.ft_miss += Number(statLine.ft_miss || 0);
+                });
+
+                return { gamesPlayed, totalStats };
+            };
+
             const getAverages = (player) => {
                 const gp = player.gamesPlayed || 0;
                 const stats = player.totalStats || {};
@@ -11873,7 +11931,6 @@
                                                                 <thead>
                                                                     <tr className="bg-slate-950/80 text-slate-400 font-mono text-[9px] border-b border-slate-800">
                                                                         <th className="py-2 px-3">Player</th>
-                                                                        <th className="py-2 px-2 text-center text-emerald-300">MIN</th>
                                                                         <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                         <th className="py-2 px-2 text-center">FG</th>
                                                                         <th className="py-2 px-2 text-center">3PT</th>
@@ -11915,7 +11972,6 @@
                                                                                     </button>
                                                                                     {onCourt && <span className="ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded">On Court</span>}
                                                                                 </td>
-                                                                                <td className="py-1.5 px-2 text-center text-emerald-300 font-bold">{formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-orange-400 font-bold">{pstats.pts}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{totalMade}/{totalAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.fg3m || 0}/{fg3Att}</td>
@@ -11964,7 +12020,6 @@
                                                                 <thead>
                                                                     <tr className="bg-slate-950/80 text-slate-400 font-mono text-[9px] border-b border-slate-800">
                                                                         <th className="py-2 px-3">Player</th>
-                                                                        <th className="py-2 px-2 text-center text-emerald-300">MIN</th>
                                                                         <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                         <th className="py-2 px-2 text-center">FG</th>
                                                                         <th className="py-2 px-2 text-center">3PT</th>
@@ -12006,7 +12061,6 @@
                                                                                     </button>
                                                                                     {onCourt && <span className="ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded">On Court</span>}
                                                                                 </td>
-                                                                                <td className="py-1.5 px-2 text-center text-emerald-300 font-bold">{formatSecondsAsMinutes(livePlayerSeconds[player.id] || 0)}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-orange-400 font-bold">{pstats.pts}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{totalMade}/{totalAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.fg3m || 0}/{fg3Att}</td>
@@ -14257,7 +14311,21 @@
                                     </div>
 
                                     {(() => {
-                                        const playerPool = teams.flatMap((t) => t.players.map((p) => ({ ...p, team: t.name, avg: getAverages(p) })));
+                                        const playerPool = teams.flatMap((t) => t.players.map((p) => {
+                                            const aggregate = getArchivedPlayerAggregate(t.id, p.id);
+                                            const playerForLeaders = {
+                                                ...p,
+                                                team: t.name,
+                                                teamId: t.id,
+                                                gamesPlayed: aggregate.gamesPlayed,
+                                                totalStats: aggregate.totalStats
+                                            };
+
+                                            return {
+                                                ...playerForLeaders,
+                                                avg: getAverages(playerForLeaders)
+                                            };
+                                        }));
                                         const leaderDefs = [
                                             { id: 'pts', title: 'Scoring', statLabel: 'PTS', valueKey: 'pts', colorClass: 'text-orange-400' },
                                             { id: 'reb', title: 'Rebounds', statLabel: 'REB', valueKey: 'reb', colorClass: 'text-emerald-400' },
