@@ -1075,6 +1075,10 @@
                     setLastLiveSeq(seq);
                 }
 
+                if (locallyDeletedLiveLogIdsRef.current.has(String(event.id))) {
+                    return;
+                }
+
                 setSyncDebug((prev) => ({
                     ...prev,
                     lastIncomingEventId: event.id,
