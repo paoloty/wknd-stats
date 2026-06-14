@@ -5163,9 +5163,17 @@
                 writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: true });
                 try {
                     if (navigator.onLine !== false) {
+                        const slimGames = (Array.isArray(updatedGames) ? updatedGames : []).map((game) => {
+                            if (!game || typeof game !== 'object') return game;
+                            const nextGame = { ...game };
+                            // Full-state saves should not resend embedded cover images.
+                            // Covers are managed via dedicated endpoints and server-side preservation.
+                            delete nextGame.socialCoverDataUrl;
+                            return nextGame;
+                        });
                         const payload = await apiRequest('/api/state', {
                             method: 'PUT',
-                            body: JSON.stringify({ teams: normalizedTeams, games: updatedGames })
+                            body: JSON.stringify({ teams: normalizedTeams, games: slimGames })
                         });
                         const persistedTeams = Array.isArray(payload?.teams)
                             ? normalizeTeamsForStorage(payload.teams)

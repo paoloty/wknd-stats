@@ -3273,9 +3273,25 @@ app.put('/api/state', async (req, res) => {
   }
 
   try {
+    const existingState = readState();
+    const existingGames = Array.isArray(existingState?.games) ? existingState.games : [];
+    const existingCoverByGameId = new Map(
+      existingGames.map((game) => [String(game?.id || ''), String(game?.socialCoverDataUrl || '')])
+    );
+    const gamesWithPreservedCovers = games.map((game) => {
+      if (!game || typeof game !== 'object') return game;
+      if (typeof game.socialCoverDataUrl === 'string') return game;
+      const existingCover = existingCoverByGameId.get(String(game.id || ''));
+      if (!existingCover) return game;
+      return {
+        ...game,
+        socialCoverDataUrl: existingCover
+      };
+    });
+
     const teamsWithCachedImages = await persistPlayerImagesForTeams(teams);
-    writeState(teamsWithCachedImages, games);
-    res.json({ ok: true, teams: teamsWithCachedImages, games });
+    writeState(teamsWithCachedImages, gamesWithPreservedCovers);
+    res.json({ ok: true, teams: teamsWithCachedImages, games: gamesWithPreservedCovers });
   } catch (error) {
     res.status(500).json({ error: 'Failed to persist state.' });
   }
