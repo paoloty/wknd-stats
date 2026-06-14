@@ -343,6 +343,7 @@ function ensurePlayerProfileColumns() {
   const wanted = [
     ['positions', "TEXT NOT NULL DEFAULT '[]'"],
     ['picture_url', 'TEXT NOT NULL DEFAULT ""'],
+    ['height', 'TEXT NOT NULL DEFAULT ""'],
     ['birthday', 'TEXT NOT NULL DEFAULT ""'],
     ['email', 'TEXT NOT NULL DEFAULT ""'],
     ['social', 'TEXT NOT NULL DEFAULT ""'],
@@ -436,6 +437,7 @@ function ensurePlayersTableWithoutLegacyStats() {
       name TEXT NOT NULL,
       number TEXT NOT NULL,
       positions TEXT NOT NULL DEFAULT '[]',
+      height TEXT NOT NULL DEFAULT '',
       picture_url TEXT NOT NULL DEFAULT '',
       birthday TEXT NOT NULL DEFAULT '',
       email TEXT NOT NULL DEFAULT '',
@@ -446,10 +448,10 @@ function ensurePlayersTableWithoutLegacyStats() {
     );
 
     INSERT INTO players_new (
-      id, team_id, name, number, positions, picture_url, birthday, email, social, contact, writeup, sort_order
+      id, team_id, name, number, positions, height, picture_url, birthday, email, social, contact, writeup, sort_order
     )
     SELECT
-      id, team_id, name, number, positions, picture_url, birthday, email, social, contact, writeup, sort_order
+      id, team_id, name, number, positions, COALESCE(height, ''), picture_url, birthday, email, social, contact, writeup, sort_order
     FROM players;
 
     DROP TABLE players;
@@ -526,6 +528,7 @@ db.exec(`
     name TEXT NOT NULL,
     number TEXT NOT NULL,
     positions TEXT NOT NULL DEFAULT '[]',
+    height TEXT NOT NULL DEFAULT '',
     picture_url TEXT NOT NULL DEFAULT '',
     birthday TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
@@ -656,9 +659,9 @@ const clearStatActionsStmt = db.prepare('DELETE FROM stat_actions');
 const insertTeamStmt = db.prepare('INSERT INTO teams (id, name, color, sort_order) VALUES (@id, @name, @color, @sort_order)');
 const insertPlayerStmt = db.prepare(`
   INSERT INTO players (
-    id, team_id, name, number, positions, picture_url, birthday, email, social, contact, writeup, sort_order
+    id, team_id, name, number, positions, height, picture_url, birthday, email, social, contact, writeup, sort_order
   ) VALUES (
-    @id, @team_id, @name, @number, @positions, @picture_url, @birthday, @email, @social, @contact, @writeup, @sort_order
+    @id, @team_id, @name, @number, @positions, @height, @picture_url, @birthday, @email, @social, @contact, @writeup, @sort_order
   )
 `);
 
@@ -714,6 +717,7 @@ const selectPlayersStmt = db.prepare(`
     p.name,
     p.number,
     p.positions,
+    p.height,
     p.picture_url,
     p.birthday,
     p.email,
@@ -1647,6 +1651,7 @@ function readState() {
       name: player.name,
       number: player.number,
       positions: Array.isArray(parseJsonSafe(player.positions, [])) ? parseJsonSafe(player.positions, []) : [],
+      height: player.height || '',
       pictureUrl: player.picture_url || '',
       birthday: player.birthday || '',
       email: player.email || '',
@@ -1749,6 +1754,7 @@ const writeTeamsTransaction = db.transaction((nextTeams) => {
         name: player.name,
         number: player.number,
         positions: JSON.stringify(Array.isArray(player.positions) ? player.positions : []),
+        height: player.height || '',
         picture_url: player.pictureUrl || '',
         birthday: player.birthday || '',
         email: player.email || '',
@@ -2170,6 +2176,7 @@ function writeActiveSession(session, sourceClientId = null) {
   const existingSession = readActiveSession();
   const existingSessionInstanceId = String(existingSession?.liveSessionInstanceId || existingSession?.sessionInstanceId || '').trim();
   const incomingSessionUpdatedAt = toInt(session?.sessionUpdatedAt);
+  const existingSessionUpdatedAt = toInt(existingSession?.sessionUpdatedAt);
   const incomingSessionRevision = toInt(session?.sessionRevision);
   const existingSessionRevision = toInt(existingSession?.sessionRevision);
   const incomingSessionInstanceId = String(session?.liveSessionInstanceId || session?.sessionInstanceId || '').trim();
@@ -2192,6 +2199,20 @@ function writeActiveSession(session, sourceClientId = null) {
 
   if (isSameSessionInstance && incomingSessionRevision > 0 && incomingSessionRevision < existingSessionRevision) {
     return false;
+  }
+
+  // Equal-revision writes are common during multi-client contention. Accept them only
+  // when they carry a strictly newer sessionUpdatedAt; otherwise they can re-apply a
+  // stale clock/snapshot and roll back a just-started period.
+  if (
+    isSameSessionInstance
+    && incomingSessionRevision > 0
+    && existingSessionRevision > 0
+    && incomingSessionRevision === existingSessionRevision
+  ) {
+    if (incomingSessionUpdatedAt <= 0 || (existingSessionUpdatedAt > 0 && incomingSessionUpdatedAt <= existingSessionUpdatedAt)) {
+      return false;
+    }
   }
 
   if (

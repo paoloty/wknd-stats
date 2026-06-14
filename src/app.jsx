@@ -224,6 +224,7 @@
             const [selectedTeamIdForPlayer, setSelectedTeamIdForPlayer] = useState("");
             const [newPlayerName, setNewPlayerName] = useState("");
             const [newPlayerNumber, setNewPlayerNumber] = useState("");
+            const [newPlayerHeight, setNewPlayerHeight] = useState("");
             const [editingPlayer, setEditingPlayer] = useState(null);
             const [advancedEditingPlayer, setAdvancedEditingPlayer] = useState(null);
             const syncSocketRef = useRef(null);
@@ -294,6 +295,9 @@
             const liveSessionInstanceIdRef = useRef(liveSessionInstanceId);
             const liveSessionCreatedAtRef = useRef(liveSessionCreatedAt);
             const currentQuarterRef = useRef(currentQuarter);
+            const periodClockSecondsRef = useRef(periodClockSeconds);
+            const isPeriodClockRunningRef = useRef(isPeriodClockRunning);
+            const awaitingPeriodStartRef = useRef(awaitingPeriodStart);
             const latestEndedGameTimestampRef = useRef(0);
             const sessionRevisionRef = useRef(0);
             const clockControlRevisionRef = useRef(0);
@@ -374,6 +378,7 @@
                 || liveLogEditTarget
             );
             const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
+            const LIVE_LINEUP_POSITION_SLOTS = ['C', 'F', 'F', 'G', 'G'];
             const LOCAL_APP_STATE_CACHE_KEY = 'wknd_app_state_cache';
             const normalizePlayerPositions = (playerLike) => {
                 const rawPositions = [];
@@ -399,6 +404,162 @@
                         .map((pos) => String(pos || '').trim().toUpperCase())
                         .filter((pos) => PLAYER_POSITIONS.includes(pos))
                 ));
+            };
+            const parsePlayerHeightInches = (playerLike) => {
+                const raw = String(playerLike?.height || '').trim();
+                if (!raw) return 0;
+
+                const compact = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+                const feetInchesMatch = compact.match(/^(\d+)\s*(?:'|ft)\s*(\d{1,2})?\s*(?:"|in)?$/i)
+                    || compact.match(/^(\d+)\s*[- ]\s*(\d{1,2})$/);
+                if (feetInchesMatch) {
+                    const feet = Number.parseInt(feetInchesMatch[1], 10) || 0;
+                    const inches = Number.parseInt(feetInchesMatch[2] || '0', 10) || 0;
+                    return (feet * 12) + inches;
+                }
+
+                const cmMatch = compact.match(/^(\d{3})\s*cm$/i);
+                if (cmMatch) {
+                    const cm = Number.parseInt(cmMatch[1], 10) || 0;
+                    return Math.round(cm / 2.54);
+                }
+
+                const inchesMatch = compact.match(/^(\d{2,3})\s*(?:in|inches)?$/i);
+                if (inchesMatch) {
+                    return Number.parseInt(inchesMatch[1], 10) || 0;
+                }
+
+                return 0;
+            };
+            const getLiveLineupSlotFitScore = (playerLike, slotLabel) => {
+                const positions = normalizePlayerPositions(playerLike);
+                if (!positions.length) return { maxScore: 0, excellenceCount: 0 };
+
+                const scoreByPositionForSlot = slotLabel === 'C'
+                    ? { C: 500, PF: 320, SF: 220, SG: 80, PG: 60 }
+                    : slotLabel === 'F'
+                        ? { PF: 500, SF: 500, C: 260, SG: 140, PG: 120 }
+                        : { PG: 500, SG: 500, SF: 180, PF: 120, C: 40 };
+
+                let maxScore = 0;
+                let excellenceCount = 0;
+                positions.forEach((position) => {
+                    const score = Number(scoreByPositionForSlot[position] || 0);
+                    if (score > maxScore) maxScore = score;
+                    if (score >= 300) excellenceCount++;
+                });
+
+                return { maxScore, excellenceCount };
+            };
+            const getOrderedLiveLineupEntries = (teamId, lineupIds = []) => {
+                const teamPool = (teamsRef.current && teamsRef.current.length > 0) ? teamsRef.current : teams;
+                const teamObj = teamPool.find((team) => team.id === teamId);
+                const playersById = new Map((teamObj?.players || []).map((player) => [player.id, player]));
+                const getSlotPurityBonus = (playerLike, slotLabel) => {
+                    const positions = normalizePlayerPositions(playerLike);
+                    const hasCenter = positions.includes('C');
+                    const hasForward = positions.includes('SF') || positions.includes('PF');
+                    const hasGuard = positions.includes('SG') || positions.includes('PG');
+                    if (slotLabel === 'C') {
+                        return hasCenter && !hasForward && !hasGuard ? 2 : (hasCenter ? 1 : 0);
+                    }
+                    if (slotLabel === 'F') {
+                        return hasForward && !hasGuard ? 2 : (hasForward ? 1 : 0);
+                    }
+                    return hasGuard && !hasForward ? 2 : (hasGuard ? 1 : 0);
+                };
+                const uniqueLineupIds = Array.from(new Set((lineupIds || []).filter(Boolean)));
+                const primaryIds = uniqueLineupIds.slice(0, LIVE_LINEUP_POSITION_SLOTS.length);
+                const extraIds = uniqueLineupIds.slice(primaryIds.length);
+                const targetSlots = LIVE_LINEUP_POSITION_SLOTS.slice(0, primaryIds.length);
+
+                if (!primaryIds.length) {
+                    return extraIds.map((playerId) => ({ playerId, slot: '' }));
+                }
+
+                const candidates = primaryIds.map((playerId) => ({
+                    playerId,
+                    player: playersById.get(playerId),
+                    height: parsePlayerHeightInches(playersById.get(playerId)),
+                    fouls: Number(liveStats[playerId]?.pf || 0)
+                }));
+
+                let bestScore = Number.NEGATIVE_INFINITY;
+                let bestHeightTieBreak = Number.NEGATIVE_INFINITY;
+                let bestPurity = Number.NEGATIVE_INFINITY;
+                let bestFoulPreference = Number.NEGATIVE_INFINITY;
+                let bestAssignment = null;
+                const assignedEntries = new Array(targetSlots.length);
+                const used = new Array(candidates.length).fill(false);
+
+                const backtrack = (slotIndex, scoreTotal, heightTieBreakTotal, purityTotal, foulPreferenceTotal) => {
+                    if (slotIndex >= targetSlots.length) {
+                        if (
+                            scoreTotal > bestScore
+                            || (
+                                scoreTotal === bestScore
+                                && (
+                                    heightTieBreakTotal > bestHeightTieBreak
+                                    || (
+                                        heightTieBreakTotal === bestHeightTieBreak
+                                        && (
+                                            purityTotal > bestPurity
+                                            || (
+                                                purityTotal === bestPurity
+                                                && foulPreferenceTotal > bestFoulPreference
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        ) {
+                            bestScore = scoreTotal;
+                            bestHeightTieBreak = heightTieBreakTotal;
+                            bestPurity = purityTotal;
+                            bestFoulPreference = foulPreferenceTotal;
+                            bestAssignment = assignedEntries.slice();
+                        }
+                        return;
+                    }
+
+                    const slot = targetSlots[slotIndex];
+                    for (let i = 0; i < candidates.length; i++) {
+                        if (used[i]) continue;
+                        const candidate = candidates[i];
+                        const slotScore = getLiveLineupSlotFitScore(candidate.player, slot).maxScore;
+                        const slotPurityBonus = getSlotPurityBonus(candidate.player, slot);
+                        const hasHeight = candidate.height > 0;
+                        const slotHeightTieBreak = hasHeight
+                            ? (slot === 'G' ? -candidate.height : candidate.height)
+                            : -1000;
+                        const slotFoulPreference = -candidate.fouls;
+
+                        used[i] = true;
+                        assignedEntries[slotIndex] = { playerId: candidate.playerId, slot };
+
+                        backtrack(
+                            slotIndex + 1,
+                            scoreTotal + slotScore,
+                            heightTieBreakTotal + slotHeightTieBreak,
+                            purityTotal + slotPurityBonus,
+                            foulPreferenceTotal + slotFoulPreference
+                        );
+
+                        used[i] = false;
+                    }
+                };
+
+                backtrack(0, 0, 0, 0, 0);
+
+                const orderedEntries = Array.isArray(bestAssignment)
+                    ? bestAssignment
+                    : primaryIds.map((playerId, index) => ({ playerId, slot: targetSlots[index] || '' }));
+
+                extraIds.forEach((playerId) => {
+                    orderedEntries.push({ playerId, slot: '' });
+                });
+
+                return orderedEntries;
             };
             const REGULATION_PERIOD_SECONDS = 12 * 60;
             const OVERTIME_PERIOD_SECONDS = 5 * 60;
@@ -1573,30 +1734,48 @@
             const computeQuarterTeamStatsFromLog = (logs = []) => {
                 const entries = Array.isArray(logs) ? logs : [];
 
-                // Pre-pass: build an inferred quarter for every event using quarterEnd
-                // boundaries. This handles older saved logs where stat events were stored
-                // without a `quarter` field (they all defaulted to 1 via getQuarterFromEvent).
+                // Pre-pass: build an inferred quarter for every event using period boundaries.
+                // Prefer explicit quarterStart markers (including OT starts), then quarterEnd.
+                // This keeps overtime stats separated from Q4 even when some legacy stat events
+                // carry stale/missing quarter values.
                 // Events are stored newest-first, so we reverse to walk oldest-first.
                 const reversed = [...entries].reverse();
                 const inferredQuarterByIndex = new Map(); // reversed index → quarter
                 let currentInferredQuarter = 1;
                 reversed.forEach((event, idx) => {
+                    const explicitQuarter = Number.parseInt(event?.quarter, 10);
+                    const hasExplicitQuarter = Number.isFinite(explicitQuarter) && explicitQuarter >= 1;
+
+                    if (event?.kind === 'meta' && event?.metaType === 'quarterStart' && hasExplicitQuarter) {
+                        currentInferredQuarter = explicitQuarter;
+                        inferredQuarterByIndex.set(idx, currentInferredQuarter);
+                        return;
+                    }
+
+                    inferredQuarterByIndex.set(idx, currentInferredQuarter);
+
                     // A quarterEnd marks the boundary: everything after this (in forward time)
                     // belongs to the next quarter.
                     if (event?.kind === 'meta' && event?.metaType === 'quarterEnd') {
-                        inferredQuarterByIndex.set(idx, currentInferredQuarter);
-                        currentInferredQuarter += 1;
-                    } else {
-                        inferredQuarterByIndex.set(idx, currentInferredQuarter);
+                        if (hasExplicitQuarter) {
+                            currentInferredQuarter = Math.max(currentInferredQuarter, explicitQuarter + 1);
+                        } else {
+                            currentInferredQuarter += 1;
+                        }
                     }
                 });
 
-                // Helper: get quarter for an event, preferring the explicit field but
-                // falling back to the boundary-inferred value.
+                // Helper: get quarter for an event.
+                // For stats, trust boundary inference first so OT rows stay separate even if
+                // legacy stat entries have stale quarter values. For non-stats, prefer explicit.
                 const getEffectiveQuarter = (event, reversedIdx) => {
                     const explicit = Number.parseInt(event?.quarter, 10);
+                    const inferred = inferredQuarterByIndex.get(reversedIdx) || 1;
+                    if (event?.kind === 'stat') {
+                        return inferred;
+                    }
                     if (Number.isFinite(explicit) && explicit >= 1) return explicit;
-                    return inferredQuarterByIndex.get(reversedIdx) || 1;
+                    return inferred;
                 };
 
                 // Build a reversedIdx lookup keyed by event id for the undo fix.
@@ -2375,6 +2554,28 @@
                     Number.parseInt(session.clockControlRevision, 10) || 0,
                     getClockControlRevisionFromLogs(normalized.gameLog || [], 0)
                 );
+                const localClockControlRevision = Number(clockControlRevisionRef.current || 0);
+                const hasActiveLocalResumeLockNow = Date.now() < Number(localResumeLockUntilRef.current || 0);
+
+                const isStaleRemoteForSameSession = Boolean(
+                    !isDifferentLiveSession
+                    && remoteSessionUpdatedAt > 0
+                    && localSessionUpdatedAt > 0
+                    && remoteSessionUpdatedAt < localSessionUpdatedAt
+                );
+                if (isStaleRemoteForSameSession) {
+                    return;
+                }
+
+                const isStaleClockControlDuringResumeLock = Boolean(
+                    !isDifferentLiveSession
+                    && hasActiveLocalResumeLockNow
+                    && remoteClockControlRevision > 0
+                    && localClockControlRevision > remoteClockControlRevision
+                );
+                if (isStaleClockControlDuringResumeLock) {
+                    return;
+                }
 
                 if (isDifferentLiveSession) {
                     pendingLiveEventsRef.current = [];
@@ -2472,7 +2673,9 @@
                     );
                 const remoteAwaitingPeriodStart = Boolean(session.awaitingPeriodStart);
                 const remoteAwaitingOvertimeDecision = Boolean(session.awaitingOvertimeDecision);
-                const localClockSeconds = Number(periodClockSeconds || 0);
+                const localClockSeconds = Number(periodClockSecondsRef.current || periodClockSeconds || 0);
+                const localClockIsRunning = Boolean(isPeriodClockRunningRef.current);
+                const localAwaitingPeriodStart = Boolean(awaitingPeriodStartRef.current);
                 const localCurrentQuarter = Number(currentQuarterRef.current || currentQuarter || 1);
                 // If the remote snapshot is for an older quarter than we are locally (e.g. a
                 // sync broadcast that arrived before our quarterStart PUT reached the server),
@@ -2484,6 +2687,25 @@
                     suppressLiveSessionSyncRef.current = false;
                     return;
                 }
+
+                const remoteSaysClockRunning = Boolean(session.isPeriodClockRunning) && !Boolean(session.isPlayPaused);
+                const shouldSkipStartRollbackDuringResumeLock = Boolean(
+                    hasActiveLocalResumeLock
+                    && !isDifferentLiveSession
+                    && localClockIsRunning
+                    && localClockSeconds > 0
+                    && !localAwaitingPeriodStart
+                    && (
+                        remoteAwaitingPeriodStart
+                        || !remoteSaysClockRunning
+                        || remoteClockSeconds <= 0
+                    )
+                );
+                if (shouldSkipStartRollbackDuringResumeLock) {
+                    suppressLiveSessionSyncRef.current = false;
+                    return;
+                }
+
                 const shouldPreserveLocalClockDuringResumeLock = hasActiveLocalResumeLock
                     && !pauseActiveFromLog
                     && !remoteAwaitingPeriodStart
@@ -4664,7 +4886,10 @@
                 liveSessionInstanceIdRef.current = liveSessionInstanceId;
                 liveSessionCreatedAtRef.current = liveSessionCreatedAt;
                 currentQuarterRef.current = currentQuarter;
-            }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, dnpPlayers, lineupRevision, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter]);
+                periodClockSecondsRef.current = periodClockSeconds;
+                isPeriodClockRunningRef.current = isPeriodClockRunning;
+                awaitingPeriodStartRef.current = awaitingPeriodStart;
+            }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, dnpPlayers, lineupRevision, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, awaitingPeriodStart]);
 
             useEffect(() => {
                 if (suppressLiveSessionSyncRef.current) {
@@ -4745,6 +4970,7 @@
                 const safePlayer = player || {};
                 return {
                     ...safePlayer,
+                    height: String(safePlayer.height || '').trim(),
                     pictureUrl: safePlayer.pictureUrl || '',
                     birthday: safePlayer.birthday || '',
                     email: safePlayer.email || '',
@@ -5072,14 +5298,22 @@
                 const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
                 const isOnline = navigator.onLine !== false;
 
-                // Finalizing a game must be server-confirmed. If offline, fail fast so
-                // the live session stays open and the user can retry once connected.
+                // Always persist the finalized game locally first so the operator can end a
+                // match offline. If offline, keep the cache marked dirty so bootstrap/sync can
+                // push the completed game to the server once connectivity returns.
+                setTeams(normalizedTeams);
+                setGames(updatedGames);
+                writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: !isOnline });
+
                 if (!isOnline) {
-                    return false;
+                    return { persistedToServer: false, savedLocally: true };
                 }
 
                 const didPersist = await saveFullState(normalizedTeams, updatedGames);
-                return didPersist;
+                return {
+                    persistedToServer: didPersist,
+                    savedLocally: true
+                };
             };
 
             const handleSaveGameVideoLink = async (gameId) => {
@@ -8079,11 +8313,6 @@
                 setIsEndingGame(true);
 
                 try {
-                    if (navigator.onLine === false) {
-                        showToast('Internet connection is required to end and save the game.', 'error');
-                        return;
-                    }
-
                     setPendingPeriodActionMode(null);
 
                     const teamAObj = teams.find(t => t.id === teamAId);
@@ -8169,9 +8398,9 @@
                     gameLog: [...finalizedGameLog]
                     };
 
-                    const didSaveGame = await saveNewGameState(newGame, updatedTeams);
-                    if (!didSaveGame) {
-                        showToast('Could not save game to database. Match is still live, please retry End Game.', 'error');
+                    const saveResult = await saveNewGameState(newGame, updatedTeams);
+                    if (!saveResult?.savedLocally) {
+                        showToast('Could not save the completed game. Match is still live, please retry End Game.', 'error');
                         return;
                     }
 
@@ -8180,8 +8409,12 @@
 
                     setActiveTab('history');
                     setSelectedHistoryGameId(newGame.id);
-                    if (didClearLiveSession) {
+                    if (saveResult?.persistedToServer && didClearLiveSession) {
                         showToast("Live statistics committed to system database successfully!", "success");
+                    } else if (saveResult?.savedLocally && navigator.onLine === false) {
+                        showToast('Game saved locally. Server sync and live-session cleanup will resume when internet returns.', 'success');
+                    } else if (saveResult?.savedLocally && !saveResult?.persistedToServer) {
+                        showToast('Game saved locally. Server sync is pending and will retry automatically.', 'success');
                     } else {
                         showToast('Game was saved, but active session clear is still pending. Please retry discard/end on active devices.', 'error');
                     }
@@ -8751,6 +8984,7 @@
                     name: newPlayerName.trim(),
                     number: newPlayerNumber.trim(),
                     positions: [],
+                    height: newPlayerHeight.trim(),
                     pictureUrl: '',
                     birthday: '',
                     email: '',
@@ -8764,6 +8998,7 @@
                 saveTeamState(updatedTeams);
                 setNewPlayerName("");
                 setNewPlayerNumber("");
+                setNewPlayerHeight("");
                 setShowNewPlayerModal(false);
             };
 
@@ -8775,6 +9010,7 @@
                     name: player.name,
                     number: player.number,
                     positions: normalizePlayerPositions(player),
+                    height: player.height || '',
                     pictureUrl: player.pictureUrl || '',
                     birthday: player.birthday || '',
                     email: player.email || '',
@@ -8797,6 +9033,7 @@
                                 ? {
                                     ...player,
                                     positions: normalizePlayerPositions(advancedEditingPlayer),
+                                    height: (advancedEditingPlayer.height || '').trim(),
                                     pictureUrl: (advancedEditingPlayer.pictureUrl || '').trim(),
                                     birthday: (advancedEditingPlayer.birthday || '').trim(),
                                     email: (advancedEditingPlayer.email || '').trim(),
@@ -10144,7 +10381,7 @@
                 };
             };
 
-            const renderPlayerCompactRow = (playerId, isTeamA) => {
+            const renderPlayerCompactRow = (playerId, isTeamA, slotLabel = '') => {
                 const teamObj = isTeamA ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
                 const player = teams.flatMap(t => t.players).find(p => p.id === playerId);
                 if (!player) return null;
@@ -10203,9 +10440,11 @@
                                 <span className="font-extrabold text-[11px] text-white block truncate leading-tight md:hidden">{player.name}</span>
                                 <span className="font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight">{onCourtLastName}</span>
                                 <div className="hidden md:flex gap-2 mt-1 items-center">
+                                    {slotLabel && <span className="text-[9px] text-sky-300 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 uppercase">{slotLabel}</span>}
                                     {isLoggedIn && !hasActionArmed && <span className="text-[9px] text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">Sub</span>}
                                     {isLoggedIn && !teamAccessAllowed && <span className="text-[9px] text-slate-400 font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 uppercase">Locked</span>}
                                 </div>
+                                {slotLabel && <div className="md:hidden mt-1"><span className="text-[9px] text-sky-300 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 uppercase">{slotLabel}</span></div>}
                             </div>
                         </div>
                         <div className="flex items-stretch gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap overflow-x-auto max-w-full self-auto">
@@ -10950,7 +11189,7 @@
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="space-y-1.5">{teamALineup.map(id => renderPlayerCompactRow(id, true))}</div>
+                                                <div className="space-y-1.5">{getOrderedLiveLineupEntries(teamAId, teamALineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, true, slot))}</div>
                                                 {canOperateLive && teamALineup.length < 5 && (
                                                     <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2">
                                                         <div className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1.5">Available from bench ({teamALineup.length}/5)</div>
@@ -11079,7 +11318,7 @@
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="space-y-1.5">{teamBLineup.map(id => renderPlayerCompactRow(id, false))}</div>
+                                                <div className="space-y-1.5">{getOrderedLiveLineupEntries(teamBId, teamBLineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, false, slot))}</div>
                                                 {canOperateLive && teamBLineup.length < 5 && (
                                                     <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2">
                                                         <div className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1.5">Available from bench ({teamBLineup.length}/5)</div>
@@ -14071,6 +14310,7 @@
                                     </select>
                                     <input type="text" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} placeholder="Full Name" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" required />
                                     <input type="text" value={newPlayerNumber} onChange={(e) => setNewPlayerNumber(e.target.value)} placeholder="Jersey No." className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono" required />
+                                    <input type="text" value={newPlayerHeight} onChange={(e) => setNewPlayerHeight(e.target.value)} placeholder="Height (e.g. 6'4, 6-4, 193cm)" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono" />
                                     <div className="flex gap-2 font-bold pt-1">
                                         <button type="button" onClick={() => setShowNewPlayerModal(false)} className="flex-1 py-2 bg-slate-955 text-slate-400 rounded-xl border border-slate-850">Cancel</button>
                                         <button type="submit" className="flex-1 py-2 bg-emerald-600 text-white rounded-xl">Register</button>
@@ -14098,19 +14338,26 @@
                                     </p>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         <input
+                                            type="text"
+                                            value={advancedEditingPlayer.height || ''}
+                                            onChange={(e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, height: e.target.value })}
+                                            placeholder="Height (e.g. 6'4, 6-4, 193cm)"
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono"
+                                        />
+                                        <input
                                             type="date"
                                             value={advancedEditingPlayer.birthday}
                                             onChange={(e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, birthday: e.target.value })}
                                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
                                         />
-                                        <input
-                                            type="email"
-                                            value={advancedEditingPlayer.email}
-                                            onChange={(e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, email: e.target.value })}
-                                            placeholder="Email"
-                                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
-                                        />
                                     </div>
+                                    <input
+                                        type="email"
+                                        value={advancedEditingPlayer.email}
+                                        onChange={(e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, email: e.target.value })}
+                                        placeholder="Email"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+                                    />
                                     <input
                                         type="text"
                                         value={advancedEditingPlayer.social}
@@ -14173,25 +14420,48 @@
                                     {(() => {
                                         const benchIds = (subTargetPlayer.team === 'A' ? teamABench : teamBBench)
                                             .filter((benchId) => !dnpPlayers.includes(benchId));
+                                        const teamId = subTargetPlayer.team === 'A' ? teamAId : teamBId;
                                         const teamObj = subTargetPlayer.team === 'A' ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
+                                        const lineupIds = subTargetPlayer.team === 'A' ? teamALineup : teamBLineup;
+                                        const orderedLineupEntries = getOrderedLiveLineupEntries(teamId, lineupIds);
+                                        const targetEntry = orderedLineupEntries.find((entry) => entry.playerId === subTargetPlayer.id);
+                                        const targetSlot = targetEntry?.slot || '';
                                         const targetPlayer = teamObj?.players.find((x) => x.id === subTargetPlayer.id);
                                         const targetPositions = normalizePlayerPositions(targetPlayer);
 
                                         const benchEntries = benchIds.map((benchId) => {
                                             const p = teamObj?.players.find((x) => x.id === benchId);
                                             const playerPositions = normalizePlayerPositions(p);
-                                            const positionMatch = targetPositions.length > 0
-                                                && playerPositions.some((pos) => targetPositions.includes(pos));
-                                            return { benchId, p, positionMatch };
+                                            const matchCount = targetPositions.filter((pos) => playerPositions.includes(pos)).length;
+                                            const height = parsePlayerHeightInches(p);
+                                            const slotScore = targetSlot
+                                                ? getLiveLineupSlotFitScore(p, targetSlot).maxScore
+                                                : (matchCount > 0 ? 500 : 0);
+                                            const hasCenter = playerPositions.includes('C');
+                                            const hasForward = playerPositions.includes('SF') || playerPositions.includes('PF');
+                                            const hasGuard = playerPositions.includes('SG') || playerPositions.includes('PG');
+                                            const purityBonus = targetSlot === 'C'
+                                                ? (hasCenter && !hasForward && !hasGuard ? 2 : (hasCenter ? 1 : 0))
+                                                : targetSlot === 'F'
+                                                    ? (hasForward && !hasGuard ? 2 : (hasForward ? 1 : 0))
+                                                    : targetSlot === 'G'
+                                                        ? (hasGuard && !hasForward ? 2 : (hasGuard ? 1 : 0))
+                                                        : 0;
+                                            const fouls = Number(liveStats[benchId]?.pf || 0);
+                                            return { benchId, p, matchCount, height, slotScore, purityBonus, fouls };
                                         });
 
-                                        const hasAnyPositionMatch = benchEntries.some((entry) => entry.positionMatch);
-                                        const orderedBenchEntries = hasAnyPositionMatch
-                                            ? [
-                                                ...benchEntries.filter((entry) => entry.positionMatch),
-                                                ...benchEntries.filter((entry) => !entry.positionMatch)
-                                            ]
-                                            : benchEntries;
+                                        const orderedBenchEntries = benchEntries.slice().sort((a, b) => {
+                                            if (b.slotScore !== a.slotScore) return b.slotScore - a.slotScore;
+                                            const heightDiff = targetSlot === 'G'
+                                                ? a.height - b.height
+                                                : b.height - a.height;
+                                            if (heightDiff !== 0) return heightDiff;
+                                            if (b.purityBonus !== a.purityBonus) return b.purityBonus - a.purityBonus;
+                                            if (a.fouls !== b.fouls) return a.fouls - b.fouls;
+                                            if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+                                            return String(a.p?.name || '').localeCompare(String(b.p?.name || ''));
+                                        });
 
                                         return orderedBenchEntries.map(({ benchId, p }) => {
                                             const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
@@ -14247,7 +14517,22 @@
                                         const candidateIds = (benchIds.length > 0 ? benchIds : fallbackCandidates)
                                             .filter((id) => !dnpPlayers.includes(id));
                                         const availableSlots = Math.max(0, 5 - lineupIds.length);
-                                        return candidateIds.map((benchId) => {
+                                        const sortedCandidateIds = candidateIds.slice().sort((a, b) => {
+                                            const pa = teamObj?.players.find((x) => x.id === a);
+                                            const pb = teamObj?.players.find((x) => x.id === b);
+                                            const posA = normalizePlayerPositions(pa);
+                                            const posB = normalizePlayerPositions(pb);
+                                            const slotScore = (pos) => {
+                                                if (pos.includes('C')) return 0;
+                                                if (pos.includes('SF') || pos.includes('PF')) return 1;
+                                                if (pos.includes('SG') || pos.includes('PG')) return 2;
+                                                return 3;
+                                            };
+                                            const slotDiff = slotScore(posA) - slotScore(posB);
+                                            if (slotDiff !== 0) return slotDiff;
+                                            return parsePlayerHeightInches(pb) - parsePlayerHeightInches(pa);
+                                        });
+                                        return sortedCandidateIds.map((benchId) => {
                                             const p = teamObj?.players.find((x) => x.id === benchId);
                                             const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
                                             const isSelected = addFromBenchSelection.includes(benchId);
@@ -14351,7 +14636,7 @@
                                     {showHomeLivePanel && <div className={`bg-slate-950/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
                                         <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{homeTeamLabel} On Court</div>
                                         <div className="space-y-1">
-                                            {teamALineup.map(id => {
+                                            {getOrderedLiveLineupEntries(teamAId, teamALineup).map(({ playerId: id }) => {
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
@@ -14362,7 +14647,7 @@
                                     {showAwayLivePanel && <div className={`bg-slate-955/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
                                         <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{awayTeamLabel} On Court</div>
                                         <div className="space-y-1">
-                                            {teamBLineup.map(id => {
+                                            {getOrderedLiveLineupEntries(teamBId, teamBLineup).map(({ playerId: id }) => {
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
