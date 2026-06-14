@@ -3148,6 +3148,89 @@ app.post('/api/auth/login', (req, res) => {
   res.json({ ok: true, role });
 });
 
+// Upsert a single game record without touching teams or rewriting other games.
+// Used by the client's import-game-log flow so large payloads (all teams + all games)
+// are never needed just to persist one game.
+app.put('/api/games/:gameId', (req, res) => {
+  const gameId = String(req.params.gameId || '').trim();
+  if (!gameId) {
+    res.status(400).json({ error: 'gameId is required' });
+    return;
+  }
+
+  const game = req.body?.game;
+  if (!game || typeof game !== 'object') {
+    res.status(400).json({ error: 'Body must include game object' });
+    return;
+  }
+
+  if (String(game.id || '') !== gameId) {
+    res.status(400).json({ error: 'game.id must match URL :gameId' });
+    return;
+  }
+
+  try {
+    const upsertGameTransaction = db.transaction(() => {
+      // Remove this game's player stats and re-insert (safe upsert pattern).
+      db.prepare('DELETE FROM game_player_stats WHERE game_id = ?').run(gameId);
+      db.prepare('DELETE FROM games WHERE id = ?').run(gameId);
+
+      insertGameStmt.run({
+        id: game.id,
+        date: game.date || new Date().toISOString(),
+        team_a_id: game.teamAId || '',
+        team_b_id: game.teamBId || '',
+        team_a_name: game.teamAName || '',
+        team_b_name: game.teamBName || '',
+        team_a_score: toInt(game.teamAScore),
+        team_b_score: toInt(game.teamBScore),
+        game_log_json: JSON.stringify(Array.isArray(game.gameLog) ? game.gameLog : []),
+        period_snapshots_json: JSON.stringify(Array.isArray(game.periodSnapshots) ? game.periodSnapshots : []),
+        dnp_players_json: JSON.stringify(Array.isArray(game.dnpPlayers) ? game.dnpPlayers : []),
+        under_review: game.underReview ? 1 : 0,
+        youtube_url: typeof game.youtubeUrl === 'string' ? game.youtubeUrl : '',
+        game_writeup: typeof game.gameWriteup === 'string' ? game.gameWriteup : '',
+        potg_writeup: typeof game.potgWriteup === 'string' ? game.potgWriteup : '',
+        social_cover_data_url: typeof game.socialCoverDataUrl === 'string' ? game.socialCoverDataUrl : '',
+        sort_order: 0
+      });
+
+      const playerStats = game.playerStats || {};
+      Object.entries(playerStats).forEach(([playerId, stats]) => {
+        if (!playerId) return;
+        const playerTeamRow = selectPlayerTeamIdStmt.get(playerId);
+        const fallbackTeamId = String(playerId).startsWith('b') ? (game.teamBId || '') : (game.teamAId || '');
+        insertGamePlayerStatStmt.run({
+          game_id: gameId,
+          team_id: (playerTeamRow && playerTeamRow.team_id) || fallbackTeamId || '',
+          player_id: playerId,
+          pts: toInt(stats.pts),
+          ast: toInt(stats.ast),
+          reb: toInt(stats.reb),
+          stl: toInt(stats.stl),
+          blk: toInt(stats.blk),
+          turnover: toInt(stats.to),
+          pf: toInt(stats.pf),
+          fg2m: toInt(stats.fg2m),
+          fg3m: toInt(stats.fg3m),
+          fg2m_miss: toInt(stats.fg2m_miss),
+          fg3m_miss: toInt(stats.fg3m_miss),
+          ftm: toInt(stats.ftm),
+          ft_miss: toInt(stats.ft_miss),
+          minutes: typeof stats.min === 'string' ? stats.min : ''
+        });
+      });
+    });
+
+    upsertGameTransaction();
+    broadcastSync();
+    res.json({ ok: true, game });
+  } catch (error) {
+    console.error('PUT /api/games/:gameId error:', error);
+    res.status(500).json({ error: 'Failed to persist game.' });
+  }
+});
+
 app.put('/api/state', async (req, res) => {
   const { teams, games } = req.body || {};
   if (!Array.isArray(teams) || !Array.isArray(games)) {

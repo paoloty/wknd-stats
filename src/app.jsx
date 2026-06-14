@@ -293,6 +293,7 @@
             const lineupRevisionRef = useRef(lineupRevision);
             const liveSessionInstanceIdRef = useRef(liveSessionInstanceId);
             const liveSessionCreatedAtRef = useRef(liveSessionCreatedAt);
+            const currentQuarterRef = useRef(currentQuarter);
             const latestEndedGameTimestampRef = useRef(0);
             const sessionRevisionRef = useRef(0);
             const clockControlRevisionRef = useRef(0);
@@ -2471,13 +2472,24 @@
                 const remoteAwaitingPeriodStart = Boolean(session.awaitingPeriodStart);
                 const remoteAwaitingOvertimeDecision = Boolean(session.awaitingOvertimeDecision);
                 const localClockSeconds = Number(periodClockSeconds || 0);
+                const localCurrentQuarter = Number(currentQuarterRef.current || currentQuarter || 1);
+                // If the remote snapshot is for an older quarter than we are locally (e.g. a
+                // sync broadcast that arrived before our quarterStart PUT reached the server),
+                // skip the entire apply during the resume stability window to prevent reverting
+                // the clock and quarter back to the just-ended period.
+                const remoteIsOlderQuarter = resolvedRemoteQuarter < localCurrentQuarter;
+                const shouldSkipApplyDuringResumeLock = hasActiveLocalResumeLock && remoteIsOlderQuarter;
+                if (shouldSkipApplyDuringResumeLock) {
+                    suppressLiveSessionSyncRef.current = false;
+                    return;
+                }
                 const shouldPreserveLocalClockDuringResumeLock = hasActiveLocalResumeLock
                     && !pauseActiveFromLog
                     && !remoteAwaitingPeriodStart
                     && !remoteAwaitingOvertimeDecision
                     && localClockSeconds > 0
                     && remoteClockSeconds <= 0
-                    && resolvedRemoteQuarter === currentQuarter;
+                    && resolvedRemoteQuarter <= localCurrentQuarter;
                 const effectiveRemoteClockSeconds = shouldPreserveLocalClockDuringResumeLock
                     ? localClockSeconds
                     : remoteClockSeconds;
@@ -4635,7 +4647,8 @@
                 lineupRevisionRef.current = lineupRevision;
                 liveSessionInstanceIdRef.current = liveSessionInstanceId;
                 liveSessionCreatedAtRef.current = liveSessionCreatedAt;
-            }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, dnpPlayers, lineupRevision, liveSessionInstanceId, liveSessionCreatedAt]);
+                currentQuarterRef.current = currentQuarter;
+            }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, dnpPlayers, lineupRevision, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter]);
 
             useEffect(() => {
                 if (suppressLiveSessionSyncRef.current) {
@@ -4983,7 +4996,30 @@
 
                         setTeams(mergedTeams);
                         setGames(updatedGames);
-                        await saveFullState(mergedTeams, updatedGames);
+
+                        // Persist the imported game via a lightweight single-game endpoint so we
+                        // never time out sending all teams + all games through persistPlayerImagesForTeams.
+                        let persistedToServer = false;
+                        try {
+                            if (navigator.onLine !== false) {
+                                await apiRequest(`/api/games/${encodeURIComponent(nextImportedGameId)}`, {
+                                    method: 'PUT',
+                                    body: JSON.stringify({ game: importedGame })
+                                });
+                                persistedToServer = true;
+                            }
+                        } catch (_) {
+                            // Fall through to full saveFullState below.
+                        }
+
+                        if (!persistedToServer) {
+                            // Fallback: write everything (may be slow but ensures consistency).
+                            await saveFullState(mergedTeams, updatedGames);
+                        } else {
+                            // Game is in DB; also update local cache so offline reload stays in sync.
+                            writeCachedAppState(normalizeTeamsForStorage(mergedTeams), updatedGames, statActions, { dirty: false });
+                        }
+
                         setSelectedHistoryGameId(nextImportedGameId);
                         showToast('Game log imported as a new game.', 'success');
                     } catch (error) {
