@@ -177,6 +177,7 @@
             const [loggedHistory, setLoggedHistory] = useState([]);
             const [periodSnapshots, setPeriodSnapshots] = useState([]);
             const [activeAction, setActiveAction] = useState(null); 
+            const [activeActionLabelOverride, setActiveActionLabelOverride] = useState('');
             const [correctionMode, setCorrectionMode] = useState(false); 
             const [showLoggingModal, setShowLoggingModal] = useState(false);
             const [recentActionIds, setRecentActionIds] = useState([]);
@@ -259,6 +260,7 @@
             const [showAccountMenu, setShowAccountMenu] = useState(false);
             const [editingLiveLogId, setEditingLiveLogId] = useState(null);
             const [editingLiveLogActionId, setEditingLiveLogActionId] = useState('');
+            const [selectedPlayerId, setSelectedPlayerId] = useState('');
 
             const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
             const [subTargetPlayer, setSubTargetPlayer] = useState(null); 
@@ -372,8 +374,7 @@
             const isConfirmDialogOpen = Boolean(confirmDialog);
             const isFoulAlertOpen = Boolean(foulAlert);
             const isLiveGameplayModalActive = Boolean(
-                (showLoggingModal && !!activeAction)
-                || showSubstitutionModal
+                showSubstitutionModal
                 || showAddFromBenchModal
                 || liveLogEditTarget
             );
@@ -877,6 +878,10 @@
             };
 
             const openActionForTeam = (action, isTeamA) => {
+                if (!canUseLiveControls) {
+                    showToast('Live controls are locked right now.', 'info');
+                    return;
+                }
                 if (!canOperateTeam(isTeamA)) {
                     ensureTeamOperationAccess(isTeamA, 'log stats for this team');
                     return;
@@ -918,15 +923,23 @@
                 }
 
                 setActiveAction(action);
+                setActiveActionLabelOverride('');
                 if (action?.id) {
                     setRecentActionIds((prev) => [action.id, ...prev.filter((id) => id !== action.id)].slice(0, 6));
                 }
                 setShowLoggingModal(true);
             };
 
+            const openActionForTeamWithLabel = (action, isTeamA, labelOverride) => {
+                if (!action) return;
+                setActiveActionLabelOverride(String(labelOverride || ''));
+                openActionForTeam(action, isTeamA);
+            };
+
             const handleCancelActionModal = () => {
                 setShowLoggingModal(false);
                 setActiveAction(null);
+                setActiveActionLabelOverride('');
                 setCorrectionMode(false);
                 nonPrimaryResumeConfirmRef.current = false;
             };
@@ -2854,21 +2867,49 @@
                     .sort((a, b) => orderMap.get(a.id) - orderMap.get(b.id));
             };
 
-            // Fixed button layout based on typical in-game stat flow, not live usage.
-            const primaryActions = getActionsByOrder(['pts_2', 'pts_3', 'fg2m_miss', 'fg3m_miss']);
-            const primaryActionIds = new Set(primaryActions.map((action) => String(action?.id || '')));
+            const scoringActions = getActionsByOrder(['pts_2', 'fg2m_miss', 'pts_3', 'fg3m_miss', 'pts_1', 'ft_miss']);
+            const flowActions = getActionsByOrder(['ast', 'stl', 'blk']);
+            const whistleActions = getActionsByOrder(['to', 'pf', 'pf_offensive']);
+            const reboundAction = liveActionById.get('reb') || null;
+            const technicalFoulAction = liveActionById.get('pf_technical') || null;
+            const scoringActionIds = new Set(scoringActions.map((action) => String(action?.id || '')));
             const autoResumeActionIds = new Set(['pts_2', 'pts_3', 'fg2m_miss', 'fg3m_miss', 'reb', 'ast', 'to', 'stl', 'blk']);
-            const isPrimaryActionArmed = primaryActionIds.has(String(activeAction?.id || ''));
             const isAutoResumeActionArmed = autoResumeActionIds.has(String(activeAction?.id || ''));
-            const secondaryActions = getActionsByOrder(['reb', 'ast', 'pf', 'pf_offensive']);
-            const tertiaryActions = getActionsByOrder(['pts_1', 'ft_miss', 'to', 'stl', 'blk']);
-            const foulActions = getActionsByOrder(['pf_technical']);
-            const technicalFoulAction = foulActions.find((act) => act.id === 'pf_technical') || null;
+            const getActionDisplayLabel = (action, fallbackLabel = '') => {
+                const actionId = String(action?.id || '');
+                const labelById = {
+                    pts_2: '2PT MADE',
+                    fg2m_miss: '2PT MISS',
+                    pts_3: '3PT MADE',
+                    fg3m_miss: '3PT MISS',
+                    pts_1: 'FT MADE',
+                    ft_miss: 'FT MISS',
+                    ast: '+1 AST',
+                    reb: 'REB',
+                    stl: '+1 STL',
+                    blk: '+1 BLK',
+                    to: '+1 TO',
+                    pf: '+1 FOUL',
+                    pf_offensive: 'OFFENSIVE FOUL',
+                    pf_technical: 'TECHNICAL FOUL'
+                };
+                return labelById[actionId] || fallbackLabel || String(action?.label || '');
+            };
 
             const liveHomeTeam = teams.find(t => t.id === teamAId);
             const liveAwayTeam = teams.find(t => t.id === teamBId);
             const homeTeamLabel = liveHomeTeam?.name || 'HOME';
             const awayTeamLabel = liveAwayTeam?.name || 'AWAY';
+            const liveLogEditTargetTeam = liveLogEditTarget?.isTeamA === true
+                ? liveHomeTeam
+                : liveLogEditTarget?.isTeamA === false
+                    ? liveAwayTeam
+                    : (() => {
+                        const targetPlayerId = String(liveLogEditTarget?.playerId || '').trim();
+                        if (!targetPlayerId) return null;
+                        return teams.find((team) => (team?.players || []).some((player) => player.id === targetPlayerId)) || null;
+                    })();
+            const liveLogEditTargetPlayers = liveLogEditTargetTeam?.players || [];
             const operatorHandledTeamLabel = effectiveOperatorFocus === 'home'
                 ? homeTeamLabel
                 : effectiveOperatorFocus === 'away'
@@ -2892,6 +2933,22 @@
                     boxShadow: `0 0 0 1px ${optionColor}55`
                 };
             };
+            useEffect(() => {
+                if (!liveLogEditTarget) {
+                    setSelectedPlayerId('');
+                    return;
+                }
+
+                const currentPlayerId = String(liveLogEditTarget.playerId || '').trim();
+                const currentPlayerName = String(liveLogEditTarget.playerName || '').trim().toLowerCase();
+                const matchedPlayer = liveLogEditTargetPlayers.find((player) => {
+                    const playerName = String(player?.name || '').trim().toLowerCase();
+                    return player.id === currentPlayerId || playerName === currentPlayerName;
+                });
+
+                setSelectedPlayerId(matchedPlayer?.id || currentPlayerId || '');
+            }, [liveLogEditTarget?.id, liveLogEditTarget?.playerId, liveLogEditTarget?.playerName, liveLogEditTargetTeam?.id, liveHomeTeam?.id, liveAwayTeam?.id]);
+
             const isTieGame = teamAScore === teamBScore;
             const canStartOvertime = isTieGame;
             const hasLiveSessionIdentity = Boolean(String(liveSessionInstanceId || '').trim());
@@ -6445,13 +6502,20 @@
                 showToast('Match started. Press Start Q1 to begin period play.', 'success');
             };
 
-            const handlePlayerClick = (playerId, isTeamA) => {
-                if (!canUseLiveControls) return;
-                if (!ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
-                if (!activeAction) return;
+            const handlePlayerClick = (playerId, isTeamA, options = {}) => {
+                const skipAccessChecks = Boolean(options?.skipAccessChecks);
+                if (!skipAccessChecks && !canUseLiveControls) {
+                    showToast('Live controls are locked right now.', 'info');
+                    return;
+                }
+                if (!skipAccessChecks && !ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
+                if (!activeAction) {
+                    showToast('Select a stat action first.', 'info');
+                    return;
+                }
                 const isTechnicalFoulAction = String(activeAction?.id || '') === 'pf_technical';
                 const isFoulLikeSelectedAction = isFoulLikeAction(activeAction);
-                const isPrimaryAction = primaryActionIds.has(String(activeAction?.id || ''));
+                const isPrimaryAction = scoringActionIds.has(String(activeAction?.id || ''));
                 const isAutoResumeAction = autoResumeActionIds.has(String(activeAction?.id || ''));
                 const isStoppedClockAction = stoppedClockActionIds.has(String(activeAction?.id || ''));
                 const isManualPauseSource = latestPauseMetaType === 'manualPause';
@@ -6470,6 +6534,11 @@
 
                 if (isTimeoutOrFoulPauseSource && !isAutoResumeAction && !isTechnicalFoulAction && !isFoulLikeSelectedAction && !isStoppedClockAction && !canBackfillEndedPeriodStats) {
                     showToast('Clock is stopped for timeout/stoppage. Resume play before logging this action.', 'info');
+                    return;
+                }
+
+                if (!playerId) {
+                    showToast('Select a player to record the action.', 'info');
                     return;
                 }
 
@@ -6695,6 +6764,7 @@
                     attachedTrackingStat,
                     trackingDelta: 1 * multiplier
                 };
+                markLocalSessionUpdated();
                 const autoResumeEvent = shouldAutoResumeFromStatTrigger
                     ? {
                         id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -7060,11 +7130,13 @@
 
                 setEditingLiveLogId(logId);
                 setEditingLiveLogActionId(defaultActionId);
+                setSelectedPlayerId(String(targetEntry.playerId || '').trim());
             };
 
             const handleCloseLiveLogEdit = () => {
                 setEditingLiveLogId(null);
                 setEditingLiveLogActionId('');
+                setSelectedPlayerId('');
             };
 
             const handleApplyLiveLogEdit = () => {
@@ -7094,20 +7166,24 @@
                     return;
                 }
 
+                const resolvedPlayerId = String(selectedPlayerId || liveLogEditTarget.playerId || '').trim();
+                const nextPlayerObj = teams.flatMap((team) => team.players || []).find((player) => player.id === resolvedPlayerId) || null;
+
                 const changeSign = Number(liveLogEditTarget.changeAmount || 0) < 0 ? -1 : 1;
                 const nextChangeAmount = Number(nextAction.val || 0) * changeSign;
                 const nextTrackingDelta = nextAction.trackingStat ? changeSign : 0;
                 const nextCountsTeamFoul = nextAction.stat !== 'pf' ? true : nextAction.countsTeamFoul !== false;
 
-                const playerObj = teams.flatMap((team) => team.players || []).find((player) => player.id === liveLogEditTarget.playerId);
                 const teamPrefixMatch = String(liveLogEditTarget.text || '').match(/^\[(HOME|AWAY)\]\s*/);
                 const teamPrefix = teamPrefixMatch ? teamPrefixMatch[0] : '';
-                const editedLogText = `${teamPrefix}⚡ ${playerObj?.name || 'Player'}: ${nextAction.label}`;
+                const editedLogText = `${teamPrefix}⚡ ${nextPlayerObj?.name || liveLogEditTarget.playerName || 'Player'}: ${nextAction.label}`;
 
                 const nextGameLog = gameLog.map((entry) => {
                     if (entry.id !== liveLogEditTarget.id) return entry;
                     return {
                         ...entry,
+                        playerId: resolvedPlayerId || entry.playerId,
+                        playerName: nextPlayerObj?.name || liveLogEditTarget.playerName || entry.playerName,
                         actionId: nextAction.id,
                         statField: nextAction.stat,
                         changeAmount: nextChangeAmount,
@@ -7122,6 +7198,8 @@
                     if (entry.id !== liveLogEditTarget.id) return entry;
                     return {
                         ...entry,
+                        playerId: resolvedPlayerId || entry.playerId,
+                        playerName: nextPlayerObj?.name || liveLogEditTarget.playerName || entry.playerName,
                         actionId: nextAction.id,
                         statField: nextAction.stat,
                         changeAmount: nextChangeAmount,
@@ -7155,9 +7233,9 @@
                 setPlayedPlayers(replayed.playedPlayers);
                 restoreClockFromLatestLog(nextGameLog, replayed.currentQuarter || currentQuarter);
 
-                if (liveLogEditTarget.playerId) {
-                    triggerPlayerFlash(liveLogEditTarget.playerId);
-                    flashPlayerElements(liveLogEditTarget.playerId);
+                if (resolvedPlayerId) {
+                    triggerPlayerFlash(resolvedPlayerId);
+                    flashPlayerElements(resolvedPlayerId);
                 }
 
                 handleCloseLiveLogEdit();
@@ -10848,299 +10926,456 @@
 
                                         {canOperateLive && (
                                             <div className={`col-span-12 ${isOperatorScreenLockedByAdminBoth ? 'pointer-events-none select-none opacity-70 cursor-not-allowed ring-1 ring-amber-400/35 bg-slate-950/35 rounded-xl [&_*]:!cursor-not-allowed' : ''}`}>
-                                                <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                                                    <button
-                                                        onClick={() => handleLogTimeout(true)}
-                                                            disabled={!teamATimeoutEnabled || !canOperateTeam(true)}
-                                                        className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
-                                                        style={{
-                                                            backgroundColor: `${liveHomeTeam?.color || '#06b6d4'}${teamATimeoutEnabled ? '66' : '22'}`,
-                                                            borderColor: liveHomeTeam?.color || '#06b6d4',
-                                                            color: teamATimeoutEnabled ? '#ffffff' : (liveHomeTeam?.color || '#67e8f9')
-                                                        }}
-                                                    >
-                                                        <span className="inline-flex items-center justify-center gap-1">
-                                                            <Icons.Timer />
-                                                            {`${(liveHomeTeam?.name || 'Home').toUpperCase()} TIMEOUT`}
-                                                        </span>
-                                                    </button>
-                                                    <button
-                                                        onClick={handlePeriodAction}
-                                                        disabled={periodActionRequiresAdminControl && !canAdminControlClock}
-                                                        title={periodActionRequiresAdminControl && !canAdminControlClock ? 'Only admin can control clock or lock scores.' : undefined}
-                                                        className={`w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer shadow-lg ${
-                                                            displayPeriodActionIsPositive
-                                                                ? `bg-emerald-600/25 hover:bg-emerald-600/35 border-emerald-400/70 text-emerald-100 ${!isLiveGameplayModalActive ? 'animate-pulse' : ''}`
-                                                                : displayPeriodActionIsPause
-                                                                    ? 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/70 text-amber-100'
-                                                                : 'bg-red-600 hover:bg-red-500 border-red-400 text-white'
-                                                        } disabled:opacity-35 disabled:saturate-0 disabled:cursor-not-allowed`}
-                                                    >
-                                                        <span className="inline-flex items-center justify-center gap-1">
-                                                            {(displayPeriodActionIsStart || displayPeriodActionIsResume) ? <Icons.Play /> : (displayPeriodActionIsEnd ? <Icons.Stop /> : <Icons.Pause />)}
-                                                            {displayPeriodActionLabel}
-                                                        </span>
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleLogTimeout(false)}
-                                                        disabled={!teamBTimeoutEnabled || !canOperateTeam(false)}
-                                                        className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 md:px-3 rounded-xl text-[9px] md:text-xs leading-tight tracking-wide border-2 transition-all cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed"
-                                                        style={{
-                                                            backgroundColor: `${liveAwayTeam?.color || '#06b6d4'}${teamBTimeoutEnabled ? '66' : '22'}`,
-                                                            borderColor: liveAwayTeam?.color || '#06b6d4',
-                                                            color: teamBTimeoutEnabled ? '#ffffff' : (liveAwayTeam?.color || '#67e8f9')
-                                                        }}
-                                                    >
-                                                        <span className="inline-flex items-center justify-center gap-1">
-                                                            <Icons.Timer />
-                                                            {`${(liveAwayTeam?.name || 'Away').toUpperCase()} TIMEOUT`}
-                                                        </span>
-                                                    </button>
-                                                </div>
-                                                <div className="mt-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setShowExtraGameControls((prev) => {
-                                                                const next = !prev;
-                                                                if (!next) {
-                                                                    setShowSyncClockEditor(false);
-                                                                    setIsEditingClockInput(false);
-                                                                }
-                                                                return next;
-                                                            });
-                                                        }}
-                                                        className="w-full inline-flex items-center justify-center font-bold py-2 px-3 rounded-lg text-[10px] md:text-xs border border-slate-700 bg-slate-900/70 text-slate-300 hover:bg-slate-800/90 cursor-pointer"
-                                                    >
-                                                        <span className="inline-flex items-center justify-center gap-1">
+                                                {/* Permanent Global Match Controls Row */}
+                                                <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-2.5 space-y-2">
+                                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                                        <div className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500">Global Match Controls</div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setShowExtraGameControls((prev) => {
+                                                                    const next = !prev;
+                                                                    if (!next) {
+                                                                        setShowSyncClockEditor(false);
+                                                                        setIsEditingClockInput(false);
+                                                                    }
+                                                                    return next;
+                                                                });
+                                                            }}
+                                                            className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1 text-[9px] font-bold text-slate-300 hover:bg-slate-800/90 cursor-pointer"
+                                                        >
                                                             <Icons.Zap />
-                                                            {showExtraGameControls ? 'Hide Extra Game Controls' : 'Show Extra Game Controls'}
-                                                        </span>
-                                                    </button>
+                                                            {showExtraGameControls ? 'Hide Extra' : 'Show Extra'}
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-1.5">
+                                                        <button
+                                                            onClick={() => handleLogTimeout(true)}
+                                                            disabled={!teamATimeoutEnabled || !canOperateTeam(true)}
+                                                            className="w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed border-2 backdrop-blur-md shadow-sm"
+                                                            style={{
+                                                                borderColor: (() => {
+                                                                    const color = String(liveHomeTeam?.color || '#06b6d4').replace('#', '');
+                                                                    const normalized = color.length === 3
+                                                                        ? color.split('').map((ch) => ch + ch).join('')
+                                                                        : color.padEnd(6, '0').slice(0, 6);
+                                                                    const red = parseInt(normalized.slice(0, 2), 16);
+                                                                    const green = parseInt(normalized.slice(2, 4), 16);
+                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
+                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
+                                                                    return isLight ? '#cbd5e1' : (liveHomeTeam?.color || '#06b6d4');
+                                                                })(),
+                                                                backgroundColor: (() => {
+                                                                    const color = String(liveHomeTeam?.color || '#06b6d4').replace('#', '');
+                                                                    const normalized = color.length === 3
+                                                                        ? color.split('').map((ch) => ch + ch).join('')
+                                                                        : color.padEnd(6, '0').slice(0, 6);
+                                                                    const red = parseInt(normalized.slice(0, 2), 16);
+                                                                    const green = parseInt(normalized.slice(2, 4), 16);
+                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
+                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
+                                                                    return isLight ? '#e2e8f0' : (liveHomeTeam?.color || '#0f172a');
+                                                                })(),
+                                                                color: (() => {
+                                                                    const color = String(liveHomeTeam?.color || '#06b6d4').replace('#', '');
+                                                                    const normalized = color.length === 3
+                                                                        ? color.split('').map((ch) => ch + ch).join('')
+                                                                        : color.padEnd(6, '0').slice(0, 6);
+                                                                    const red = parseInt(normalized.slice(0, 2), 16);
+                                                                    const green = parseInt(normalized.slice(2, 4), 16);
+                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
+                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
+                                                                    return isLight ? '#020617' : (liveHomeTeam?.textColor || '#ffffff');
+                                                                })()
+                                                            }}
+                                                        >
+                                                            <span className="inline-flex items-center justify-center gap-1">
+                                                                <Icons.Timer />
+                                                                {(liveHomeTeam?.name || 'TEAM A').toUpperCase()} TIMEOUT
+                                                            </span>
+                                                        </button>
+                                                        <button
+                                                            onClick={handlePeriodAction}
+                                                            disabled={periodActionRequiresAdminControl && !canAdminControlClock}
+                                                            title={periodActionRequiresAdminControl && !canAdminControlClock ? 'Only admin can control clock or lock scores.' : undefined}
+                                                            className={`w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase border transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:saturate-0 disabled:cursor-not-allowed ${(() => {
+                                                                const periodActionLabel = String(displayPeriodActionLabel || '').toUpperCase();
+                                                                if (periodActionLabel.includes('START') || periodActionLabel.includes('RESUME')) {
+                                                                    return 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.6)]';
+                                                                }
+                                                                if (periodActionLabel.includes('PAUSE')) {
+                                                                    return 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-amber-400';
+                                                                }
+                                                                if (periodActionLabel.includes('END') || periodActionLabel.includes('LOCK')) {
+                                                                    return 'bg-red-700 hover:bg-red-600 border-red-600 text-white shadow-[0_0_25px_rgba(239,68,68,0.6)] animate-pulse';
+                                                                }
+                                                                return 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200';
+                                                            })()}`}
+                                                        >
+                                                            <span className="inline-flex items-center justify-center gap-1">
+                                                                {(displayPeriodActionIsStart || displayPeriodActionIsResume) ? <Icons.Play /> : (displayPeriodActionIsEnd ? <Icons.Stop /> : <Icons.Pause />)}
+                                                                {String(displayPeriodActionLabel || '').toUpperCase()}
+                                                            </span>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleLogTimeout(false)}
+                                                            disabled={!teamBTimeoutEnabled || !canOperateTeam(false)}
+                                                            className="w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed border-2 backdrop-blur-md shadow-sm"
+                                                            style={{
+                                                                borderColor: (() => {
+                                                                    const color = String(liveAwayTeam?.color || '#ef4444').replace('#', '');
+                                                                    const normalized = color.length === 3
+                                                                        ? color.split('').map((ch) => ch + ch).join('')
+                                                                        : color.padEnd(6, '0').slice(0, 6);
+                                                                    const red = parseInt(normalized.slice(0, 2), 16);
+                                                                    const green = parseInt(normalized.slice(2, 4), 16);
+                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
+                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
+                                                                    return isLight ? '#cbd5e1' : (liveAwayTeam?.color || '#ef4444');
+                                                                })(),
+                                                                backgroundColor: (() => {
+                                                                    const color = String(liveAwayTeam?.color || '#ef4444').replace('#', '');
+                                                                    const normalized = color.length === 3
+                                                                        ? color.split('').map((ch) => ch + ch).join('')
+                                                                        : color.padEnd(6, '0').slice(0, 6);
+                                                                    const red = parseInt(normalized.slice(0, 2), 16);
+                                                                    const green = parseInt(normalized.slice(2, 4), 16);
+                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
+                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
+                                                                    return isLight ? '#e2e8f0' : (liveAwayTeam?.color || '#0f172a');
+                                                                })(),
+                                                                color: (() => {
+                                                                    const color = String(liveAwayTeam?.color || '#ef4444').replace('#', '');
+                                                                    const normalized = color.length === 3
+                                                                        ? color.split('').map((ch) => ch + ch).join('')
+                                                                        : color.padEnd(6, '0').slice(0, 6);
+                                                                    const red = parseInt(normalized.slice(0, 2), 16);
+                                                                    const green = parseInt(normalized.slice(2, 4), 16);
+                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
+                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
+                                                                    return isLight ? '#020617' : (liveAwayTeam?.textColor || '#ffffff');
+                                                                })()
+                                                            }}
+                                                        >
+                                                            <span className="inline-flex items-center justify-center gap-1">
+                                                                <Icons.Timer />
+                                                                {(liveAwayTeam?.name || 'TEAM B').toUpperCase()} TIMEOUT
+                                                            </span>
+                                                        </button>
+                                                    </div>
+                                                </div>
 
-                                                    {showExtraGameControls && (
-                                                        <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2">
-                                                            <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-                                                                {canFinalizeGame ? (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={openEndGameConfirm}
-                                                                        disabled={!canAdminControlClock}
-                                                                        title={!canAdminControlClock ? 'Only admin can end and lock scores.' : undefined}
-                                                                        className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/55 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                                                                    >
-                                                                        <span className="inline-flex items-center justify-center gap-1">
-                                                                            <Icons.Stop />
-                                                                            End Match
-                                                                        </span>
-                                                                    </button>
-                                                                ) : (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={openFinalizePeriodConfirm}
-                                                                        disabled={!canEndCurrentPeriod || !canAdminControlClock}
-                                                                        title={!canAdminControlClock ? 'Only admin can end and lock scores.' : undefined}
-                                                                        className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/50 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                                                                    >
-                                                                        <span className="inline-flex items-center justify-center gap-1">
-                                                                            <Icons.Stop />
-                                                                            {currentQuarter <= 4
-                                                                                ? `End Quarter (${getPeriodLabel(currentQuarter)})`
-                                                                                : `End Period (${getPeriodLabel(currentQuarter)})`}
-                                                                        </span>
-                                                                    </button>
-                                                                )}
-                                                                <button
-                                                                    onClick={handleOfficialsTimeout}
-                                                                    disabled={!canOfficialsTimeout}
-                                                                    className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-sky-500/50 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                                                                >
-                                                                    <span className="inline-flex items-center justify-center gap-1">
-                                                                        <Icons.Timer />
-                                                                        Officials Timeout
-                                                                    </span>
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={!technicalFoulAction || isActionDisabled(technicalFoulAction)}
-                                                                    onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                    title={getActionDisabledTitle(technicalFoulAction)}
-                                                                    className="w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border border-red-500/45 bg-red-500/15 text-red-200 hover:bg-red-500/25 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                                                                >
-                                                                    <span className="inline-flex items-center justify-center gap-1">
-                                                                        <Icons.ShieldAlert />
-                                                                        Technical Foul
-                                                                    </span>
-                                                                </button>
-                                                                {isLoggedIn && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            if (!showSyncClockEditor) {
-                                                                                setShowSyncClockEditor(true);
-                                                                            }
-                                                                        }}
-                                                                        disabled={isSyncClockControlDisabled}
-                                                                        title={!canAdminControlClock ? 'Only admin can sync clock.' : undefined}
-                                                                        className={`${showSyncClockEditor ? 'md:hidden ' : ''}w-full inline-flex items-center justify-center font-black py-2 md:py-2.5 px-2 md:px-3 rounded-xl text-[9px] md:text-[11px] leading-tight tracking-wide border transition-colors ${isSyncClockControlDisabled
-                                                                            ? 'border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed opacity-70'
-                                                                            : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer'}`}
-                                                                    >
-                                                                        <span className="inline-flex items-center justify-center gap-1">
-                                                                            <Icons.History />
-                                                                            Sync Clock
-                                                                        </span>
-                                                                    </button>
-                                                                )}
-                                                                {isLoggedIn && showSyncClockEditor && canAdminControlClock && (
-                                                                    <div className="col-span-4 md:col-span-1 w-full rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-1.5 flex items-center gap-1">
-                                                                        <input
-                                                                            type="text"
-                                                                            value={manualClockInput}
-                                                                            onFocus={() => setIsEditingClockInput(true)}
-                                                                            onBlur={() => setIsEditingClockInput(false)}
-                                                                            onChange={(e) => setManualClockInput(e.target.value)}
-                                                                            placeholder="MM:SS"
-                                                                            className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none"
-                                                                        />
-                                                                        <button
-                                                                            type="button"
-                                                                            onMouseDown={(e) => e.preventDefault()}
-                                                                            onClick={handleApplyManualClock}
-                                                                            className="shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
-                                                                            aria-label="Save synced clock"
-                                                                            title="Save"
-                                                                        >
-                                                                            <Icons.Save />
-                                                                        </button>
+                                                {/* Collapsible Secondary Controls */}
+                                                {showExtraGameControls && (
+                                                    <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950/55 p-2.5 space-y-2">
+                                                        <div className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500 mb-2">Secondary Controls</div>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                            <button
+                                                                onClick={handleOfficialsTimeout}
+                                                                disabled={!canOfficialsTimeout}
+                                                                className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-slate-700/60 bg-slate-900/80 backdrop-blur-sm text-slate-100 hover:bg-slate-800/90 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_12px_rgba(148,163,184,0.2)]"
+                                                            >
+                                                                <span className="inline-flex items-center justify-center gap-1">
+                                                                    <Icons.Timer />
+                                                                    OFFICIALS TIMEOUT
+                                                                </span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={!technicalFoulAction || isActionDisabled(technicalFoulAction)}
+                                                                onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                title={getActionDisabledTitle(technicalFoulAction)}
+                                                                className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-amber-700/50 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_12px_rgba(245,158,11,0.2)]"
+                                                            >
+                                                                <span className="inline-flex items-center justify-center gap-1">
+                                                                    <Icons.ShieldAlert />
+                                                                    TECHNICAL FOUL
+                                                                </span>
+                                                            </button>
+                                                            {isLoggedIn && (
+                                                                <div className="relative w-full min-h-[2.75rem] md:min-h-[3rem]">
+                                                                    {!showSyncClockEditor ? (
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => {
-                                                                                setShowSyncClockEditor(false);
-                                                                                setIsEditingClockInput(false);
+                                                                                if (!showSyncClockEditor) {
+                                                                                    setShowSyncClockEditor(true);
+                                                                                }
                                                                             }}
-                                                                            className="shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 cursor-pointer"
-                                                                            aria-label="Close sync clock editor"
-                                                                            title="Close"
+                                                                            disabled={isSyncClockControlDisabled}
+                                                                            title={!canAdminControlClock ? 'Only admin can sync clock.' : undefined}
+                                                                            className={`w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border transition-all duration-200 ${isSyncClockControlDisabled
+                                                                                ? 'border-slate-700/60 bg-slate-900/80 text-slate-500 cursor-not-allowed opacity-70'
+                                                                                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 cursor-pointer hover:shadow-[0_0_12px_rgba(16,185,129,0.2)]'}`}
                                                                         >
-                                                                            <Icons.X />
+                                                                            <span className="inline-flex items-center justify-center gap-1">
+                                                                                <Icons.History />
+                                                                                SYNC CLOCK
+                                                                            </span>
                                                                         </button>
-                                                                    </div>
-                                                                )}
-                                                            </div>
+                                                                    ) : (
+                                                                        <div className="absolute inset-0 w-full rounded-lg border border-emerald-500/30 bg-slate-950/90 px-2 py-1.5 flex items-center gap-1.5 overflow-hidden">
+                                                                            <input
+                                                                                type="text"
+                                                                                value={manualClockInput}
+                                                                                onFocus={() => setIsEditingClockInput(true)}
+                                                                                onBlur={() => setIsEditingClockInput(false)}
+                                                                                onChange={(e) => setManualClockInput(e.target.value)}
+                                                                                placeholder="MM:SS"
+                                                                                className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-md px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none uppercase"
+                                                                            />
+                                                                            <button
+                                                                                type="button"
+                                                                                onMouseDown={(e) => e.preventDefault()}
+                                                                                onClick={handleApplyManualClock}
+                                                                                className="shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-md border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                                                                                aria-label="Save synced clock"
+                                                                                title="SAVE"
+                                                                            >
+                                                                                <Icons.Save />
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setShowSyncClockEditor(false);
+                                                                                    setIsEditingClockInput(false);
+                                                                                }}
+                                                                                className="shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-md border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 cursor-pointer"
+                                                                                aria-label="Close sync clock editor"
+                                                                                title="CLOSE"
+                                                                            >
+                                                                                <Icons.X />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                            {canFinalizeGame ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={openEndGameConfirm}
+                                                                    disabled={!canAdminControlClock}
+                                                                    title={!canAdminControlClock ? 'Only admin can end and lock scores.' : undefined}
+                                                                    className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-red-500/45 bg-red-950/30 text-red-400 hover:bg-red-950/40 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] animate-pulse"
+                                                                >
+                                                                    <span className="inline-flex items-center justify-center gap-1">
+                                                                        <Icons.Stop />
+                                                                        END MATCH
+                                                                    </span>
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={openFinalizePeriodConfirm}
+                                                                    disabled={!canEndCurrentPeriod || !canAdminControlClock}
+                                                                    title={!canAdminControlClock ? 'Only admin can end and lock scores.' : undefined}
+                                                                    className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-red-500/45 bg-red-950/30 text-red-400 hover:bg-red-950/40 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] animate-pulse"
+                                                                >
+                                                                    <span className="inline-flex items-center justify-center gap-1">
+                                                                        <Icons.Stop />
+                                                                        {currentQuarter <= 4
+                                                                            ? `END QUARTER (${getPeriodLabel(currentQuarter)})`
+                                                                            : `END PERIOD (${getPeriodLabel(currentQuarter)})`}
+                                                                    </span>
+                                                                </button>
+                                                            )}
                                                         </div>
-                                                    )}
+                                                    </div>
+                                                )}
+
+                                                <div className="mt-2 space-y-2">
+                                                    {/* Instruction Banner */}
+                                                    <div className="flex items-center gap-2 border-b border-slate-800 pb-1.5 px-2">
+                                                        <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1">
+                                                            <Icons.Zap />
+                                                            Tap action first, then select player on court
+                                                        </span>
+                                                    </div>
+
+                                                    {/* PRIMARY SCORING ACTIONS */}
+                                                    <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">PRIMARY SCORING ACTIONS</span>
+                                                        </div>
+                                                        <div className="grid grid-cols-3 gap-1.5">
+                                                            {[
+                                                                ['pts_2', 'fg2m_miss'],
+                                                                ['pts_3', 'fg3m_miss'],
+                                                                ['pts_1', 'ft_miss']
+                                                            ].map(([madeId, missId]) => {
+                                                                const madeAction = liveActionById.get(madeId);
+                                                                const missAction = liveActionById.get(missId);
+                                                                const madeLabel = String(getActionDisplayLabel(madeAction) || '').toUpperCase();
+                                                                const missLabel = String(getActionDisplayLabel(missAction) || '').toUpperCase();
+                                                                const madeIcon = madeId === 'pts_1' ? (
+                                                                    <Icons.Zap />
+                                                                ) : madeId === 'pts_3' ? (
+                                                                    <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                        <circle cx="12" cy="12" r="8" />
+                                                                        <circle cx="12" cy="12" r="4" />
+                                                                        <path d="M12 2v4" />
+                                                                        <path d="M12 18v4" />
+                                                                        <path d="M2 12h4" />
+                                                                        <path d="M18 12h4" />
+                                                                    </svg>
+                                                                ) : (
+                                                                    <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                        <path d="M12 2s4 3.5 4 7.5c0 2.2-1.1 3.7-2.1 4.7-.8-.9-1.3-2-1.7-3.4-1 1.2-2 2.9-2 4.8C10.2 19.2 12.6 22 16 22c3.3 0 6-2.5 6-6 0-6.7-5.2-10.7-10-14z" />
+                                                                    </svg>
+                                                                );
+                                                                const missIcon = missId === 'ft_miss' ? (
+                                                                    <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                        <circle cx="12" cy="12" r="9" />
+                                                                        <path d="M5 19 19 5" />
+                                                                    </svg>
+                                                                ) : (
+                                                                    <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                        <circle cx="12" cy="12" r="9" />
+                                                                        <path d="M9 9l6 6" />
+                                                                        <path d="M15 9l-6 6" />
+                                                                    </svg>
+                                                                );
+                                                                return (
+                                                                    <div key={`${madeId}-${missId}`} className="grid grid-rows-2 gap-1.5">
+                                                                        {madeAction ? (
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={isActionDisabled(madeAction)}
+                                                                                onClick={() => openActionForTeam(madeAction, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                                title={getActionDisabledTitle(madeAction)}
+                                                                                className={`w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-emerald-950/20 backdrop-blur-md ${madeId === 'pts_1' ? 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]' : 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]'}`}
+                                                                            >
+                                                                                {madeIcon}
+                                                                                <span>{madeLabel}</span>
+                                                                            </button>
+                                                                        ) : null}
+                                                                        {missAction ? (
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={isActionDisabled(missAction)}
+                                                                                onClick={() => openActionForTeam(missAction, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                                title={getActionDisabledTitle(missAction)}
+                                                                                className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-red-950/20 backdrop-blur-md text-red-300 border-red-500/50 hover:bg-red-950/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
+                                                                            >
+                                                                                {missIcon}
+                                                                                <span>{missLabel}</span>
+                                                                            </button>
+                                                                        ) : null}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">POSSESSION & GAME FLOW</span>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-1.5">
+                                                            {flowActions.filter((act) => act.id === 'ast').map((act) => (
+                                                                <button
+                                                                    key={`flow-${act.id}`}
+                                                                    disabled={isActionDisabled(act)}
+                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                    title={getActionDisabledTitle(act)}
+                                                                    className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                >
+                                                                    <Icons.ChevronRight />
+                                                                    <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
+                                                                </button>
+                                                            ))}
+                                                            {reboundAction && (
+                                                                <>
+                                                                    <button
+                                                                        key="drb"
+                                                                        type="button"
+                                                                        disabled={isActionDisabled(reboundAction)}
+                                                                        onClick={() => openActionForTeamWithLabel(reboundAction, effectiveOperatorFocus === 'away' ? false : true, 'DEF REBOUND')}
+                                                                        title={getActionDisabledTitle(reboundAction)}
+                                                                        className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                    >
+                                                                        <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                            <circle cx="12" cy="12" r="9" />
+                                                                            <path d="M12 16V8" />
+                                                                            <path d="m8 12 4-4 4 4" />
+                                                                        </svg>
+                                                                        <span>DEF REBOUND</span>
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                            {flowActions.filter((act) => act.id === 'stl' || act.id === 'blk').map((act) => (
+                                                                <button
+                                                                    key={`flow-${act.id}`}
+                                                                    disabled={isActionDisabled(act)}
+                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                    title={getActionDisabledTitle(act)}
+                                                                    className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                >
+                                                                    {act.id === 'stl' ? (
+                                                                        <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                            <path d="M6 18 18 6" />
+                                                                            <path d="M7 6h5v5" />
+                                                                            <path d="M6 12a6 6 0 0 1 6-6" />
+                                                                        </svg>
+                                                                    ) : (
+                                                                        <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                            <path d="M12 2 4 7v5c0 5 3 9 8 10 5-1 8-5 8-10V7l-8-5Z" />
+                                                                            <path d="M9 12h6" />
+                                                                        </svg>
+                                                                    )}
+                                                                    <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">WHISTLES & FOULS</span>
+                                                        </div>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                                                            {whistleActions.map((act) => (
+                                                                <button
+                                                                    key={act.id}
+                                                                    disabled={isActionDisabled(act)}
+                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                    title={getActionDisabledTitle(act)}
+                                                                    className={`w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${
+                                                                      act.id === 'pf_offensive'
+                                                                        ? 'bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50'
+                                                                        : act.id === 'pf'
+                                                                          ? 'bg-amber-950/20 hover:bg-amber-950/30 hover:shadow-[0_0_12px_rgba(245,158,11,0.2)] text-amber-300 border-amber-500/50'
+                                                                          : 'bg-slate-900/40 hover:bg-slate-900/50 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100 border-slate-800/60'
+                                                                    }`}
+                                                                >
+                                                                    {act.id === 'to' ? (
+                                                                        <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                            <path d="M3 12a9 9 0 0 1 9-9" />
+                                                                            <path d="M12 3h7v7" />
+                                                                            <path d="M21 12a9 9 0 0 1-9 9" />
+                                                                            <path d="M12 21H5v-7" />
+                                                                        </svg>
+                                                                    ) : act.id === 'pf_offensive' ? (
+                                                                        <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                            <path d="M12 2 2 20h20L12 2Z" />
+                                                                            <path d="M12 8v5" />
+                                                                            <path d="M12 16h.01" />
+                                                                        </svg>
+                                                                    ) : (
+                                                                        <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                            <circle cx="12" cy="12" r="9" />
+                                                                            <path d="M12 7v5" />
+                                                                            <path d="M12 16h.01" />
+                                                                        </svg>
+                                                                    )}
+                                                                    <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         )}
-
-                                        {/* QUICK ACTION DECK GRID WITH RESPONSIVE DISPLAY & TIERED PRIORITY */}
-                                        {canOperateLive && <div className={`col-span-12 bg-slate-900 border border-slate-800 p-2.5 md:p-4 rounded-xl shadow-xl space-y-2 md:space-y-4 max-h-[calc(100vh-245px)] overflow-y-auto md:max-h-none md:overflow-visible ${isOperatorScreenLockedByAdminBoth ? 'pointer-events-none select-none opacity-70 cursor-not-allowed ring-1 ring-amber-400/35 bg-slate-950/35 [&_*]:!cursor-not-allowed' : ''}`}>
-                                            <div className="flex items-center border-b border-slate-800 pb-1.5">
-                                                <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1"><Icons.Zap /> Tap action first, then select player on court</span>
-                                            </div>
-                                            {showRecentActionsUi && recentActionIds.length > 0 && (
-                                                <div className="md:hidden">
-                                                    <div className="text-[9px] text-slate-500 font-extrabold uppercase tracking-widest mb-1.5">Recent Actions</div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {recentActionIds
-                                                            .map((id) => liveActionById.get(id))
-                                                            .filter(Boolean)
-                                                            .map((act) => (
-                                                                <button
-                                                                    key={`recent-action-${act.id}`}
-                                                                    type="button"
-                                                                    disabled={isActionDisabled(act)}
-                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                    className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-950 text-[10px] font-black uppercase tracking-wide text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                >
-                                                                    {act.label}
-                                                                </button>
-                                                            ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {canBackfillEndedPeriodStats && (
-                                                <div className="text-[10px] font-bold text-sky-200 bg-sky-500/10 border border-sky-500/30 rounded-lg px-2.5 py-2 inline-flex items-center gap-1.5">
-                                                    <Icons.Edit />
-                                                    Backfill Mode: clock has ended, but stat buttons stay enabled so you can log missed actions before finalizing the period.
-                                                </div>
-                                            )}
-                                            {!displayIsPeriodClockRunning && hasMatchStarted && !canBackfillEndedPeriodStats && !isAwaitingPeriodStart && !awaitingOvertimeDecision && (
-                                                <div className="text-[10px] font-black text-red-200 bg-red-500/12 border border-red-500/45 rounded-lg px-2.5 py-2 inline-flex items-center gap-1.5 animate-pulse">
-                                                    <Icons.Timer />
-                                                    CLOCK STOPPED: Resume play or confirm auto-resume before continuing live stat logging.
-                                                </div>
-                                            )}
-                                            {!displayCanTriggerStatLogging && (
-                                                <div className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
-                                                    {(isAwaitingPeriodStart || awaitingOvertimeDecision)
-                                                        ? (canBackfillEndedPeriodStats
-                                                            ? `Clock has ended for ${getPeriodLabel(currentQuarter)}. You can still log missed stats before starting the next period.`
-                                                            : `Period finalized. ${getPeriodLabel(currentQuarter)} stats are locked. Start the next period (or end match) to continue. Undo to previous period is disabled.`)
-                                                        : (hasMatchStarted
-                                                            ? 'Most stat triggers are locked while paused/stopped. Technical Foul stays enabled. Free Throw and Free Throw Missed are only enabled when the clock is stopped.'
-                                                            : 'Stat triggers are locked until you press Start Match.')}
-                                                </div>
-                                            )}
-
-                                            {/* TIER 1: GIANT PRIMARY KEYS (Shooting metrics) */}
-                                            <div>
-                                                <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🏀 Primary Shooting Keys & Attempts</span>
-                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-3">
-                                                        {canOperateLive && primaryActions.map(act => (
-                                                        <button 
-                                                            key={act.id} 
-                                                            disabled={isActionDisabled(act)}
-                                                            onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
-                                                            title={getActionDisabledTitle(act)}
-                                                            className={`py-3.5 md:py-6 px-1.5 md:px-4 rounded-lg md:rounded-2xl inline-flex items-center justify-center text-center text-[9px] md:text-sm font-black tracking-wide border transition-all active:scale-95 cursor-pointer shadow-lg uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
-                                                        >
-                                                            {act.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            {/* TIER 2 & TIER 3 COMBINED CONTAINER */}
-                                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                                                {/* TIER 2: LARGE SECONDARY KEYS (Rebounds & Assists) */}
-                                                <div className="lg:col-span-12">
-                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">🛡️ Transition Keys (Very Common)</span>
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 md:gap-3">
-                                                        {canOperateLive && secondaryActions.map(act => (
-                                                            <button 
-                                                                key={act.id} 
-                                                                disabled={isActionDisabled(act)}
-                                                                onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                title={getActionDisabledTitle(act)}
-                                                                className={`py-3.5 md:py-4 px-2 md:px-4 rounded-lg md:rounded-xl inline-flex items-center justify-center text-center text-[10px] md:text-xs font-black border transition-all active:scale-95 cursor-pointer shadow-md uppercase disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
-                                                            >
-                                                                {act.label}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-
-                                                {/* TIER 3: COMPACT TERTIARY KEYS ("FT Miss" is neatly located here) */}
-                                                <div className="lg:col-span-12">
-                                                    <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-2">⚙️ Auxiliary Game Events</span>
-                                                    <div className="grid grid-cols-2 md:grid-cols-6 gap-1.5 md:gap-2">
-                                                        {canOperateLive && tertiaryActions.map(act => (
-                                                            <button 
-                                                                key={act.id} 
-                                                                disabled={isActionDisabled(act)}
-                                                                onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                title={getActionDisabledTitle(act)}
-                                                                className={`py-[11px] md:py-2.5 px-1.5 md:px-2 rounded-lg inline-flex items-center justify-center text-center text-[9px] md:text-[10px] font-bold border transition-all active:scale-95 cursor-pointer shadow-sm disabled:opacity-40 disabled:saturate-0 disabled:cursor-not-allowed ${act.colorClass} border-transparent`}
-                                                            >
-                                                                {act.label}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>}
 
                                         {/* Mobile Tab Toggles */}
                                         {showHomeLivePanel && showAwayLivePanel && (
@@ -14613,7 +14848,7 @@
                                         <h3 className={`${isCompactRecordActionModal ? 'text-base mt-1' : 'text-xl mt-1'} font-black text-white leading-tight`}>
                                             Record Action:
                                             <span className={`ml-2 inline-flex items-center rounded-md border px-2 py-0.5 font-mono tracking-wide ${activeActionTone.textClass}`} style={activeActionTone.badgeStyle}>
-                                                {activeAction.label}
+                                                {activeActionLabelOverride || activeAction.label}
                                             </span>
                                         </h3>
                                     </div>
@@ -14640,7 +14875,7 @@
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(true)} onClick={() => handlePlayerClick(id, true)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
+                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, true, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
                                             })}
                                         </div>
                                     </div>}
@@ -14651,7 +14886,7 @@
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} disabled={isFouledOut || !canOperateTeam(false)} onClick={() => handlePlayerClick(id, false)} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
+                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, false, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
                                             })}
                                         </div>
                                     </div>}
