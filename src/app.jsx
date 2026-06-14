@@ -305,6 +305,7 @@
             const clockControlRevisionRef = useRef(0);
             const discardedLiveSessionTombstoneRef = useRef({ sessionInstanceId: '', discardedAt: 0 });
             const lastRemoteGameLogIdsRef = useRef(new Set());
+            const locallyDeletedLiveLogIdsRef = useRef(new Set());
             const gameLogImportInputRef = useRef(null);
             const lastLocalSessionUpdatedAtRef = useRef(0);
             const lastLocalDnpUpdatedAtRef = useRef(0);
@@ -2595,6 +2596,7 @@
                     persistPendingLiveEvents();
                     pendingActiveSessionSyncRef.current = null;
                     persistPendingActiveSessionSync();
+                    locallyDeletedLiveLogIdsRef.current = new Set();
                 }
 
                 suppressLiveSessionSyncRef.current = true;
@@ -2627,13 +2629,33 @@
                     });
                 }
 
+                const locallyDeletedIds = locallyDeletedLiveLogIdsRef.current || new Set();
+                const normalizedGameLog = normalized.gameLog || [];
+                const normalizedLoggedHistory = normalized.loggedHistory || [];
+                if (locallyDeletedIds.size > 0) {
+                    const remoteIds = new Set(normalizedGameLog.map((event) => String(event?.id || '')).filter(Boolean));
+                    locallyDeletedIds.forEach((eventId) => {
+                        if (!remoteIds.has(eventId)) {
+                            locallyDeletedIds.delete(eventId);
+                        }
+                    });
+                }
+                const filteredRemoteGameLog = normalizedGameLog.filter((event) => {
+                    const eventId = String(event?.id || '').trim();
+                    return !eventId || !locallyDeletedIds.has(eventId);
+                });
+                const filteredRemoteLoggedHistory = normalizedLoggedHistory.filter((event) => {
+                    const eventId = String(event?.id || '').trim();
+                    return !eventId || !locallyDeletedIds.has(eventId);
+                });
+
                 const effectiveGameLog = keepLocalRotation
-                    ? mergeUniqueEventsById(gameLogRef.current || [], normalized.gameLog || [], MAX_LIVE_LOG_ENTRIES)
-                    : normalized.gameLog;
+                    ? mergeUniqueEventsById(gameLogRef.current || [], filteredRemoteGameLog, MAX_LIVE_LOG_ENTRIES)
+                    : filteredRemoteGameLog;
                 const effectiveLoggedHistory = keepLocalRotation
-                    ? mergeUniqueEventsById(loggedHistoryRef.current || [], normalized.loggedHistory || [], MAX_LIVE_HISTORY_ENTRIES)
-                    : normalized.loggedHistory;
-                lastRemoteGameLogIdsRef.current = new Set((normalized.gameLog || []).map((event) => event?.id).filter(Boolean));
+                    ? mergeUniqueEventsById(loggedHistoryRef.current || [], filteredRemoteLoggedHistory, MAX_LIVE_HISTORY_ENTRIES)
+                    : filteredRemoteLoggedHistory;
+                lastRemoteGameLogIdsRef.current = new Set(filteredRemoteGameLog.map((event) => event?.id).filter(Boolean));
                 const replayed = buildLiveStateFromEvents(replaySnapshot || liveGameSnapshotRef.current || null, effectiveGameLog) || null;
                 const hasAdminFocusEvent = (effectiveGameLog || []).some((event) => event?.kind === 'meta' && event?.metaType === 'adminFocusSet');
                 const pauseActiveFromLog = isTimeoutCurrentlyActive(effectiveGameLog);
@@ -2910,6 +2932,21 @@
                         return teams.find((team) => (team?.players || []).some((player) => player.id === targetPlayerId)) || null;
                     })();
             const liveLogEditTargetPlayers = liveLogEditTargetTeam?.players || [];
+            const formatLiveLogEditPlayerLabel = (player) => {
+                const rawName = String(player?.name || '').trim();
+                const formattedName = rawName.includes(',')
+                    ? rawName
+                    : rawName
+                        .split(/\s+/)
+                        .filter(Boolean)
+                        .reduce((accumulator, part, index, parts) => {
+                            if (index === parts.length - 1) {
+                                return accumulator ? `${part}, ${accumulator}` : part;
+                            }
+                            return accumulator ? accumulator : part;
+                        }, '');
+                return `#${String(player?.number || '').trim()} ${formattedName || rawName}`.trim().toUpperCase();
+            };
             const operatorHandledTeamLabel = effectiveOperatorFocus === 'home'
                 ? homeTeamLabel
                 : effectiveOperatorFocus === 'away'
@@ -5532,6 +5569,7 @@
                     const orderedGameLog = [...(Array.isArray(game.gameLog) ? game.gameLog : [])].reverse();
                     const isRecapNoiseEvent = (entry, idx, allEntries) => {
                         const text = String(entry?.text || '').toLowerCase();
+                        const metaType = String(entry?.metaType || '').trim();
                         if (entry?.hiddenFromLog) return true;
                         if (entry?.metaType === 'periodCheckpoint') return true;
                         if (entry?.isUndoCompensation) return true;
@@ -5540,6 +5578,8 @@
                         if (/clock adjusted|sync clock|clock updated/.test(text)) return true;
                         if (/^undo:\s*reversed/i.test(text)) return true;
                         if (/\bcorrection\b/.test(text)) return true;
+
+                        if (metaType === 'adminFocusSet' || metaType === 'rolePresence') return true;
 
                         if (entry?.metaType === 'manualPause') return true;
                         if (text.trim() === 'manual pause' || text.trim() === 'pause game' || text.trim() === 'pause') return true;
@@ -6093,6 +6133,7 @@
                 remoteEventIdsRef.current = new Set();
                 liveEventQueueReadyRef.current = false;
                 lastRemoteGameLogIdsRef.current = new Set();
+                locallyDeletedLiveLogIdsRef.current = new Set();
                 lastObservedLogIdRef.current = null;
 
                 pendingActiveSessionSyncRef.current = null;
@@ -6422,6 +6463,7 @@
                 setOperatorFocus('both');
                 clearTransientLiveActionState();
                 setLoggedHistory([]);
+                locallyDeletedLiveLogIdsRef.current = new Set();
                 const initialGameLog = [
                     {
                         id: `${focusEventTs}_${Math.random().toString(36).slice(2, 8)}`,
@@ -7001,6 +7043,7 @@
                 }
                 const entry = gameLog.find(log => log.id === logId);
                 if (!entry) return;
+                const entryIndex = gameLog.findIndex((log) => log.id === logId);
 
                 const entryQuarter = Number(getEffectiveQuarterFromLogEntry(entry, gameLog));
                 const isCurrentPeriodEntry = entryQuarter === Number(currentQuarter);
@@ -7019,8 +7062,40 @@
 
                 setIsPeriodClockRunning(false);
 
-                const remainingGameLog = gameLog.filter(log => log.id !== logId);
-                const remainingHistory = loggedHistory.filter(item => item.id !== logId);
+                const idsToDelete = new Set([String(logId)]);
+                const isFoulStatEntry = entry?.kind === 'stat' && String(entry?.statField || '') === 'pf';
+                if (isFoulStatEntry && entryIndex >= 0) {
+                    let linkedFoulPauseId = '';
+                    let bestDistance = Number.POSITIVE_INFINITY;
+                    const minIndex = Math.max(0, entryIndex - 3);
+                    const maxIndex = Math.min(gameLog.length - 1, entryIndex + 3);
+
+                    for (let idx = minIndex; idx <= maxIndex; idx += 1) {
+                        if (idx === entryIndex) continue;
+                        const candidate = gameLog[idx];
+                        if (!candidate || candidate.kind !== 'meta' || candidate.metaType !== 'foulPause' || !candidate.id) continue;
+
+                        const candidateQuarter = Number(getEffectiveQuarterFromLogEntry(candidate, gameLog));
+                        if (candidateQuarter !== entryQuarter) continue;
+                        if (String(candidate.clockRemaining || '') !== String(entry.clockRemaining || '')) continue;
+                        if (typeof candidate.isTeamA === 'boolean' && typeof entry.isTeamA === 'boolean' && candidate.isTeamA !== entry.isTeamA) continue;
+
+                        const distance = Math.abs(idx - entryIndex);
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            linkedFoulPauseId = String(candidate.id);
+                        }
+                    }
+
+                    if (linkedFoulPauseId) {
+                        idsToDelete.add(linkedFoulPauseId);
+                    }
+                }
+
+                idsToDelete.forEach((id) => locallyDeletedLiveLogIdsRef.current.add(id));
+
+                const remainingGameLog = gameLog.filter((log) => !idsToDelete.has(String(log?.id || '')));
+                const remainingHistory = loggedHistory.filter((item) => !idsToDelete.has(String(item?.id || '')));
 
                 const historyMatch = loggedHistory.find(item => item.id === logId) || loggedHistory.find(item => item.logText === entry.text);
                 const statSource = (entry.kind === 'stat' && entry.playerId && entry.statField)
@@ -11243,7 +11318,7 @@
                                                                                 disabled={isActionDisabled(madeAction)}
                                                                                 onClick={() => openActionForTeam(madeAction, effectiveOperatorFocus === 'away' ? false : true)}
                                                                                 title={getActionDisabledTitle(madeAction)}
-                                                                                className={`w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-emerald-950/20 backdrop-blur-md ${madeId === 'pts_1' ? 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]' : 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]'}`}
+                                                                                className={`w-full min-h-[4.5rem] md:min-h-[5rem] py-4 md:py-5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-emerald-950/20 backdrop-blur-md ${madeId === 'pts_1' ? 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]' : 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]'}`}
                                                                             >
                                                                                 {madeIcon}
                                                                                 <span>{madeLabel}</span>
@@ -11255,7 +11330,7 @@
                                                                                 disabled={isActionDisabled(missAction)}
                                                                                 onClick={() => openActionForTeam(missAction, effectiveOperatorFocus === 'away' ? false : true)}
                                                                                 title={getActionDisabledTitle(missAction)}
-                                                                                className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-red-950/20 backdrop-blur-md text-red-300 border-red-500/50 hover:bg-red-950/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
+                                                                                className="w-full min-h-[4.5rem] md:min-h-[5rem] py-4 md:py-5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-red-950/20 backdrop-blur-md text-red-300 border-red-500/50 hover:bg-red-950/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
                                                                             >
                                                                                 {missIcon}
                                                                                 <span>{missLabel}</span>
@@ -11278,7 +11353,7 @@
                                                                     disabled={isActionDisabled(act)}
                                                                     onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
                                                                     title={getActionDisabledTitle(act)}
-                                                                    className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                    className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
                                                                 >
                                                                     <Icons.ChevronRight />
                                                                     <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
@@ -11290,16 +11365,16 @@
                                                                         key="drb"
                                                                         type="button"
                                                                         disabled={isActionDisabled(reboundAction)}
-                                                                        onClick={() => openActionForTeamWithLabel(reboundAction, effectiveOperatorFocus === 'away' ? false : true, 'DEF REBOUND')}
+                                                                        onClick={() => openActionForTeamWithLabel(reboundAction, effectiveOperatorFocus === 'away' ? false : true, '+1 REB')}
                                                                         title={getActionDisabledTitle(reboundAction)}
-                                                                        className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                        className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
                                                                     >
                                                                         <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                                                             <circle cx="12" cy="12" r="9" />
                                                                             <path d="M12 16V8" />
                                                                             <path d="m8 12 4-4 4 4" />
                                                                         </svg>
-                                                                        <span>DEF REBOUND</span>
+                                                                        <span>+1 REB</span>
                                                                     </button>
                                                                 </>
                                                             )}
@@ -11309,7 +11384,7 @@
                                                                     disabled={isActionDisabled(act)}
                                                                     onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
                                                                     title={getActionDisabledTitle(act)}
-                                                                    className="w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                    className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
                                                                 >
                                                                     {act.id === 'stl' ? (
                                                                         <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -11340,7 +11415,7 @@
                                                                     disabled={isActionDisabled(act)}
                                                                     onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
                                                                     title={getActionDisabledTitle(act)}
-                                                                    className={`w-full py-3 md:py-3.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${
+                                                                                                                                        className={`w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${
                                                                       act.id === 'pf_offensive'
                                                                         ? 'bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50'
                                                                         : act.id === 'pf'
@@ -14907,19 +14982,36 @@
                                     <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Selected Log</div>
                                     <div className="break-words">{String(liveLogEditTarget.text || '').replace(/^\[(HOME|AWAY)\]\s*/, '')}</div>
                                 </div>
-                                <div>
-                                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Action</label>
-                                    <select
-                                        value={editingLiveLogActionId}
-                                        onChange={(e) => setEditingLiveLogActionId(e.target.value)}
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-white text-xs"
-                                    >
-                                        {editableLiveStatActions.map((action) => (
-                                            <option key={`live-edit-action-${action.id}`} value={action.id}>
-                                                {action.label}
-                                            </option>
-                                        ))}
-                                    </select>
+                                <div className="space-y-2.5 rounded-xl border border-slate-800 bg-slate-950/55 p-2.5">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-400 tracking-wider uppercase mb-1">Action</label>
+                                        <select
+                                            value={editingLiveLogActionId}
+                                            onChange={(e) => setEditingLiveLogActionId(e.target.value)}
+                                            className="w-full bg-slate-900/80 border border-slate-700 rounded-xl p-2.5 text-white text-xs font-bold uppercase tracking-wider"
+                                        >
+                                            {editableLiveStatActions.map((action) => (
+                                                <option key={`live-edit-action-${action.id}`} value={action.id}>
+                                                    {String(action.label || '').toUpperCase()}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-400 tracking-wider uppercase mb-1">Player</label>
+                                        <select
+                                            value={selectedPlayerId}
+                                            onChange={(e) => setSelectedPlayerId(e.target.value)}
+                                            className="w-full bg-slate-900/80 border border-slate-700 rounded-xl p-2.5 text-white text-xs font-bold uppercase tracking-wider"
+                                        >
+                                            <option value="">SELECT PLAYER</option>
+                                            {liveLogEditTargetPlayers.map((player) => (
+                                                <option key={`live-edit-player-${player.id}`} value={player.id}>
+                                                    {formatLiveLogEditPlayerLabel(player)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 pt-1">
                                     <button
