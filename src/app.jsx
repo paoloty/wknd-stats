@@ -11444,19 +11444,7 @@
                                                         <div className="flex items-center justify-between gap-2">
                                                             <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">POSSESSION & GAME FLOW</span>
                                                         </div>
-                                                        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-1.5">
-                                                            {flowActions.filter((act) => act.id === 'ast').map((act) => (
-                                                                <button
-                                                                    key={`flow-${act.id}`}
-                                                                    disabled={isActionDisabled(act)}
-                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                    title={getActionDisabledTitle(act)}
-                                                                    className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
-                                                                >
-                                                                    <Icons.ChevronRight />
-                                                                    <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
-                                                                </button>
-                                                            ))}
+                                                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-1.5">
                                                             {reboundAction && (
                                                                 <>
                                                                     <button
@@ -11476,6 +11464,18 @@
                                                                     </button>
                                                                 </>
                                                             )}
+                                                            {flowActions.filter((act) => act.id === 'ast').map((act) => (
+                                                                <button
+                                                                    key={`flow-${act.id}`}
+                                                                    disabled={isActionDisabled(act)}
+                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
+                                                                    title={getActionDisabledTitle(act)}
+                                                                    className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                >
+                                                                    <Icons.ChevronRight />
+                                                                    <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
+                                                                </button>
+                                                            ))}
                                                             {flowActions.filter((act) => act.id === 'stl' || act.id === 'blk').map((act) => (
                                                                 <button
                                                                     key={`flow-${act.id}`}
@@ -11513,12 +11513,10 @@
                                                                     disabled={isActionDisabled(act)}
                                                                     onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
                                                                     title={getActionDisabledTitle(act)}
-                                                                                                                                        className={`w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${
-                                                                      act.id === 'pf_offensive'
-                                                                        ? 'bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50'
-                                                                        : act.id === 'pf'
-                                                                          ? 'bg-amber-950/20 hover:bg-amber-950/30 hover:shadow-[0_0_12px_rgba(245,158,11,0.2)] text-amber-300 border-amber-500/50'
-                                                                          : 'bg-slate-900/40 hover:bg-slate-900/50 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100 border-slate-800/60'
+                                                                    className={`w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${
+                                                                        act.id === 'pf'
+                                                                        ? 'bg-amber-950/20 hover:bg-amber-950/30 hover:shadow-[0_0_12px_rgba(245,158,11,0.2)] text-amber-300 border-amber-500/50'
+                                                                        : 'bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50'
                                                                     }`}
                                                                 >
                                                                     {act.id === 'to' ? (
