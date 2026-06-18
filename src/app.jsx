@@ -380,7 +380,7 @@
                 || liveLogEditTarget
             );
             const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
-            const LIVE_LINEUP_POSITION_SLOTS = ['C', 'F', 'F', 'G', 'G'];
+            const LIVE_LINEUP_DISPLAY_POSITIONS = ['C', 'PF', 'SF', 'SG', 'PG'];
             const LOCAL_APP_STATE_CACHE_KEY = 'wknd_app_state_cache';
             const normalizePlayerPositions = (playerLike) => {
                 const rawPositions = [];
@@ -439,9 +439,13 @@
 
                 const scoreByPositionForSlot = slotLabel === 'C'
                     ? { C: 500, PF: 320, SF: 220, SG: 80, PG: 60 }
-                    : slotLabel === 'F'
-                        ? { PF: 500, SF: 500, C: 260, SG: 140, PG: 120 }
-                        : { PG: 500, SG: 500, SF: 180, PF: 120, C: 40 };
+                    : slotLabel === 'PF'
+                        ? { PF: 500, SF: 420, C: 260, SG: 140, PG: 120 }
+                        : slotLabel === 'SF'
+                            ? { SF: 500, PF: 420, SG: 220, C: 180, PG: 120 }
+                            : slotLabel === 'SG'
+                                ? { SG: 500, PG: 460, SF: 220, PF: 120, C: 60 }
+                                : { PG: 500, SG: 460, SF: 220, PF: 120, C: 60 };
 
                 let maxScore = 0;
                 let excellenceCount = 0;
@@ -457,58 +461,62 @@
                 const teamPool = (teamsRef.current && teamsRef.current.length > 0) ? teamsRef.current : teams;
                 const teamObj = teamPool.find((team) => team.id === teamId);
                 const playersById = new Map((teamObj?.players || []).map((player) => [player.id, player]));
-                const getSlotPurityBonus = (playerLike, slotLabel) => {
-                    const positions = normalizePlayerPositions(playerLike);
-                    const hasCenter = positions.includes('C');
-                    const hasForward = positions.includes('SF') || positions.includes('PF');
-                    const hasGuard = positions.includes('SG') || positions.includes('PG');
-                    if (slotLabel === 'C') {
-                        return hasCenter && !hasForward && !hasGuard ? 2 : (hasCenter ? 1 : 0);
-                    }
-                    if (slotLabel === 'F') {
-                        return hasForward && !hasGuard ? 2 : (hasForward ? 1 : 0);
-                    }
-                    return hasGuard && !hasForward ? 2 : (hasGuard ? 1 : 0);
-                };
+                const positionOrder = new Map(LIVE_LINEUP_DISPLAY_POSITIONS.map((position, index) => [position, index]));
                 const uniqueLineupIds = Array.from(new Set((lineupIds || []).filter(Boolean)));
-                const primaryIds = uniqueLineupIds.slice(0, LIVE_LINEUP_POSITION_SLOTS.length);
+                const primaryIds = uniqueLineupIds.slice(0, LIVE_LINEUP_DISPLAY_POSITIONS.length);
                 const extraIds = uniqueLineupIds.slice(primaryIds.length);
-                const targetSlots = LIVE_LINEUP_POSITION_SLOTS.slice(0, primaryIds.length);
+                const targetSlots = LIVE_LINEUP_DISPLAY_POSITIONS.slice(0, primaryIds.length);
 
                 if (!primaryIds.length) {
                     return extraIds.map((playerId) => ({ playerId, slot: '' }));
                 }
 
-                const candidates = primaryIds.map((playerId) => ({
-                    playerId,
-                    player: playersById.get(playerId),
-                    height: parsePlayerHeightInches(playersById.get(playerId)),
-                    fouls: Number(liveStats[playerId]?.pf || 0)
-                }));
+                const candidates = primaryIds.map((playerId) => {
+                    const player = playersById.get(playerId);
+                    const positions = normalizePlayerPositions(player);
+                    const positionSpecificity = positions.length === 1 ? 2 : 1;
+
+                    return {
+                        playerId,
+                        player,
+                        positions,
+                        height: parsePlayerHeightInches(player),
+                        fouls: Number(liveStats[playerId]?.pf || 0),
+                        jerseyNumber: Number(player?.number || 0) || Number.MAX_SAFE_INTEGER,
+                        positionSpecificity
+                    };
+                });
 
                 let bestScore = Number.NEGATIVE_INFINITY;
+                let bestSpecificity = Number.NEGATIVE_INFINITY;
                 let bestHeightTieBreak = Number.NEGATIVE_INFINITY;
-                let bestPurity = Number.NEGATIVE_INFINITY;
                 let bestFoulPreference = Number.NEGATIVE_INFINITY;
+                let bestJerseyPreference = Number.NEGATIVE_INFINITY;
                 let bestAssignment = null;
                 const assignedEntries = new Array(targetSlots.length);
                 const used = new Array(candidates.length).fill(false);
 
-                const backtrack = (slotIndex, scoreTotal, heightTieBreakTotal, purityTotal, foulPreferenceTotal) => {
+                const backtrack = (slotIndex, scoreTotal, specificityTotal, heightTieBreakTotal, foulPreferenceTotal, jerseyPreferenceTotal) => {
                     if (slotIndex >= targetSlots.length) {
                         if (
                             scoreTotal > bestScore
                             || (
                                 scoreTotal === bestScore
                                 && (
-                                    heightTieBreakTotal > bestHeightTieBreak
+                                    specificityTotal > bestSpecificity
                                     || (
-                                        heightTieBreakTotal === bestHeightTieBreak
+                                        specificityTotal === bestSpecificity
                                         && (
-                                            purityTotal > bestPurity
+                                            heightTieBreakTotal > bestHeightTieBreak
                                             || (
-                                                purityTotal === bestPurity
-                                                && foulPreferenceTotal > bestFoulPreference
+                                                heightTieBreakTotal === bestHeightTieBreak
+                                                && (
+                                                    foulPreferenceTotal > bestFoulPreference
+                                                    || (
+                                                        foulPreferenceTotal === bestFoulPreference
+                                                        && jerseyPreferenceTotal > bestJerseyPreference
+                                                    )
+                                                )
                                             )
                                         )
                                     )
@@ -516,9 +524,10 @@
                             )
                         ) {
                             bestScore = scoreTotal;
+                            bestSpecificity = specificityTotal;
                             bestHeightTieBreak = heightTieBreakTotal;
-                            bestPurity = purityTotal;
                             bestFoulPreference = foulPreferenceTotal;
+                            bestJerseyPreference = jerseyPreferenceTotal;
                             bestAssignment = assignedEntries.slice();
                         }
                         return;
@@ -529,12 +538,15 @@
                         if (used[i]) continue;
                         const candidate = candidates[i];
                         const slotScore = getLiveLineupSlotFitScore(candidate.player, slot).maxScore;
-                        const slotPurityBonus = getSlotPurityBonus(candidate.player, slot);
+                        const slotSpecificity = candidate.positions.includes(slot)
+                            ? candidate.positionSpecificity
+                            : 0;
                         const hasHeight = candidate.height > 0;
                         const slotHeightTieBreak = hasHeight
-                            ? (slot === 'G' ? -candidate.height : candidate.height)
+                            ? (slot === 'PG' || slot === 'SG' ? -candidate.height : candidate.height)
                             : -1000;
                         const slotFoulPreference = -candidate.fouls;
+                        const slotJerseyPreference = -candidate.jerseyNumber;
 
                         used[i] = true;
                         assignedEntries[slotIndex] = { playerId: candidate.playerId, slot };
@@ -542,20 +554,27 @@
                         backtrack(
                             slotIndex + 1,
                             scoreTotal + slotScore,
+                            specificityTotal + slotSpecificity,
                             heightTieBreakTotal + slotHeightTieBreak,
-                            purityTotal + slotPurityBonus,
-                            foulPreferenceTotal + slotFoulPreference
+                            foulPreferenceTotal + slotFoulPreference,
+                            jerseyPreferenceTotal + slotJerseyPreference
                         );
 
                         used[i] = false;
                     }
                 };
 
-                backtrack(0, 0, 0, 0, 0);
+                backtrack(0, 0, 0, 0, 0, 0);
 
                 const orderedEntries = Array.isArray(bestAssignment)
                     ? bestAssignment
-                    : primaryIds.map((playerId, index) => ({ playerId, slot: targetSlots[index] || '' }));
+                    : targetSlots.map((slot, index) => ({ playerId: primaryIds[index], slot }));
+
+                orderedEntries.sort((left, right) => {
+                    const leftRank = positionOrder.has(left.slot) ? positionOrder.get(left.slot) : LIVE_LINEUP_DISPLAY_POSITIONS.length;
+                    const rightRank = positionOrder.has(right.slot) ? positionOrder.get(right.slot) : LIVE_LINEUP_DISPLAY_POSITIONS.length;
+                    return leftRank - rightRank;
+                });
 
                 extraIds.forEach((playerId) => {
                     orderedEntries.push({ playerId, slot: '' });
@@ -14830,25 +14849,24 @@
                                             const slotScore = targetSlot
                                                 ? getLiveLineupSlotFitScore(p, targetSlot).maxScore
                                                 : (matchCount > 0 ? 500 : 0);
-                                            const hasCenter = playerPositions.includes('C');
-                                            const hasForward = playerPositions.includes('SF') || playerPositions.includes('PF');
-                                            const hasGuard = playerPositions.includes('SG') || playerPositions.includes('PG');
                                             const purityBonus = targetSlot === 'C'
-                                                ? (hasCenter && !hasForward && !hasGuard ? 2 : (hasCenter ? 1 : 0))
-                                                : targetSlot === 'F'
-                                                    ? (hasForward && !hasGuard ? 2 : (hasForward ? 1 : 0))
-                                                    : targetSlot === 'G'
-                                                        ? (hasGuard && !hasForward ? 2 : (hasGuard ? 1 : 0))
-                                                        : 0;
+                                                ? (playerPositions.includes('C') && playerPositions.length === 1 ? 2 : (playerPositions.includes('C') ? 1 : 0))
+                                                : targetSlot === 'PF'
+                                                    ? (playerPositions.includes('PF') && !playerPositions.includes('SG') && !playerPositions.includes('PG') ? 2 : (playerPositions.includes('PF') ? 1 : 0))
+                                                    : targetSlot === 'SF'
+                                                        ? (playerPositions.includes('SF') && !playerPositions.includes('PG') ? 2 : (playerPositions.includes('SF') ? 1 : 0))
+                                                        : targetSlot === 'SG'
+                                                            ? (playerPositions.includes('SG') && !playerPositions.includes('C') ? 2 : (playerPositions.includes('SG') ? 1 : 0))
+                                                            : targetSlot === 'PG'
+                                                                ? (playerPositions.includes('PG') && playerPositions.length === 1 ? 2 : (playerPositions.includes('PG') ? 1 : 0))
+                                                                : 0;
                                             const fouls = Number(liveStats[benchId]?.pf || 0);
                                             return { benchId, p, matchCount, height, slotScore, purityBonus, fouls };
                                         });
 
                                         const orderedBenchEntries = benchEntries.slice().sort((a, b) => {
                                             if (b.slotScore !== a.slotScore) return b.slotScore - a.slotScore;
-                                            const heightDiff = targetSlot === 'G'
-                                                ? a.height - b.height
-                                                : b.height - a.height;
+                                            const heightDiff = b.height - a.height;
                                             if (heightDiff !== 0) return heightDiff;
                                             if (b.purityBonus !== a.purityBonus) return b.purityBonus - a.purityBonus;
                                             if (a.fouls !== b.fouls) return a.fouls - b.fouls;
@@ -14915,15 +14933,17 @@
                                             const pb = teamObj?.players.find((x) => x.id === b);
                                             const posA = normalizePlayerPositions(pa);
                                             const posB = normalizePlayerPositions(pb);
-                                            const slotScore = (pos) => {
-                                                if (pos.includes('C')) return 0;
-                                                if (pos.includes('SF') || pos.includes('PF')) return 1;
-                                                if (pos.includes('SG') || pos.includes('PG')) return 2;
-                                                return 3;
-                                            };
+                                            const slotScore = (positions) => positions.reduce((bestRank, position) => {
+                                                const rank = LIVE_LINEUP_DISPLAY_POSITIONS.indexOf(position);
+                                                return Math.min(bestRank, rank === -1 ? LIVE_LINEUP_DISPLAY_POSITIONS.length : rank);
+                                            }, LIVE_LINEUP_DISPLAY_POSITIONS.length);
                                             const slotDiff = slotScore(posA) - slotScore(posB);
                                             if (slotDiff !== 0) return slotDiff;
-                                            return parsePlayerHeightInches(pb) - parsePlayerHeightInches(pa);
+                                            const heightDiff = parsePlayerHeightInches(pb) - parsePlayerHeightInches(pa);
+                                            if (heightDiff !== 0) return heightDiff;
+                                            const jerseyDiff = (Number(pa?.number || 0) || Number.MAX_SAFE_INTEGER) - (Number(pb?.number || 0) || Number.MAX_SAFE_INTEGER);
+                                            if (jerseyDiff !== 0) return jerseyDiff;
+                                            return String(pa?.name || '').localeCompare(String(pb?.name || ''));
                                         });
                                         return sortedCandidateIds.map((benchId) => {
                                             const p = teamObj?.players.find((x) => x.id === benchId);
