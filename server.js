@@ -36,6 +36,7 @@ let lastActiveSessionClearedAt = 0;
 let lastDiscardedSessionInstanceId = '';
 let lastDiscardedSessionClearedAt = 0;
 const LIVE_SESSION_GUARDS_KEY = 'liveSessionGuards';
+const PUBLIC_AWARDS_PAGE_KEY = 'publicAwardsPageEnabled';
 const LIVE_SESSION_CLOCK_SKEW_TOLERANCE_MS = 10 * 60 * 1000;
 
 const AUTH_PASSWORDS = {
@@ -311,6 +312,13 @@ function ensureGamesPotgWriteupColumn() {
   }
 }
 
+function ensureGamesManualPotgPlayerIdColumn() {
+  const columns = db.prepare('PRAGMA table_info(games)').all();
+  if (!columns.some((column) => column.name === 'manual_potg_player_id')) {
+    db.exec('ALTER TABLE games ADD COLUMN manual_potg_player_id TEXT NOT NULL DEFAULT ""');
+  }
+}
+
 function ensureGamesPeriodSnapshotsColumn() {
   const columns = db.prepare('PRAGMA table_info(games)').all();
   if (!columns.some((column) => column.name === 'period_snapshots_json')) {
@@ -551,6 +559,7 @@ db.exec(`
     youtube_url TEXT NOT NULL DEFAULT '',
     game_writeup TEXT NOT NULL DEFAULT '',
     potg_writeup TEXT NOT NULL DEFAULT '',
+    manual_potg_player_id TEXT NOT NULL DEFAULT '',
     social_cover_data_url TEXT NOT NULL DEFAULT '',
     dnp_players_json TEXT NOT NULL DEFAULT '[]',
     under_review INTEGER NOT NULL DEFAULT 0,
@@ -630,6 +639,7 @@ ensureGamesLogColumn();
 ensureGamesYouTubeColumn();
 ensureGamesWriteupColumn();
 ensureGamesPotgWriteupColumn();
+ensureGamesManualPotgPlayerIdColumn();
 ensureGamesPeriodSnapshotsColumn();
 ensureGamesSocialCoverColumn();
 ensureGamesDnpColumn();
@@ -656,6 +666,8 @@ const clearTeamsStmt = db.prepare('DELETE FROM teams');
 const clearGamePlayerStatsStmt = db.prepare('DELETE FROM game_player_stats');
 const clearGamesStmt = db.prepare('DELETE FROM games');
 const clearStatActionsStmt = db.prepare('DELETE FROM stat_actions');
+const deleteGameByIdStmt = db.prepare('DELETE FROM games WHERE id = ?');
+const deleteGamePlayerStatsByGameStmt = db.prepare('DELETE FROM game_player_stats WHERE game_id = ?');
 
 const insertTeamStmt = db.prepare('INSERT INTO teams (id, name, color, sort_order) VALUES (@id, @name, @color, @sort_order)');
 const insertPlayerStmt = db.prepare(`
@@ -691,9 +703,9 @@ const upsertPlayerTotalsStmt = db.prepare(`
 
 const insertGameStmt = db.prepare(`
   INSERT INTO games (
-    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, social_cover_data_url, dnp_players_json, under_review, sort_order
+    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review, sort_order
   ) VALUES (
-    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @social_cover_data_url, @dnp_players_json, @under_review, @sort_order
+    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @manual_potg_player_id, @social_cover_data_url, @dnp_players_json, @under_review, @sort_order
   )
 `);
 
@@ -744,7 +756,7 @@ const selectPlayersStmt = db.prepare(`
   ORDER BY p.sort_order ASC, p.id ASC
 `);
 const selectGamesStmt = db.prepare(`
-  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, social_cover_data_url, dnp_players_json, under_review
+  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
@@ -753,6 +765,27 @@ const selectGamePlayerStatsStmt = db.prepare(`
   FROM game_player_stats
 `);
 const selectPlayerTeamIdStmt = db.prepare('SELECT team_id FROM players WHERE id = ?');
+const selectPlayerByIdAndTeamStmt = db.prepare(`
+  SELECT id, team_id, name, number, positions, height, picture_url, birthday, email, social, contact, writeup
+  FROM players
+  WHERE id = ? AND team_id = ?
+  LIMIT 1
+`);
+const updatePlayerProfileStmt = db.prepare(`
+  UPDATE players
+  SET
+    name = @name,
+    number = @number,
+    positions = @positions,
+    height = @height,
+    picture_url = @picture_url,
+    birthday = @birthday,
+    email = @email,
+    social = @social,
+    contact = @contact,
+    writeup = @writeup
+  WHERE id = @id AND team_id = @team_id
+`);
 const selectRelationalStatsStmt = db.prepare(`
   SELECT
     gps.game_id,
@@ -780,6 +813,26 @@ const selectRelationalStatsStmt = db.prepare(`
   LEFT JOIN teams t ON t.id = gps.team_id
   LEFT JOIN players p ON p.id = gps.player_id
   ORDER BY g.sort_order ASC, gps.team_id ASC, gps.player_id ASC
+`);
+const selectPlayerTotalsAggregateStmt = db.prepare(`
+  SELECT
+    player_id,
+    COUNT(DISTINCT game_id) AS games_played,
+    COALESCE(SUM(pts), 0) AS pts,
+    COALESCE(SUM(ast), 0) AS ast,
+    COALESCE(SUM(reb), 0) AS reb,
+    COALESCE(SUM(stl), 0) AS stl,
+    COALESCE(SUM(blk), 0) AS blk,
+    COALESCE(SUM(turnover), 0) AS turnover,
+    COALESCE(SUM(pf), 0) AS pf,
+    COALESCE(SUM(fg2m), 0) AS fg2m,
+    COALESCE(SUM(fg3m), 0) AS fg3m,
+    COALESCE(SUM(fg2m_miss), 0) AS fg2m_miss,
+    COALESCE(SUM(fg3m_miss), 0) AS fg3m_miss,
+    COALESCE(SUM(ftm), 0) AS ftm,
+    COALESCE(SUM(ft_miss), 0) AS ft_miss
+  FROM game_player_stats
+  GROUP BY player_id
 `);
 const selectStatActionsStmt = db.prepare(`
   SELECT id, label, category, stat, val, color_class, tracking_stat
@@ -953,6 +1006,34 @@ function normalizeManualPlayerImageValue(rawValue) {
   }
 
   return value;
+}
+
+const PLAYER_POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'];
+
+function normalizePlayerPositionsForStorage(rawValue, fallback = []) {
+  const rawPositions = [];
+  const pushFromValue = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (typeof item === 'string') rawPositions.push(item);
+      });
+      return;
+    }
+    if (typeof value === 'string') {
+      value.split(/[\s,\/?|]+/).forEach((item) => {
+        if (item) rawPositions.push(item);
+      });
+    }
+  };
+
+  pushFromValue(rawValue);
+  if (!rawPositions.length) pushFromValue(fallback);
+
+  return Array.from(new Set(
+    rawPositions
+      .map((pos) => String(pos || '').trim().toUpperCase())
+      .filter((pos) => PLAYER_POSITIONS.includes(pos))
+  ));
 }
 
 async function cacheRemotePlayerImage(profileImageUrl, playerIdentityHint = 'player') {
@@ -1332,6 +1413,22 @@ function derivePlayerOfTheGameFromState(game, teams) {
       : teamsList
     ).flatMap((team) => (Array.isArray(team?.players) ? team.players : []).map((player) => player.id))
   );
+
+  const manualPotgPlayerId = String(game?.manualPotgPlayerId || '').trim();
+  if (manualPotgPlayerId && stats[manualPotgPlayerId]) {
+    const manualPlayer = players.find((player) => player.id === manualPotgPlayerId);
+    const manualTeam = teamsList.find((team) => (Array.isArray(team?.players) ? team.players : []).some((player) => player.id === manualPotgPlayerId));
+    return {
+      name: String(manualPlayer?.name || 'PLAYER').toUpperCase(),
+      statsLine: `${Number(stats[manualPotgPlayerId]?.pts || 0)} PTS - ${Number(stats[manualPotgPlayerId]?.reb || 0)} REB - ${Number(stats[manualPotgPlayerId]?.ast || 0)} AST`,
+      teamColor: String(manualTeam?.color || '#f97316'),
+      teamName: String(manualTeam?.name || 'Team'),
+      perScore: 0,
+      stats: stats[manualPotgPlayerId],
+      playerId: manualPotgPlayerId,
+      selectionMode: 'manual'
+    };
+  }
 
   const eligible = entries
     .filter(([playerId]) => allowedPlayerIds.has(playerId))
@@ -1725,6 +1822,7 @@ function readState() {
     youtubeUrl: game.youtube_url || '',
     gameWriteup: game.game_writeup || '',
     potgWriteup: game.potg_writeup || '',
+    manualPotgPlayerId: game.manual_potg_player_id || '',
     socialCoverDataUrl: game.social_cover_data_url || ''
   }));
 
@@ -1850,6 +1948,30 @@ function writeState(nextTeams, nextGames) {
   broadcastSync();
 }
 
+function rebuildPlayerTotalsFromGameStats() {
+  clearPlayerTotalsStmt.run();
+  const totalsRows = selectPlayerTotalsAggregateStmt.all();
+  totalsRows.forEach((row) => {
+    upsertPlayerTotalsStmt.run({
+      player_id: row.player_id,
+      games_played: toInt(row.games_played),
+      pts: toInt(row.pts),
+      ast: toInt(row.ast),
+      reb: toInt(row.reb),
+      stl: toInt(row.stl),
+      blk: toInt(row.blk),
+      turnover: toInt(row.turnover),
+      pf: toInt(row.pf),
+      fg2m: toInt(row.fg2m),
+      fg3m: toInt(row.fg3m),
+      fg2m_miss: toInt(row.fg2m_miss),
+      fg3m_miss: toInt(row.fg3m_miss),
+      ftm: toInt(row.ftm),
+      ft_miss: toInt(row.ft_miss)
+    });
+  });
+}
+
 function readStatActions() {
   return selectStatActionsStmt.all().map((row) => ({
     id: row.id,
@@ -1973,7 +2095,6 @@ function mergeActiveSession(existingSession, incomingSession) {
   const hasObjectValues = (value) => {
     return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0;
   };
-
   const existingSnapshot = existing.liveGameSnapshot && typeof existing.liveGameSnapshot === 'object'
     ? existing.liveGameSnapshot
     : null;
@@ -2337,6 +2458,13 @@ function hydrateLiveSessionGuards() {
   );
 }
 
+function readPublicAwardsPageEnabled() {
+  const raw = parseJsonSafe((selectLegacyConfigStmt.get(PUBLIC_AWARDS_PAGE_KEY) || {}).value_json, null);
+  if (typeof raw === 'boolean') return raw;
+  if (raw && typeof raw === 'object' && typeof raw.enabled === 'boolean') return raw.enabled;
+  return false;
+}
+
 function clearOrphanedLiveEvents() {
   const hasActiveSession = Boolean(readActiveSession());
   if (!hasActiveSession) {
@@ -2502,6 +2630,7 @@ app.get([
   '/teams',
   '/standings',
   '/leaders',
+  '/awards',
   '/history',
   '/history/game/:gameId',
   '/teams/player/:teamId/:playerId'
@@ -2512,10 +2641,16 @@ app.get([
 app.use(express.static(__dirname, { index: false }));
 
 app.get('/api/state', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.json(readState());
 });
 
 app.get('/api/bootstrap', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const state = readState();
   const statActions = readStatActions();
 
@@ -2530,8 +2665,21 @@ app.get('/api/client-config', (req, res) => {
 
   res.json({
     gaEnabled,
-    gaMeasurementId: gaEnabled ? GA_MEASUREMENT_ID : ''
+    gaMeasurementId: gaEnabled ? GA_MEASUREMENT_ID : '',
+    publicAwardsPageEnabled: readPublicAwardsPageEnabled()
   });
+});
+
+app.put('/api/client-config', (req, res) => {
+  const role = String(req.body?.role || '').trim();
+  if (role !== 'admin') {
+    res.status(403).json({ error: 'Only admin can update client config.' });
+    return;
+  }
+
+  const publicAwardsPageEnabled = Boolean(req.body?.publicAwardsPageEnabled);
+  upsertConfigValueStmt.run(PUBLIC_AWARDS_PAGE_KEY, JSON.stringify({ enabled: publicAwardsPageEnabled }));
+  res.json({ ok: true, publicAwardsPageEnabled });
 });
 
 app.get('/api/stats', (_req, res) => {
@@ -3203,6 +3351,20 @@ app.put('/api/games/:gameId', (req, res) => {
     return;
   }
 
+  const teamAScoreValue = toInt(game.teamAScore);
+  const teamBScoreValue = toInt(game.teamBScore);
+  const winnerTeamId = teamAScoreValue === teamBScoreValue
+    ? ''
+    : (teamAScoreValue > teamBScoreValue ? String(game.teamAId || '') : String(game.teamBId || ''));
+  const manualPotgPlayerId = String(game.manualPotgPlayerId || '').trim();
+  if (manualPotgPlayerId && winnerTeamId) {
+    const playerTeamRow = selectPlayerTeamIdStmt.get(manualPotgPlayerId);
+    if (String(playerTeamRow?.team_id || '') && String(playerTeamRow.team_id) !== winnerTeamId) {
+      res.status(400).json({ error: 'Manual POTG must come from the winning team.' });
+      return;
+    }
+  }
+
   try {
     const upsertGameTransaction = db.transaction(() => {
       // Remove this game's player stats and re-insert (safe upsert pattern).
@@ -3225,6 +3387,7 @@ app.put('/api/games/:gameId', (req, res) => {
         youtube_url: typeof game.youtubeUrl === 'string' ? game.youtubeUrl : '',
         game_writeup: typeof game.gameWriteup === 'string' ? game.gameWriteup : '',
         potg_writeup: typeof game.potgWriteup === 'string' ? game.potgWriteup : '',
+        manual_potg_player_id: typeof game.manualPotgPlayerId === 'string' ? game.manualPotgPlayerId : '',
         social_cover_data_url: typeof game.socialCoverDataUrl === 'string' ? game.socialCoverDataUrl : '',
         sort_order: 0
       });
@@ -3306,11 +3469,100 @@ app.put('/api/teams', async (req, res) => {
 
   try {
     const teamsWithCachedImages = await persistPlayerImagesForTeams(teams);
-    const state = readState();
-    writeState(teamsWithCachedImages, state.games);
+    // Persist teams independently. Rewriting all games here can fail player saves
+    // due to unrelated historical game-data issues.
+    writeTeamsTransaction(teamsWithCachedImages);
+    broadcastSync();
     res.json({ ok: true, teams: teamsWithCachedImages });
   } catch (error) {
+    console.error('PUT /api/teams error:', error);
     res.status(500).json({ error: 'Failed to persist teams.' });
+  }
+});
+
+app.put('/api/players/:playerId/profile', async (req, res) => {
+  const playerId = String(req.params.playerId || '').trim();
+  const { teamId, player } = req.body || {};
+  const normalizedTeamId = String(teamId || '').trim();
+  if (!playerId || !normalizedTeamId) {
+    res.status(400).json({ error: 'playerId and teamId are required.' });
+    return;
+  }
+
+  try {
+    const existing = selectPlayerByIdAndTeamStmt.get(playerId, normalizedTeamId);
+    if (!existing) {
+      res.status(404).json({ error: 'Player not found.' });
+      return;
+    }
+
+    const incoming = (player && typeof player === 'object') ? player : {};
+    const nextName = typeof incoming.name === 'string' ? incoming.name.trim() : String(existing.name || '').trim();
+    const nextNumber = typeof incoming.number === 'string' ? incoming.number.trim() : String(existing.number || '').trim();
+    if (!nextName || !nextNumber) {
+      res.status(400).json({ error: 'Player name and number are required.' });
+      return;
+    }
+
+    const nextPositions = normalizePlayerPositionsForStorage(
+      Object.prototype.hasOwnProperty.call(incoming, 'positions') ? incoming.positions : undefined,
+      parseJsonSafe(existing.positions, [])
+    );
+    const rawPictureUrl = typeof incoming.pictureUrl === 'string'
+      ? incoming.pictureUrl.trim()
+      : String(existing.picture_url || '').trim();
+    const cachedPictureUrl = rawPictureUrl
+      ? await cacheRemotePlayerImage(rawPictureUrl, playerId)
+      : '';
+
+    const nextHeight = typeof incoming.height === 'string' ? incoming.height.trim() : String(existing.height || '').trim();
+    const nextBirthday = typeof incoming.birthday === 'string' ? incoming.birthday.trim() : String(existing.birthday || '').trim();
+    const nextEmail = typeof incoming.email === 'string' ? incoming.email.trim() : String(existing.email || '').trim();
+    const nextSocial = typeof incoming.social === 'string' ? incoming.social.trim() : String(existing.social || '').trim();
+    const nextContact = typeof incoming.contact === 'string' ? incoming.contact.trim() : String(existing.contact || '').trim();
+    const nextWriteup = typeof incoming.writeup === 'string' ? incoming.writeup.trim() : String(existing.writeup || '').trim();
+
+    const updateResult = updatePlayerProfileStmt.run({
+      id: playerId,
+      team_id: normalizedTeamId,
+      name: nextName,
+      number: nextNumber,
+      positions: JSON.stringify(nextPositions),
+      height: nextHeight,
+      picture_url: cachedPictureUrl,
+      birthday: nextBirthday,
+      email: nextEmail,
+      social: nextSocial,
+      contact: nextContact,
+      writeup: nextWriteup
+    });
+
+    if (!updateResult?.changes) {
+      res.status(500).json({ error: 'No player row was updated.' });
+      return;
+    }
+
+    broadcastSync();
+    res.json({
+      ok: true,
+      player: {
+        id: playerId,
+        teamId: normalizedTeamId,
+        name: nextName,
+        number: nextNumber,
+        positions: nextPositions,
+        height: nextHeight,
+        pictureUrl: cachedPictureUrl,
+        birthday: nextBirthday,
+        email: nextEmail,
+        social: nextSocial,
+        contact: nextContact,
+        writeup: nextWriteup
+      }
+    });
+  } catch (error) {
+    console.error('PUT /api/players/:playerId/profile error:', error);
+    res.status(500).json({ error: 'Failed to persist player profile.' });
   }
 });
 
@@ -3342,6 +3594,35 @@ app.put('/api/stat-actions', (req, res) => {
 
   writeStatActions(statActions);
   res.json({ ok: true });
+});
+
+app.delete('/api/games/:gameId', (req, res) => {
+  const gameId = String(req.params.gameId || '').trim();
+  if (!gameId) {
+    res.status(400).json({ error: 'gameId is required.' });
+    return;
+  }
+
+  const state = readState();
+  const targetGame = (state.games || []).find((game) => String(game?.id || '').trim() === gameId);
+  if (!targetGame) {
+    res.status(404).json({ error: 'Game not found.' });
+    return;
+  }
+
+  const deleteGameTransaction = db.transaction((targetGameId) => {
+    deleteGamePlayerStatsByGameStmt.run(targetGameId);
+    deleteGameByIdStmt.run(targetGameId);
+    rebuildPlayerTotalsFromGameStats();
+  });
+
+  try {
+    deleteGameTransaction(gameId);
+    broadcastSync();
+    res.json({ ok: true, gameId });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete game.' });
+  }
 });
 
 app.put('/api/games/:gameId/video', (req, res) => {

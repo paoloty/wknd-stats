@@ -143,6 +143,7 @@
             const [selectedRosterPlayer, setSelectedRosterPlayer] = useState(null);
             const [standingsStatMode, setStandingsStatMode] = useState('totals');
             const [leadersStatMode, setLeadersStatMode] = useState('perGame');
+            const [awardsPagePublicEnabled, setAwardsPagePublicEnabled] = useState(false);
             const [standingsBarsVisible, setStandingsBarsVisible] = useState(false);
             const [standingsBarsCycle, setStandingsBarsCycle] = useState(0);
             const [selectedStandingsLeaderStat, setSelectedStandingsLeaderStat] = useState('pts');
@@ -306,6 +307,7 @@
             const discardedLiveSessionTombstoneRef = useRef({ sessionInstanceId: '', discardedAt: 0 });
             const lastRemoteGameLogIdsRef = useRef(new Set());
             const locallyDeletedLiveLogIdsRef = useRef(new Set());
+            const locallyDeletedGameIdsRef = useRef(new Set());
             const gameLogImportInputRef = useRef(null);
             const lastLocalSessionUpdatedAtRef = useRef(0);
             const lastLocalDnpUpdatedAtRef = useRef(0);
@@ -362,6 +364,8 @@
             const canAdminControlClock = authRole === 'admin';
             const canEditPlayers = authRole === 'operator' || authRole === 'admin';
             const isLoggedIn = authRole !== 'viewer';
+            const canViewAwardsPage = awardsPagePublicEnabled || isLoggedIn;
+            const awardsPageLocked = activeTab === 'awards' && !canViewAwardsPage;
             const showOperatorFocusControls = canAdminControlClock && activeTab === 'live' && isGameLive;
             const editableLiveStatActions = (statActions || []).filter((action) => {
                 if (!action || !action.id || !action.label || !action.stat) return false;
@@ -635,7 +639,9 @@
                             : activeTab === 'standings'
                                 ? 'WKND League Stats - Standings'
                                 : activeTab === 'leaders'
-                                    ? 'WKND League Stats - League Leaders'
+                                    ? 'WKND League Stats - League Statistics'
+                                : activeTab === 'awards'
+                                    ? 'WKND League Stats - All WKND Awards'
                                     : 'WKND League Stats';
 
                 document.title = pageTitle;
@@ -666,10 +672,10 @@
                     }
 
                     const tabFromPath = pathParts[0] || '';
-                    if (['live', 'teams', 'standings', 'history', 'leaders'].includes(tabFromPath)) {
+                    if (['live', 'teams', 'standings', 'history', 'awards', 'leaders'].includes(tabFromPath)) {
                         return {
                             type: 'tab',
-                            activeTab: tabFromPath
+                            activeTab: normalizeTabId(tabFromPath)
                         };
                     }
 
@@ -686,8 +692,8 @@
                     if (view === 'player' && teamId && playerId) {
                         return { type: 'teams-player', teamId, playerId };
                     }
-                    if (['live', 'teams', 'standings', 'history', 'leaders'].includes(view)) {
-                        return { type: 'tab', activeTab: view };
+                    if (['live', 'teams', 'standings', 'history', 'awards', 'leaders'].includes(view)) {
+                        return { type: 'tab', activeTab: normalizeTabId(view) };
                     }
 
                     return { type: 'tab', activeTab: 'live' };
@@ -698,9 +704,7 @@
 
             const buildAppUrl = ({ tab, historyGameId, historyTabValue, rosterPlayer }) => {
                 const url = new URL(window.location.href);
-                const safeTab = ['live', 'teams', 'standings', 'history', 'leaders'].includes(String(tab || ''))
-                    ? String(tab)
-                    : 'live';
+                const safeTab = normalizeTabId(tab);
                 if (safeTab === 'history' && historyGameId) {
                     url.pathname = `/history/game/${encodeURIComponent(historyGameId)}`;
                     if (historyTabValue) {
@@ -739,6 +743,24 @@
             }, [isLoggedIn]);
 
             useEffect(() => {
+                let isMounted = true;
+                (async () => {
+                    try {
+                        const config = await apiRequest('/api/client-config');
+                        if (!isMounted) return;
+                        setAwardsPagePublicEnabled(Boolean(config?.publicAwardsPageEnabled));
+                    } catch (error) {
+                        if (!isMounted) return;
+                        setAwardsPagePublicEnabled(false);
+                    }
+                })();
+
+                return () => {
+                    isMounted = false;
+                };
+            }, []);
+
+            useEffect(() => {
                 try {
                     const route = parseRouteFromLocation();
                     if (route.type === 'history-game' && route.gameId) {
@@ -751,7 +773,7 @@
                         setActiveTab('teams');
                         setPendingSharedRosterPlayer({ teamId: route.teamId, playerId: route.playerId });
                     } else if (route.type === 'tab') {
-                        setActiveTab(route.activeTab || 'live');
+                        setActiveTab(normalizeTabId(route.activeTab || 'live'));
                     }
                 } catch (e) {}
             }, []);
@@ -777,7 +799,7 @@
                     if (!state || !state.__wkndNav) return;
 
                     suppressNextNavHistoryPushRef.current = true;
-                    setActiveTab(state.activeTab || 'live');
+                    setActiveTab(normalizeTabId(state.activeTab || 'live'));
                     setSelectedHistoryGameId(state.selectedHistoryGameId || null);
                     setSelectedRosterPlayer(state.selectedRosterPlayer || null);
                     if (state.activeTab === 'history' && state.historyDetailTab) {
@@ -820,6 +842,30 @@
                 setEditingLiveLogId(null);
                 setEditingLiveLogActionId('');
                 showToast('Logged out. Viewer access only.', 'info');
+            };
+
+            const handleToggleAwardsPagePublic = async () => {
+                if (authRole !== 'admin') {
+                    showToast('Only admin can change awards page visibility.', 'info');
+                    return;
+                }
+
+                const nextValue = !awardsPagePublicEnabled;
+                setAwardsPagePublicEnabled(nextValue);
+
+                try {
+                    await apiRequest('/api/client-config', {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            role: authRole,
+                            publicAwardsPageEnabled: nextValue
+                        })
+                    });
+                    showToast(nextValue ? 'Awards page is now public.' : 'Awards page is now private.', 'success');
+                } catch (error) {
+                    setAwardsPagePublicEnabled(!nextValue);
+                    showToast('Failed to update awards page visibility.', 'error');
+                }
             };
 
             const handleOperatorFocusChange = (nextFocus) => {
@@ -1743,14 +1789,25 @@
                 return absoluteSeconds;
             };
 
+                const normalizeTabId = (tab) => {
+                    const rawTab = String(tab || '').trim().toLowerCase();
+                    if (['live', 'teams', 'standings', 'history', 'leaders', 'awards'].includes(rawTab)) return rawTab;
+                    return 'live';
+                };
+
             const navTabs = [
                 { id: 'live', label: 'Live', icon: Icons.Activity },
                 { id: 'teams', label: 'Rosters', icon: Icons.Users },
                 { id: 'standings', label: 'Standings', icon: Icons.Trophy },
                 { id: 'history', label: 'Game Log', icon: Icons.History },
-                { id: 'leaders', label: 'Stats', icon: Icons.Trophy }
+                { id: 'leaders', label: 'Leaders', icon: Icons.Trophy },
+                { id: 'awards', label: 'Awards', icon: Icons.Trophy }
             ];
-            const activeNavTab = navTabs.find((tab) => tab.id === activeTab) || navTabs[0];
+            const visibleNavTabs = navTabs.filter((tab) => tab.id !== 'awards' || canViewAwardsPage);
+            const activeNavTab = visibleNavTabs.find((tab) => tab.id === activeTab)
+                || navTabs.find((tab) => tab.id === activeTab)
+                || visibleNavTabs[0]
+                || navTabs[0];
 
             useEffect(() => {
                 setMobileNavOpen(false);
@@ -3228,7 +3285,19 @@
             const selectedHistoryGame = selectedHistoryGameId
                 ? (games.find(g => g.id === selectedHistoryGameId) || null)
                 : null;
+            useEffect(() => {
+                if (activeTab !== 'history') return;
+                if (!selectedHistoryGameId) return;
+                if (selectedHistoryGame) return;
+
+                setSelectedHistoryGameId(null);
+                setPendingSharedGameId(null);
+                setPendingSharedHistoryDetailTab('');
+                suppressNextNavHistoryPushRef.current = true;
+                syncHistoryShareUrl(null, 'replace');
+            }, [activeTab, selectedHistoryGameId, selectedHistoryGame]);
             const currentLiveGameLog = getCurrentGameLogSegment(gameLog);
+            const currentLiveGame = games.find((game) => game.status === 'LIVE') || null;
             const ROLE_PRESENCE_STALE_MS = 30000;
             const latestAdminFocusEvent = (() => {
                 let latestEvent = null;
@@ -4363,7 +4432,9 @@
                     }
 
                     try {
-                        const bootstrap = await apiRequest('/api/bootstrap');
+                        const bootstrap = await apiRequest('/api/bootstrap', {
+                            cache: 'no-store'
+                        });
                         const loadedTeams = Array.isArray(bootstrap?.state?.teams) ? bootstrap.state.teams : [];
                         const loadedGames = Array.isArray(bootstrap?.state?.games) ? bootstrap.state.games : [];
                         const loadedActions = Array.isArray(bootstrap?.statActions) ? bootstrap.statActions : [];
@@ -4716,14 +4787,30 @@
                             if (payload.state) {
                                 const normalizedRemoteTeams = normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []);
                                 setGames((prevGames) => {
+                                    const locallyDeletedGameIds = locallyDeletedGameIdsRef.current || new Set();
                                     const remoteGames = Array.isArray(payload.state.games)
-                                        ? payload.state.games.sort((a, b) => b.id.localeCompare(a.id))
+                                        ? payload.state.games
+                                            .filter((game) => !locallyDeletedGameIds.has(String(game?.id || '')))
+                                            .sort((a, b) => b.id.localeCompare(a.id))
                                         : [];
                                     // If the remote snapshot is missing games that exist locally (e.g. a
                                     // just-imported game whose PUT is still in-flight), keep those local
                                     // games so a sync broadcast can't wipe them before the server persists.
                                     const remoteGameIds = new Set(remoteGames.map((g) => String(g?.id || '')));
-                                    const pendingLocalGames = (prevGames || []).filter((g) => g?.id && !remoteGameIds.has(String(g.id)));
+                                    if (locallyDeletedGameIds.size > 0) {
+                                        Array.from(locallyDeletedGameIds).forEach((deletedGameId) => {
+                                            if (!remoteGameIds.has(String(deletedGameId || ''))) {
+                                                locallyDeletedGameIds.delete(String(deletedGameId || ''));
+                                            }
+                                        });
+                                    }
+                                    const pendingLocalGames = (prevGames || []).filter((g) => {
+                                        const localGameId = String(g?.id || '');
+                                        if (!localGameId) return false;
+                                        if (remoteGameIds.has(localGameId)) return false;
+                                        if (locallyDeletedGameIds.has(localGameId)) return false;
+                                        return true;
+                                    });
                                     const merged = pendingLocalGames.length
                                         ? [...pendingLocalGames, ...remoteGames].sort((a, b) => String(b.id || '').localeCompare(String(a.id || '')))
                                         : remoteGames;
@@ -5171,6 +5258,22 @@
                 } catch (error) {}
             };
 
+            const removeGameFromCachedAppState = (gameId, nextTeams = null) => {
+                try {
+                    const targetGameId = String(gameId || '').trim();
+                    if (!targetGameId) return;
+
+                    const cached = readCachedAppState();
+                    if (!cached) return;
+
+                    const filteredGames = (Array.isArray(cached.games) ? cached.games : [])
+                        .filter((game) => String(game?.id || '').trim() !== targetGameId);
+
+                    const cachedTeams = Array.isArray(nextTeams) ? nextTeams : (Array.isArray(cached.teams) ? cached.teams : []);
+                    writeCachedAppState(cachedTeams, filteredGames, Array.isArray(cached.statActions) ? cached.statActions : statActions, { dirty: cached.dirty });
+                } catch (error) {}
+            };
+
             const togglePlayerDidNotPlay = (playerId) => {
                 if (!canUseLiveControls) {
                     showToast('Live controls are locked right now.', 'info');
@@ -5209,6 +5312,7 @@
                             return nextGame;
                         });
                         const payload = await apiRequest('/api/state', {
+                            cache: 'no-store',
                             method: 'PUT',
                             body: JSON.stringify({ teams: normalizedTeams, games: slimGames })
                         });
@@ -5453,7 +5557,26 @@
                     return { persistedToServer: false, savedLocally: true };
                 }
 
-                const didPersist = await saveFullState(normalizedTeams, updatedGames);
+                // Prefer targeted finalized-game persistence first. This keeps End Game reliable
+                // even when full-state writes are heavy or temporarily flaky.
+                let didPersist = false;
+                try {
+                    await apiRequest(`/api/games/${encodeURIComponent(String(newGame?.id || ''))}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ game: newGame })
+                    });
+                    didPersist = true;
+                } catch (error) {
+                    didPersist = false;
+                }
+
+                // Best-effort full-state sync (career totals/team snapshots). If this fails,
+                // we still treat persistence as successful when the finalized game row was saved.
+                const didFullSync = await saveFullState(normalizedTeams, updatedGames);
+                if (!didPersist) {
+                    didPersist = didFullSync;
+                }
+
                 return {
                     persistedToServer: didPersist,
                     savedLocally: true
@@ -5890,6 +6013,23 @@
                     });
 
                     setGames(updatedGames);
+                    const updatedGame = updatedGames.find((existingGame) => existingGame.id === game.id) || null;
+                    if (updatedGame && navigator.onLine !== false) {
+                        try {
+                            await apiRequest(`/api/games/${encodeURIComponent(game.id)}`, {
+                                method: 'PUT',
+                                body: JSON.stringify({ game: updatedGame })
+                            });
+                            writeCachedAppState(teams, updatedGames, statActions, { dirty: false });
+                            if (!auto) {
+                                showToast('POTG spotlight generated and saved.', 'success');
+                            }
+                            return;
+                        } catch (patchError) {
+                            // Fall back to the full-state save if the targeted update fails.
+                        }
+                    }
+
                     await saveFullState(teams, updatedGames);
                     if (!auto) {
                         showToast('POTG spotlight generated and saved.', 'success');
@@ -5903,6 +6043,120 @@
                 } finally {
                     setGeneratingPotgWriteupGameId(null);
                 }
+            };
+            const handleSetManualPotg = async (gameIdOrPlayerId, maybePlayerId = null) => {
+                if (!isLoggedIn) {
+                    showToast('Log in to edit POTG.', 'info');
+                    return;
+                }
+                if (!canOperateLive) return;
+
+                const targetGameId = maybePlayerId ? String(gameIdOrPlayerId || '').trim() : '';
+                const playerId = maybePlayerId ? maybePlayerId : gameIdOrPlayerId;
+                const targetGame = targetGameId ? (games.find((existingGame) => existingGame.id === targetGameId) || null) : null;
+                const currentPotgPlayerId = String(
+                    targetGame?.manualPotgPlayerId
+                    || (!targetGameId ? liveGameSnapshot?.manualPotgPlayerId : '')
+                    || ''
+                ).trim();
+                const nextPotgPlayerId = currentPotgPlayerId === String(playerId || '') ? '' : String(playerId || '');
+                const winningTeamId = Number(targetGame?.teamAScore || 0) === Number(targetGame?.teamBScore || 0)
+                    ? ''
+                    : (Number(targetGame?.teamAScore || 0) > Number(targetGame?.teamBScore || 0)
+                        ? String(targetGame?.teamAId || '')
+                        : String(targetGame?.teamBId || ''));
+                const selectedPlayerTeamId = String(
+                    teams.find((team) => (team.players || []).some((player) => player.id === String(playerId || '')))?.id || ''
+                );
+
+                if (nextPotgPlayerId && winningTeamId && selectedPlayerTeamId && selectedPlayerTeamId !== winningTeamId) {
+                    showToast('Manual POTG must come from the winning team.', 'info');
+                    return;
+                }
+
+                if (!targetGame) {
+                    const nextLiveSnapshot = liveGameSnapshot
+                        ? {
+                            ...liveGameSnapshot,
+                            manualPotgPlayerId: nextPotgPlayerId
+                        }
+                        : null;
+
+                    if (!nextLiveSnapshot) {
+                        showToast('Could not update POTG for the active game right now.', 'error');
+                        return;
+                    }
+
+                    setLiveGameSnapshot(nextLiveSnapshot);
+
+                    const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+                    const nextClockControlRevision = Number(clockControlRevisionRef.current || 0);
+                    const nextSessionUpdatedAt = Date.now();
+                    const liveSessionPayload = {
+                        teamAId,
+                        teamBId,
+                        teamAScore,
+                        teamBScore,
+                        liveSessionInstanceId,
+                        sessionCreatedAt: Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now()),
+                        sessionRevision: nextSessionRevision,
+                        clockControlRevision: nextClockControlRevision,
+                        currentQuarter,
+                        periodClockSeconds,
+                        isPeriodClockRunning,
+                        isPlayPaused,
+                        livePlayerSeconds,
+                        teamALineup,
+                        teamABench,
+                        teamBLineup,
+                        teamBBench,
+                        lineupRevision,
+                        liveStats,
+                        liveGameSnapshot: nextLiveSnapshot,
+                        periodSnapshots,
+                        gameLog,
+                        loggedHistory,
+                        playedPlayers,
+                        dnpPlayers,
+                        dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+                        awaitingPeriodStart,
+                        sessionUpdatedAt: nextSessionUpdatedAt
+                    };
+
+                    await saveSessionToServer(liveSessionPayload);
+                    showToast(nextPotgPlayerId ? 'Manual POTG selected.' : 'Manual POTG cleared.', 'success');
+                    return;
+                }
+
+                const updatedGames = games.map((existingGame) => {
+                    if (existingGame.id !== targetGameId) return existingGame;
+                    const nextGame = { ...existingGame };
+                    if (nextPotgPlayerId) {
+                        nextGame.manualPotgPlayerId = nextPotgPlayerId;
+                    } else {
+                        delete nextGame.manualPotgPlayerId;
+                    }
+                    return nextGame;
+                });
+
+                setGames(updatedGames);
+                const updatedGame = updatedGames.find((existingGame) => existingGame.id === targetGameId) || null;
+                if (updatedGame && navigator.onLine !== false) {
+                    try {
+                        await apiRequest(`/api/games/${encodeURIComponent(targetGameId)}`, {
+                            method: 'PUT',
+                            body: JSON.stringify({ game: updatedGame })
+                        });
+                        writeCachedAppState(teams, updatedGames, statActions, { dirty: false });
+                        showToast(nextPotgPlayerId ? 'Manual POTG selected.' : 'Manual POTG cleared.', 'success');
+                        return;
+                    } catch (patchError) {
+                        // Fall back to the full-state save if the targeted update fails.
+                    }
+                }
+
+                await saveFullState(teams, updatedGames);
+                showToast(nextPotgPlayerId ? 'Manual POTG selected.' : 'Manual POTG cleared.', 'success');
             };
 
             const handleExportData = () => {
@@ -8516,6 +8770,8 @@
                 setIsEndingGame(true);
 
                 try {
+                    const previousTeamsSnapshot = teams;
+                    const previousGamesSnapshot = games;
                     setPendingPeriodActionMode(null);
 
                     const teamAObj = teams.find(t => t.id === teamAId);
@@ -8604,6 +8860,22 @@
                     const saveResult = await saveNewGameState(newGame, updatedTeams);
                     if (!saveResult?.savedLocally) {
                         showToast('Could not save the completed game. Match is still live, please retry End Game.', 'error');
+                        return;
+                    }
+
+                    // Do not finalize/clear the live session online until the server confirms
+                    // the completed game has been persisted. This prevents refresh from dropping
+                    // games that only existed in optimistic local state.
+                    if (navigator.onLine !== false && !saveResult?.persistedToServer) {
+                        setTeams(previousTeamsSnapshot);
+                        setGames(previousGamesSnapshot);
+                        writeCachedAppState(
+                            normalizeTeamsForStorage(previousTeamsSnapshot),
+                            previousGamesSnapshot,
+                            statActions,
+                            { dirty: true }
+                        );
+                        showToast('Could not persist finalized game to server yet. Match remains live, please retry End Game.', 'error');
                         return;
                     }
 
@@ -9123,6 +9395,9 @@
                         const gameToDelete = games.find(g => g.id === gameId);
                         if (!gameToDelete) return;
 
+                        const previousGamesSnapshot = games;
+                        const previousTeamsSnapshot = teams;
+
                         // Subtract game stats from players to keep career records continuous and accurate
                         const updatedTeams = teams.map(team => {
                             if (team.id !== gameToDelete.teamAId && team.id !== gameToDelete.teamBId) return team;
@@ -9159,10 +9434,62 @@
 
                         const updatedGames = games.filter(g => g.id !== gameId);
 
-                        setGames(updatedGames);
-                        setTeams(updatedTeams);
-                        await saveFullState(updatedTeams, updatedGames);
+                        const normalizedUpdatedTeams = normalizeTeamsForStorage(updatedTeams);
+                        locallyDeletedGameIdsRef.current.add(String(gameId || ''));
 
+                        // Optimistic local update first.
+                        setGames(updatedGames);
+                        setTeams(normalizedUpdatedTeams);
+                        writeCachedAppState(normalizedUpdatedTeams, updatedGames, statActions, { dirty: true });
+
+                        const isOnline = navigator.onLine !== false;
+                        if (isOnline) {
+                            try {
+                                await apiRequest(`/api/games/${encodeURIComponent(String(gameId || ''))}`, {
+                                    method: 'DELETE'
+                                });
+
+                                const statePayload = await apiRequest('/api/state', {
+                                    cache: 'no-store'
+                                });
+                                const authoritativeTeams = Array.isArray(statePayload?.teams)
+                                    ? normalizeTeamsForStorage(statePayload.teams)
+                                    : normalizedUpdatedTeams;
+                                const authoritativeGames = Array.isArray(statePayload?.games)
+                                    ? statePayload.games
+                                    : updatedGames;
+
+                                delete pendingYoutubeSaveRef.current[String(gameId || '')];
+                                setTeams(authoritativeTeams);
+                                setGames(authoritativeGames);
+                                writeCachedAppState(authoritativeTeams, authoritativeGames, statActions, { dirty: false });
+                                removeGameFromCachedAppState(gameId, authoritativeTeams);
+                            } catch (error) {
+                                locallyDeletedGameIdsRef.current.delete(String(gameId || ''));
+                                setGames(previousGamesSnapshot);
+                                setTeams(previousTeamsSnapshot);
+                                writeCachedAppState(
+                                    normalizeTeamsForStorage(previousTeamsSnapshot),
+                                    previousGamesSnapshot,
+                                    statActions,
+                                    { dirty: false }
+                                );
+                                setConfirmDialog(null);
+                                showToast('Failed to delete game record. No changes were saved.', 'error');
+                                return;
+                            }
+                        } else {
+                            await saveFullState(normalizedUpdatedTeams, updatedGames);
+                            delete pendingYoutubeSaveRef.current[String(gameId || '')];
+                            removeGameFromCachedAppState(gameId, normalizedUpdatedTeams);
+                        }
+
+                        setActiveTab('history');
+                        setSelectedHistoryGameId(null);
+                        setPendingSharedGameId(null);
+                        setPendingSharedHistoryDetailTab('');
+                        suppressNextNavHistoryPushRef.current = true;
+                        syncHistoryShareUrl(null, 'replace');
                         setConfirmDialog(null);
                         showToast("Game record deleted and career averages recalculated!", "success");
                     }
@@ -9227,6 +9554,17 @@
                 e.preventDefault();
                 if (!advancedEditingPlayer) return;
 
+                const profileUpdates = {
+                    positions: normalizePlayerPositions(advancedEditingPlayer),
+                    height: (advancedEditingPlayer.height || '').trim(),
+                    pictureUrl: (advancedEditingPlayer.pictureUrl || '').trim(),
+                    birthday: (advancedEditingPlayer.birthday || '').trim(),
+                    email: (advancedEditingPlayer.email || '').trim(),
+                    social: (advancedEditingPlayer.social || '').trim(),
+                    contact: (advancedEditingPlayer.contact || '').trim(),
+                    writeup: (advancedEditingPlayer.writeup || '').trim()
+                };
+
                 const updatedTeams = teams.map(team => {
                     if (team.id !== advancedEditingPlayer.teamId) return team;
                     return {
@@ -9235,21 +9573,57 @@
                             player.id === advancedEditingPlayer.playerId
                                 ? {
                                     ...player,
-                                    positions: normalizePlayerPositions(advancedEditingPlayer),
-                                    height: (advancedEditingPlayer.height || '').trim(),
-                                    pictureUrl: (advancedEditingPlayer.pictureUrl || '').trim(),
-                                    birthday: (advancedEditingPlayer.birthday || '').trim(),
-                                    email: (advancedEditingPlayer.email || '').trim(),
-                                    social: (advancedEditingPlayer.social || '').trim(),
-                                    contact: (advancedEditingPlayer.contact || '').trim(),
-                                    writeup: (advancedEditingPlayer.writeup || '').trim()
+                                    ...profileUpdates
                                 }
                                 : player
                         ))
                     };
                 });
 
-                await saveTeamState(updatedTeams);
+                if (navigator.onLine !== false) {
+                    try {
+                        const payload = await apiRequest(`/api/players/${encodeURIComponent(advancedEditingPlayer.playerId)}/profile`, {
+                            method: 'PUT',
+                            body: JSON.stringify({
+                                teamId: advancedEditingPlayer.teamId,
+                                player: profileUpdates
+                            })
+                        });
+                        const persistedPlayer = payload?.player && typeof payload.player === 'object' ? payload.player : null;
+                        const mergedTeams = persistedPlayer
+                            ? updatedTeams.map((team) => (
+                                team.id !== advancedEditingPlayer.teamId
+                                    ? team
+                                    : {
+                                        ...team,
+                                        players: team.players.map((player) => (
+                                            player.id !== advancedEditingPlayer.playerId
+                                                ? player
+                                                : {
+                                                    ...player,
+                                                    ...profileUpdates,
+                                                    pictureUrl: String(persistedPlayer.pictureUrl || profileUpdates.pictureUrl || '')
+                                                }
+                                        ))
+                                    }
+                            ))
+                            : updatedTeams;
+
+                        setTeams(mergedTeams);
+                        writeCachedAppState(normalizeTeamsForStorage(mergedTeams), games, statActions, { dirty: false });
+                        setAdvancedEditingPlayer(null);
+                        showToast('Advanced player profile updated.', 'success');
+                        return;
+                    } catch (_) {
+                        // Fallback to full teams save path below.
+                    }
+                }
+
+                const saved = await saveTeamState(updatedTeams);
+                if (!saved) {
+                    showToast('Failed to save player profile.', 'error');
+                    return;
+                }
                 setAdvancedEditingPlayer(null);
                 showToast('Advanced player profile updated.', 'success');
             };
@@ -9290,7 +9664,33 @@
                     };
                 });
 
-                await saveTeamState(updatedTeams);
+                if (navigator.onLine !== false) {
+                    try {
+                        await apiRequest(`/api/players/${encodeURIComponent(editingPlayer.playerId)}/profile`, {
+                            method: 'PUT',
+                            body: JSON.stringify({
+                                teamId: editingPlayer.teamId,
+                                player: {
+                                    name: nextName,
+                                    number: nextNumber
+                                }
+                            })
+                        });
+                        setTeams(updatedTeams);
+                        writeCachedAppState(normalizeTeamsForStorage(updatedTeams), games, statActions, { dirty: false });
+                        setEditingPlayer(null);
+                        showToast("Player updated.", "success");
+                        return;
+                    } catch (_) {
+                        // Fallback to full teams save path below.
+                    }
+                }
+
+                const saved = await saveTeamState(updatedTeams);
+                if (!saved) {
+                    showToast('Failed to save player.', 'error');
+                    return;
+                }
                 setEditingPlayer(null);
                 showToast("Player updated.", "success");
             };
@@ -9461,6 +9861,168 @@
                 ? getPlayerRecentGamesSummaries(selectedRosterPlayer.teamId, selectedRosterPlayer.playerId)
                 : null;
 
+            const getPlayerPerStyleScore = (stats = {}) => {
+                const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
+                const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+                const ftMade = Number(stats.ftm || 0);
+                const ftAtt = ftMade + Number(stats.ft_miss || 0);
+
+                return (
+                    Number(stats.pts || 0)
+                    + (0.4 * fgMade)
+                    - (0.7 * fgAtt)
+                    - (0.4 * (ftAtt - ftMade))
+                    + (0.7 * Number(stats.reb || 0))
+                    + Number(stats.stl || 0)
+                    + (0.7 * Number(stats.ast || 0))
+                    + (0.7 * Number(stats.blk || 0))
+                    - (0.4 * Number(stats.pf || 0))
+                    - Number(stats.to || 0)
+                );
+            };
+
+            const getPlayerSeasonPerStyleScore = (player) => {
+                const gp = Number(player?.gamesPlayed || 0);
+                if (gp <= 0) return 0;
+
+                const stats = player?.totalStats || {};
+                return getPlayerPerStyleScore({
+                    pts: Number(stats.pts || 0) / gp,
+                    fg2m: Number(stats.fg2m || 0) / gp,
+                    fg3m: Number(stats.fg3m || 0) / gp,
+                    fg2m_miss: Number(stats.fg2m_miss || 0) / gp,
+                    fg3m_miss: Number(stats.fg3m_miss || 0) / gp,
+                    ftm: Number(stats.ftm || 0) / gp,
+                    ft_miss: Number(stats.ft_miss || 0) / gp,
+                    reb: Number(stats.reb || 0) / gp,
+                    stl: Number(stats.stl || 0) / gp,
+                    ast: Number(stats.ast || 0) / gp,
+                    blk: Number(stats.blk || 0) / gp,
+                    pf: Number(stats.pf || 0) / gp,
+                    to: Number(stats.to || 0) / gp
+                });
+            };
+
+            const leaguePlayerPool = teams.flatMap((t) => t.players.map((p) => {
+                const aggregate = getArchivedPlayerAggregate(t.id, p.id);
+                const playerForLeaders = {
+                    ...p,
+                    team: t.name,
+                    teamId: t.id,
+                    gamesPlayed: aggregate.gamesPlayed,
+                    totalStats: aggregate.totalStats,
+                    perStyleScore: getPlayerSeasonPerStyleScore({
+                        ...p,
+                        gamesPlayed: aggregate.gamesPlayed,
+                        totalStats: aggregate.totalStats
+                    })
+                };
+
+                return {
+                    ...playerForLeaders,
+                    avg: getAverages(playerForLeaders)
+                };
+            }));
+
+            const leagueMvpCandidates = leaguePlayerPool
+                .filter((player) => Number(player.gamesPlayed || 0) > 0)
+                .slice()
+                .sort((a, b) => {
+                    const scoreDelta = Number(b.perStyleScore || 0) - Number(a.perStyleScore || 0);
+                    if (scoreDelta !== 0) return scoreDelta;
+
+                    const gpDelta = Number(b.gamesPlayed || 0) - Number(a.gamesPlayed || 0);
+                    if (gpDelta !== 0) return gpDelta;
+
+                    const ptsDelta = Number(b.totalStats?.pts || 0) - Number(a.totalStats?.pts || 0);
+                    if (ptsDelta !== 0) return ptsDelta;
+
+                    return String(a.name || '').localeCompare(String(b.name || ''));
+                })
+                .slice(0, 10);
+
+            const buildMythicalTeam = (playerPool, excludedIds = new Set()) => {
+                const slotOrder = PLAYER_POSITIONS.slice();
+                const slotGroups = slotOrder
+                    .map((slot) => ({
+                        slot,
+                        candidates: playerPool
+                            .filter((player) => Number(player.gamesPlayed || 0) > 0 && !excludedIds.has(player.id) && normalizePlayerPositions(player).includes(slot))
+                            .slice()
+                            .sort((a, b) => {
+                                const scoreDelta = Number(b.perStyleScore || 0) - Number(a.perStyleScore || 0);
+                                if (scoreDelta !== 0) return scoreDelta;
+
+                                const gpDelta = Number(b.gamesPlayed || 0) - Number(a.gamesPlayed || 0);
+                                if (gpDelta !== 0) return gpDelta;
+
+                                const ptsDelta = Number(b.totalStats?.pts || 0) - Number(a.totalStats?.pts || 0);
+                                if (ptsDelta !== 0) return ptsDelta;
+
+                                return String(a.name || '').localeCompare(String(b.name || ''));
+                            })
+                    }))
+                    .filter((group) => group.candidates.length > 0)
+                    .sort((left, right) => {
+                        const scarcity = left.candidates.length - right.candidates.length;
+                        if (scarcity !== 0) return scarcity;
+                        return slotOrder.indexOf(left.slot) - slotOrder.indexOf(right.slot);
+                    });
+
+                if (!slotGroups.length) return [];
+
+                let bestAssignment = null;
+                let bestScore = Number.NEGATIVE_INFINITY;
+                let bestTiebreak = Number.NEGATIVE_INFINITY;
+                const usedPlayerIds = new Set();
+                const currentAssignment = [];
+                const optimisticBound = (startIndex) => slotGroups
+                    .slice(startIndex)
+                    .reduce((sum, group) => sum + Number(group.candidates[0]?.perStyleScore || 0), 0);
+
+                const recurse = (slotIndex, scoreTotal, tiebreakTotal) => {
+                    if (slotIndex >= slotGroups.length) {
+                        if (scoreTotal > bestScore || (scoreTotal === bestScore && tiebreakTotal > bestTiebreak)) {
+                            bestScore = scoreTotal;
+                            bestTiebreak = tiebreakTotal;
+                            bestAssignment = currentAssignment.slice();
+                        }
+                        return;
+                    }
+
+                    if (scoreTotal + optimisticBound(slotIndex) < bestScore) return;
+
+                    const { slot, candidates } = slotGroups[slotIndex];
+                    for (const candidate of candidates) {
+                        if (usedPlayerIds.has(candidate.id)) continue;
+
+                        usedPlayerIds.add(candidate.id);
+                        currentAssignment.push({ slot, player: candidate });
+
+                        recurse(
+                            slotIndex + 1,
+                            scoreTotal + Number(candidate.perStyleScore || 0),
+                            tiebreakTotal + (Number(candidate.gamesPlayed || 0) * 1000) + Number(candidate.totalStats?.pts || 0)
+                        );
+
+                        currentAssignment.pop();
+                        usedPlayerIds.delete(candidate.id);
+                    }
+                };
+
+                recurse(0, 0, 0);
+
+                return (bestAssignment || [])
+                    .slice()
+                    .sort((left, right) => slotOrder.indexOf(left.slot) - slotOrder.indexOf(right.slot));
+            };
+
+            const allWKNDFirstTeam = buildMythicalTeam(leaguePlayerPool);
+            const allWKNDSecondTeam = buildMythicalTeam(
+                leaguePlayerPool,
+                new Set(allWKNDFirstTeam.map((entry) => entry.player.id))
+            );
+
             const getLeaderMetric = (player, metricKey, mode) => {
                 const stats = player?.totalStats || {};
                 const avg = getAverages(player);
@@ -9536,6 +10098,7 @@
             };
 
             const getPlayerOfTheGame = (game, teamAObj, teamBObj) => {
+                const manualPotgPlayerId = String(game?.manualPotgPlayerId || '').trim();
                 const POINTS_LEADER_BONUS = 1.25;
                 const computePerStyleScore = (stats = {}) => {
                     const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
@@ -9565,6 +10128,27 @@
                 const candidateTeams = winnerTeamId
                     ? [teamAObj, teamBObj].filter((team) => team?.id === winnerTeamId)
                     : [teamAObj, teamBObj].filter(Boolean);
+
+                if (manualPotgPlayerId) {
+                    const manualPlayer = teams.flatMap((team) => team.players || []).find((player) => player.id === manualPotgPlayerId);
+                    const manualTeam = teams.find((team) => (team.players || []).some((player) => player.id === manualPotgPlayerId));
+                    const manualStats = game?.playerStats?.[manualPotgPlayerId];
+                    const manualTeamCanWin = !winnerTeamId || String(manualTeam?.id || '') === String(winnerTeamId || '');
+                    if (manualPlayer && manualStats && manualTeamCanWin) {
+                        return {
+                            id: manualPlayer.id,
+                            name: manualPlayer.name,
+                            number: manualPlayer.number,
+                            pictureUrl: manualPlayer.pictureUrl || '',
+                            teamName: manualTeam?.name || '',
+                            teamColor: manualTeam?.color || '#f97316',
+                            teamId: manualTeam?.id || '',
+                            stats: manualStats,
+                            perScore: 0,
+                            selectionMode: 'manual'
+                        };
+                    }
+                }
 
                 const candidates = candidateTeams
                     .filter(Boolean)
@@ -10819,7 +11403,7 @@
 
                             {mobileNavOpen && (
                                 <div className="absolute left-0 right-0 mt-2 z-40 rounded-xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl overflow-hidden">
-                                    {navTabs.map((tab) => {
+                                    {visibleNavTabs.map((tab) => {
                                         const TabIcon = tab.icon;
                                         const isActive = activeTab === tab.id;
                                         return (
@@ -10894,7 +11478,10 @@
                             <button onClick={() => setActiveTab('teams')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'teams' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Users /> Rosters</button>
                             <button onClick={() => setActiveTab('standings')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'standings' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Trophy /> Standings</button>
                             <button onClick={() => setActiveTab('history')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'history' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.History /> Game Log</button>
-                            <button onClick={() => setActiveTab('leaders')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'leaders' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Trophy /> Stats</button>
+                            <button onClick={() => setActiveTab('leaders')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'leaders' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Trophy /> Leaders</button>
+                            {canViewAwardsPage && (
+                                <button onClick={() => setActiveTab('awards')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'awards' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Trophy /> Awards</button>
+                            )}
                             <div className="relative">
                                 <button
                                     onClick={() => {
@@ -12286,7 +12873,9 @@
                                                                                 </span>
                                                                             </div>
                                                                         </div>
-                                                                        <div className="text-[11px] text-slate-400 mt-1">PER-style live rating {Number(livePlayerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.</div>
+                                                                        <div className="text-[11px] text-slate-400 mt-1">
+                                                                            {`PER-style live rating ${Number(livePlayerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.`}
+                                                                        </div>
                                                                     </div>
                                                                     {(() => {
                                                                         const displayedStats = [
@@ -12328,16 +12917,23 @@
                                                                         const baseLiveTopPerformers = [...liveTopTeamAPerformers, ...liveTopTeamBPerformers]
                                                                             .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0))
                                                                             .slice(0, 6);
-                                                                        const livePotgInTable = baseLiveTopPerformers.some((entry) => entry.id === livePlayerOfTheGame.id);
-                                                                        const mergedLiveTopPerformers = livePotgInTable
-                                                                            ? baseLiveTopPerformers
-                                                                            : [...baseLiveTopPerformers, {
-                                                                                ...livePlayerOfTheGame,
-                                                                                stats: livePlayerOfTheGame.stats || {},
-                                                                                perScore: Number(livePlayerOfTheGame.perScore || 0),
-                                                                                teamName: livePlayerOfTheGame.teamName,
-                                                                                teamColor: livePlayerOfTheGame.teamColor
-                                                                            }];
+                                                                        const selectedLivePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeam, liveAwayTeam);
+                                                                        const specialLivePotgEntries = [selectedLivePlayerOfTheGame]
+                                                                            .filter(Boolean)
+                                                                            .filter((entry, index, allEntries) => allEntries.findIndex((candidate) => candidate?.id === entry?.id) === index)
+                                                                            .map((entry) => ({
+                                                                                ...entry,
+                                                                                stats: entry.stats || {},
+                                                                                perScore: Number(entry.perScore || 0),
+                                                                                teamName: entry.teamName,
+                                                                                teamColor: entry.teamColor
+                                                                            }));
+                                                                        const mergedLiveTopPerformers = [...baseLiveTopPerformers];
+                                                                        specialLivePotgEntries.forEach((entry) => {
+                                                                            if (!mergedLiveTopPerformers.some((existingEntry) => existingEntry.id === entry.id)) {
+                                                                                mergedLiveTopPerformers.push(entry);
+                                                                            }
+                                                                        });
 
                                                                         return (
                                                                             <div className="overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20">
@@ -12363,7 +12959,7 @@
                                                                                         <tbody className="divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300">
                                                                                             {mergedLiveTopPerformers.length === 0 ? (
                                                                                                 <tr>
-                                                                                                    <td className="py-2 px-2 text-slate-600 italic" colSpan={13}>No qualifying performers</td>
+                                                                                                            <td className="py-2 px-2 text-slate-600 italic" colSpan={13}>No qualifying performers</td>
                                                                                                 </tr>
                                                                                             ) : mergedLiveTopPerformers.map((entry, idx) => {
                                                                                                 const shooting = computeShootingPercentages(entry.stats || {}, { showNAWhenNoAttempts: true });
@@ -13772,6 +14368,9 @@
                                                         <div className="bg-slate-950/35 border border-slate-800/60 rounded-xl p-3">
                                                             <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Top Performers Boxscore</div>
                                                             {(() => {
+                                                                const selectedManualPotgPlayerId = String(game.manualPotgPlayerId || '').trim();
+                                                                const defaultPlayerOfTheGame = getPlayerOfTheGame({ ...game, manualPotgPlayerId: '' }, teamAObj, teamBObj);
+                                                                const selectedPlayerOfTheGame = getPlayerOfTheGame(game, teamAObj, teamBObj);
                                                                 const baseTopPerformers = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])]
                                                                     .map((entry) => ({
                                                                         ...entry,
@@ -13783,16 +14382,22 @@
                                                                             : (teamBObj?.color || '#ef4444')
                                                                     }))
                                                                     .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0));
-                                                                const potgInTable = baseTopPerformers.some((entry) => entry.id === playerOfTheGame.id);
-                                                                const mergedTopPerformers = potgInTable
-                                                                    ? baseTopPerformers
-                                                                    : [...baseTopPerformers, {
-                                                                        ...playerOfTheGame,
-                                                                        stats: playerOfTheGame.stats || {},
-                                                                        perScore: Number(playerOfTheGame.perScore || 0),
-                                                                        teamName: playerOfTheGame.teamName,
-                                                                        teamColor: playerOfTheGame.teamColor
-                                                                    }];
+                                                                const specialPotgEntries = [defaultPlayerOfTheGame, selectedPlayerOfTheGame]
+                                                                    .filter(Boolean)
+                                                                    .filter((entry, index, allEntries) => allEntries.findIndex((candidate) => candidate?.id === entry?.id) === index)
+                                                                    .map((entry) => ({
+                                                                        ...entry,
+                                                                        stats: entry.stats || {},
+                                                                        perScore: Number(entry.perScore || 0),
+                                                                        teamName: entry.teamName,
+                                                                        teamColor: entry.teamColor
+                                                                    }));
+                                                                const mergedTopPerformers = [...baseTopPerformers];
+                                                                specialPotgEntries.forEach((entry) => {
+                                                                    if (!mergedTopPerformers.some((existingEntry) => existingEntry.id === entry.id)) {
+                                                                        mergedTopPerformers.push(entry);
+                                                                    }
+                                                                });
 
                                                                 return (
                                                                     <div className="overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20">
@@ -13813,15 +14418,27 @@
                                                                                         <th className="py-2.5 px-2 text-center text-amber-500">TO</th>
                                                                                         <th className="py-2.5 px-2 text-center text-red-400">PF</th>
                                                                                         <th className="py-2.5 px-2 text-center text-slate-200">PER</th>
+                                                                                                {isLoggedIn && <th className="py-2.5 px-2 text-center text-amber-300">POTG</th>}
                                                                                     </tr>
                                                                                 </thead>
                                                                                 <tbody className="divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300">
                                                                                     {mergedTopPerformers.length === 0 ? (
                                                                                         <tr>
-                                                                                            <td className="py-2 px-2 text-slate-600 italic" colSpan={14}>No qualifying performers</td>
+                                                                                            <td className="py-2 px-2 text-slate-600 italic" colSpan={isLoggedIn ? 14 : 13}>No qualifying performers</td>
                                                                                         </tr>
                                                                                     ) : mergedTopPerformers.map((entry, idx) => {
                                                                                         const shooting = computeShootingPercentages(entry.stats || {}, { showNAWhenNoAttempts: true });
+                                                                                        const isManualPotg = selectedManualPotgPlayerId === String(entry.id || '');
+                                                                                        const isDefaultPotg = !isManualPotg && String(defaultPlayerOfTheGame?.id || '') === String(entry.id || '');
+                                                                                        const entryTeamId = teamAObj?.players?.some((player) => player.id === entry.id)
+                                                                                            ? String(game.teamAId || '')
+                                                                                            : String(game.teamBId || '');
+                                                                                        const winningTeamId = Number(game.teamAScore || 0) === Number(game.teamBScore || 0)
+                                                                                            ? ''
+                                                                                            : (Number(game.teamAScore || 0) > Number(game.teamBScore || 0)
+                                                                                                ? String(game.teamAId || '')
+                                                                                                : String(game.teamBId || ''));
+                                                                                        const isWinningTeam = !winningTeamId || entryTeamId === winningTeamId;
                                                                                         return (
                                                                                             <tr key={`potg-top-merged-${entry.id}`} className="hover:bg-slate-855/20">
                                                                                                 <td className="py-2 px-2 text-center font-bold text-slate-500">#{idx + 1}</td>
@@ -13845,6 +14462,19 @@
                                                                                                 <td className="py-2 px-2 text-center text-amber-500 font-mono">{entry.stats?.to || 0}</td>
                                                                                                 <td className="py-2 px-2 text-center text-red-400 font-mono">{entry.stats?.pf || 0}</td>
                                                                                                 <td className="py-2 px-2 text-center font-black text-slate-100">{Number(entry.perScore || 0).toFixed(1)}</td>
+                                                                                                {isLoggedIn && (
+                                                                                                    <td className="py-2 px-2 text-center">
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            disabled={!canOperateLive || !isWinningTeam}
+                                                                                                            onClick={() => handleSetManualPotg(game.id, entry.id)}
+                                                                                                            className={`px-2.5 py-1 rounded text-[9px] font-black border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isManualPotg ? 'bg-amber-500/20 text-amber-200 border-amber-500/60' : 'bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'}`}
+                                                                                                            title={!isWinningTeam ? 'Manual POTG must be from the winning team' : (isManualPotg ? 'Clear manual POTG' : 'Set as manual POTG')}
+                                                                                                        >
+                                                                                                            {isManualPotg ? 'POTG' : isDefaultPotg ? 'Default' : 'Make POTG'}
+                                                                                                        </button>
+                                                                                                    </td>
+                                                                                                )}
                                                                                             </tr>
                                                                                         );
                                                                                     })}
@@ -14302,10 +14932,237 @@
                         )}
 
                         {/* TAB 4: COMPREHENSIVE ALL PLAYER LEADERBOARDS */}
+                        {activeTab === 'awards' && !canViewAwardsPage && (
+                            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
+                                <div className="max-w-xl mx-auto text-center space-y-3">
+                                    <div className="inline-flex items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-amber-300">
+                                        Private Page
+                                    </div>
+                                    <h4 className="text-lg font-black text-white">Log in to view the awards page</h4>
+                                    <p className="text-sm text-slate-400">An admin can enable public access from the Awards page after logging in.</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAuthModal(true)}
+                                        className="inline-flex items-center justify-center rounded-lg border border-orange-500/40 bg-orange-500/15 px-4 py-2 text-xs font-black uppercase tracking-wide text-orange-300 hover:bg-orange-500/25 cursor-pointer"
+                                    >
+                                        Login
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'awards' && canViewAwardsPage && (
+                            <div className="space-y-6">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                        <h3 className="text-xl font-bold text-white font-sans">All WKND Awards</h3>
+                                        <p className="text-xs text-slate-400">MVP and All WKND teams for the current tournament run.</p>
+                                    </div>
+                                    {authRole === 'admin' && (
+                                        <div className="w-full sm:w-auto">
+                                            <button
+                                                type="button"
+                                                onClick={handleToggleAwardsPagePublic}
+                                                className={`inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold border cursor-pointer transition-all ${awardsPagePublicEnabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' : 'border-slate-700 text-slate-200 hover:bg-slate-900'}`}
+                                            >
+                                                Awards Visibility: {awardsPagePublicEnabled ? 'Public: ON' : 'Public: OFF'}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4">
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-2xl">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3">
+                                            <div>
+                                                <h4 className="font-extrabold text-sm uppercase tracking-wide text-white">MVP Candidates</h4>
+                                                <p className="text-[10px] text-slate-500 mt-0.5">Ranked by season PER-style production from completed games.</p>
+                                            </div>
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-orange-300 bg-orange-500/10 border border-orange-500/20 px-2 py-1 rounded-lg">Top 10</span>
+                                        </div>
+
+                                        {leagueMvpCandidates.length === 0 ? (
+                                            <div className="text-xs text-slate-500 italic">No player stats yet</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <div className="rounded-xl border border-orange-500/40 bg-orange-500/10 px-3 py-2 grid grid-cols-[auto_auto_1fr_auto] items-center gap-3">
+                                                    <span className="font-mono font-black text-xs w-7 text-center text-orange-300">#1</span>
+                                                    {leagueMvpCandidates[0].pictureUrl ? (
+                                                        <img
+                                                            src={leagueMvpCandidates[0].pictureUrl}
+                                                            alt={leagueMvpCandidates[0].name}
+                                                            className="w-10 h-10 rounded-full border border-slate-700 object-cover shrink-0"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-10 h-10 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0">
+                                                            IMG
+                                                        </div>
+                                                    )}
+                                                    <div className="min-w-0">
+                                                        <div className="truncate text-white font-extrabold text-sm">{leagueMvpCandidates[0].name}</div>
+                                                        <div className="text-[10px] text-slate-500 truncate mt-0.5 flex flex-wrap items-center gap-1">
+                                                            <span>{leagueMvpCandidates[0].team}</span>
+                                                            <span className="text-slate-600">•</span>
+                                                            <span>{normalizePlayerPositions(leagueMvpCandidates[0]).join('/') || 'N/A'}</span>
+                                                            <span className="text-slate-600">•</span>
+                                                            <span>{leagueMvpCandidates[0].gamesPlayed || 0} GP</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <div className="font-mono font-black text-xl text-orange-300">{Number(leagueMvpCandidates[0].perStyleScore || 0).toFixed(1)}</div>
+                                                        <div className="text-[9px] text-slate-500 uppercase tracking-widest">PER</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                                                    {leagueMvpCandidates.slice(1).map((player, idx) => (
+                                                        <div
+                                                            key={`mvp-candidate-${player.id}`}
+                                                            className="rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-2 grid grid-cols-[auto_auto_1fr_auto] items-center gap-3"
+                                                        >
+                                                            <span className="font-mono font-black text-xs w-7 text-center text-slate-500">#{idx + 2}</span>
+                                                            {player.pictureUrl ? (
+                                                                <img
+                                                                    src={player.pictureUrl}
+                                                                    alt={player.name}
+                                                                    className="w-10 h-10 rounded-full border border-slate-700 object-cover shrink-0"
+                                                                />
+                                                            ) : (
+                                                                <div className="w-10 h-10 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0">
+                                                                    IMG
+                                                                </div>
+                                                            )}
+                                                            <div className="min-w-0">
+                                                                <div className="truncate text-white font-extrabold text-sm">{player.name}</div>
+                                                                <div className="text-[10px] text-slate-500 truncate mt-0.5 flex flex-wrap items-center gap-1">
+                                                                    <span>{player.team}</span>
+                                                                    <span className="text-slate-600">•</span>
+                                                                    <span>{normalizePlayerPositions(player).join('/') || 'N/A'}</span>
+                                                                    <span className="text-slate-600">•</span>
+                                                                    <span>{player.gamesPlayed || 0} GP</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="text-right shrink-0">
+                                                                <div className="font-mono font-black text-xl text-orange-300">{Number(player.perStyleScore || 0).toFixed(1)}</div>
+                                                                <div className="text-[9px] text-slate-500 uppercase tracking-widest">PER</div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-2xl">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3">
+                                            <div>
+                                                <h4 className="font-extrabold text-sm uppercase tracking-wide text-white">All WKND First Team</h4>
+                                                <p className="text-[10px] text-slate-500 mt-0.5">First-team style lineup by position and PER-style value.</p>
+                                            </div>
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2 py-1 rounded-lg">First Team</span>
+                                        </div>
+
+                                        {allWKNDFirstTeam.length === 0 ? (
+                                            <div className="text-xs text-slate-500 italic">No eligible players yet</div>
+                                        ) : (
+                                            <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                                                {allWKNDFirstTeam.map(({ slot, player }) => (
+                                                    <div key={`mythical-${slot}-${player.id}`} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                                                        <div className="flex items-center justify-between gap-2 mb-2">
+                                                            <span className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] font-black tracking-wider text-slate-100 shrink-0">
+                                                                {slot}
+                                                            </span>
+                                                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">PER {Number(player.perStyleScore || 0).toFixed(1)}</span>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-3">
+                                                            {player.pictureUrl ? (
+                                                                <img
+                                                                    src={player.pictureUrl}
+                                                                    alt={player.name}
+                                                                    className="w-11 h-11 rounded-full border border-slate-700 object-cover shrink-0"
+                                                                />
+                                                            ) : (
+                                                                <div className="w-11 h-11 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0">
+                                                                    IMG
+                                                                </div>
+                                                            )}
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="truncate text-white font-extrabold text-sm">{player.name}</div>
+                                                                <div className="text-[10px] text-slate-500 truncate mt-0.5">{player.team}</div>
+                                                                <div className="mt-1 text-[10px] text-slate-400 flex flex-wrap gap-2">
+                                                                    <span>{player.gamesPlayed || 0} GP</span>
+                                                                    <span>PTS {Number(getAverages(player).pts || 0).toFixed(1)}</span>
+                                                                    <span>REB {Number(getAverages(player).reb || 0).toFixed(1)}</span>
+                                                                    <span>AST {Number(getAverages(player).ast || 0).toFixed(1)}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-2xl">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3">
+                                            <div>
+                                                <h4 className="font-extrabold text-sm uppercase tracking-wide text-white">All WKND Second Team</h4>
+                                                <p className="text-[10px] text-slate-500 mt-0.5">Next-best eligible players by position and PER-style value.</p>
+                                            </div>
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/10 border border-violet-500/20 px-2 py-1 rounded-lg">Second Team</span>
+                                        </div>
+
+                                        {allWKNDSecondTeam.length === 0 ? (
+                                            <div className="text-xs text-slate-500 italic">No second-team players yet</div>
+                                        ) : (
+                                            <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                                                {allWKNDSecondTeam.map(({ slot, player }) => (
+                                                    <div key={`mythical-second-${slot}-${player.id}`} className="rounded-xl border border-slate-800 bg-slate-950/45 p-3">
+                                                        <div className="flex items-center justify-between gap-2 mb-2">
+                                                            <span className="inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] font-black tracking-wider text-slate-100 shrink-0">
+                                                                {slot}
+                                                            </span>
+                                                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">PER {Number(player.perStyleScore || 0).toFixed(1)}</span>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-3">
+                                                            {player.pictureUrl ? (
+                                                                <img
+                                                                    src={player.pictureUrl}
+                                                                    alt={player.name}
+                                                                    className="w-11 h-11 rounded-full border border-slate-700 object-cover shrink-0"
+                                                                />
+                                                            ) : (
+                                                                <div className="w-11 h-11 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0">
+                                                                    IMG
+                                                                </div>
+                                                            )}
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="truncate text-white font-extrabold text-sm">{player.name}</div>
+                                                                <div className="text-[10px] text-slate-500 truncate mt-0.5">{player.team}</div>
+                                                                <div className="mt-1 text-[10px] text-slate-400 flex flex-wrap gap-2">
+                                                                    <span>{player.gamesPlayed || 0} GP</span>
+                                                                    <span>PTS {Number(getAverages(player).pts || 0).toFixed(1)}</span>
+                                                                    <span>REB {Number(getAverages(player).reb || 0).toFixed(1)}</span>
+                                                                    <span>AST {Number(getAverages(player).ast || 0).toFixed(1)}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                            </div>
+                        )}
+
                         {activeTab === 'leaders' && (
                             <div className="space-y-6">
                                 <div>
-                                    <h3 className="text-xl font-bold text-white font-sans">League Statistics Leaderboard</h3>
+                                    <h3 className="text-xl font-bold text-white font-sans">League Leaders</h3>
                                     <p className="text-xs text-slate-400">Displaying performance standings across all active league roster fields.</p>
                                 </div>
 
@@ -14331,21 +15188,6 @@
                                     </div>
 
                                     {(() => {
-                                        const playerPool = teams.flatMap((t) => t.players.map((p) => {
-                                            const aggregate = getArchivedPlayerAggregate(t.id, p.id);
-                                            const playerForLeaders = {
-                                                ...p,
-                                                team: t.name,
-                                                teamId: t.id,
-                                                gamesPlayed: aggregate.gamesPlayed,
-                                                totalStats: aggregate.totalStats
-                                            };
-
-                                            return {
-                                                ...playerForLeaders,
-                                                avg: getAverages(playerForLeaders)
-                                            };
-                                        }));
                                         const leaderDefs = [
                                             { id: 'pts', title: 'Scoring', statLabel: 'PTS', valueKey: 'pts', colorClass: 'text-orange-400' },
                                             { id: 'reb', title: 'Rebounds', statLabel: 'REB', valueKey: 'reb', colorClass: 'text-emerald-400' },
@@ -14359,7 +15201,7 @@
                                         ];
 
                                         const leaders = leaderDefs.map((def) => {
-                                            const ranked = playerPool
+                                            const ranked = leaguePlayerPool
                                                 .slice()
                                                 .sort((a, b) => getLeaderMetric(b, def.valueKey, leadersStatMode) - getLeaderMetric(a, def.valueKey, leadersStatMode));
                                             return {
