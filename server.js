@@ -1172,7 +1172,7 @@ function getRecapFirstParagraph(game) {
   return normalizeSocialCoverText(firstParagraph);
 }
 
-function getSocialImageVersion(game) {
+function getSocialImageVersion(game, teams = []) {
   let logoVersionPart = 'logo:none';
   const logoPath = resolveSocialCoverLogoPath();
   if (logoPath) {
@@ -1187,6 +1187,8 @@ function getSocialImageVersion(game) {
   if (!game) {
     return crypto.createHash('sha1').update(logoVersionPart).digest('hex').slice(0, 12);
   }
+
+  const potg = derivePlayerOfTheGameFromState(game, teams);
   const source = [
     logoVersionPart,
     String(game.id || ''),
@@ -1197,7 +1199,11 @@ function getSocialImageVersion(game) {
     String(game.teamBScore || ''),
     String(game.gameWriteup || ''),
     String(game.potgWriteup || ''),
-    String(game.socialCoverDataUrl || '')
+    String(game.socialCoverDataUrl || ''),
+    String(game.manualPotgPlayerId || ''),
+    String(potg?.playerId || ''),
+    String(potg?.pictureUrl || ''),
+    String(potg?.name || '')
   ].join('|');
   return crypto.createHash('sha1').update(source).digest('hex').slice(0, 12);
 }
@@ -1220,13 +1226,13 @@ function buildRecapDescription(game) {
   return trimForMeta(firstParagraph, 190);
 }
 
-function buildSocialMetaTags({ req, game }) {
+function buildSocialMetaTags({ req, game, teams = [] }) {
   const origin = `${req.protocol}://${req.get('host')}`;
   const canonicalPath = game ? `/?view=game&gameId=${encodeURIComponent(game.id)}` : '/';
   const canonicalUrl = `${origin}${canonicalPath}`;
   const title = buildRecapTitle(game);
   const description = buildRecapDescription(game);
-  const imageVersion = getSocialImageVersion(game);
+  const imageVersion = getSocialImageVersion(game, teams);
   const imageUrl = game
     ? `${origin}/api/social-cover/${encodeURIComponent(game.id)}.png?v=${encodeURIComponent(imageVersion)}`
     : `${origin}/api/social-cover/default.png?v=${encodeURIComponent(imageVersion)}`;
@@ -1423,7 +1429,9 @@ function derivePlayerOfTheGameFromState(game, teams) {
       name: String(manualPlayer?.name || 'PLAYER').toUpperCase(),
       statsLine: `${Number(manualStats?.pts || 0)} PTS - ${Number(manualStats?.reb || 0)} REB - ${Number(manualStats?.ast || 0)} AST`,
       teamColor: String(manualTeam?.color || '#f97316'),
+      number: String(manualPlayer?.number || ''),
       teamName: String(manualTeam?.name || 'Team'),
+      pictureUrl: String(manualPlayer?.pictureUrl || ''),
       perScore: computePerStyleScore(manualStats),
       stats: manualStats,
       playerId: manualPotgPlayerId,
@@ -1476,9 +1484,36 @@ async function readImageBufferFromSource(source, baseOrigin = '') {
   const parsed = parseImageDataUrl(value);
   if (parsed?.buffer?.length) return parsed.buffer;
 
+  // Prefer direct filesystem reads for locally hosted player avatars so OG/crawler
+  // rendering does not depend on external proxy/CDN behavior.
+  const readLocalPlayerImage = async (pathnameValue) => {
+    const pathname = String(pathnameValue || '').trim();
+    if (!pathname.startsWith('/data/player-images/')) return null;
+    const fileName = path.basename(pathname);
+    if (!fileName || fileName === '.' || fileName === '..') return null;
+    const absolutePath = path.join(playerImagesDir, fileName);
+    if (!absolutePath.startsWith(playerImagesDir)) return null;
+    if (!fs.existsSync(absolutePath)) return null;
+    const buffer = fs.readFileSync(absolutePath);
+    if (!buffer.length) return null;
+    const meta = await sharp(buffer).metadata();
+    if (!meta?.width || !meta?.height) return null;
+    return buffer;
+  };
+
+  try {
+    const localBuffer = await readLocalPlayerImage(value);
+    if (localBuffer) return localBuffer;
+  } catch {}
+
   try {
     const url = baseOrigin ? new URL(value, baseOrigin) : new URL(value);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+
+    try {
+      const localBuffer = await readLocalPlayerImage(String(url.pathname || ''));
+      if (localBuffer) return localBuffer;
+    } catch {}
 
     const response = await fetch(url.toString(), {
       method: 'GET',
@@ -2588,13 +2623,14 @@ function renderInjectedIndex(req, res) {
     );
     const state = readState();
     const game = isGameView ? ((state.games || []).find((item) => item.id === gameId) || null) : null;
+    const teams = state.teams || [];
     const indexPath = path.join(__dirname, 'index.html');
     const html = fs.readFileSync(indexPath, 'utf8');
     let metaTags = '';
     let gaHeadSnippet = '';
 
     try {
-      metaTags = buildSocialMetaTags({ req, game });
+      metaTags = buildSocialMetaTags({ req, game, teams });
     } catch {
       metaTags = '';
     }
