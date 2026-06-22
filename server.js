@@ -1418,13 +1418,14 @@ function derivePlayerOfTheGameFromState(game, teams) {
   if (manualPotgPlayerId && stats[manualPotgPlayerId]) {
     const manualPlayer = players.find((player) => player.id === manualPotgPlayerId);
     const manualTeam = teamsList.find((team) => (Array.isArray(team?.players) ? team.players : []).some((player) => player.id === manualPotgPlayerId));
+    const manualStats = stats[manualPotgPlayerId] || {};
     return {
       name: String(manualPlayer?.name || 'PLAYER').toUpperCase(),
-      statsLine: `${Number(stats[manualPotgPlayerId]?.pts || 0)} PTS - ${Number(stats[manualPotgPlayerId]?.reb || 0)} REB - ${Number(stats[manualPotgPlayerId]?.ast || 0)} AST`,
+      statsLine: `${Number(manualStats?.pts || 0)} PTS - ${Number(manualStats?.reb || 0)} REB - ${Number(manualStats?.ast || 0)} AST`,
       teamColor: String(manualTeam?.color || '#f97316'),
       teamName: String(manualTeam?.name || 'Team'),
-      perScore: 0,
-      stats: stats[manualPotgPlayerId],
+      perScore: computePerStyleScore(manualStats),
+      stats: manualStats,
       playerId: manualPotgPlayerId,
       selectionMode: 'manual'
     };

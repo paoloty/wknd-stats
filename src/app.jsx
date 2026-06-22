@@ -10144,7 +10144,7 @@
                             teamColor: manualTeam?.color || '#f97316',
                             teamId: manualTeam?.id || '',
                             stats: manualStats,
-                            perScore: 0,
+                            perScore: computePerStyleScore(manualStats),
                             selectionMode: 'manual'
                         };
                     }
