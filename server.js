@@ -1906,6 +1906,7 @@ const writeGamesTransaction = db.transaction((nextGames) => {
       youtube_url: typeof game.youtubeUrl === 'string' ? game.youtubeUrl : '',
       game_writeup: typeof game.gameWriteup === 'string' ? game.gameWriteup : '',
       potg_writeup: typeof game.potgWriteup === 'string' ? game.potgWriteup : '',
+      manual_potg_player_id: typeof game.manualPotgPlayerId === 'string' ? game.manualPotgPlayerId : '',
       social_cover_data_url: typeof game.socialCoverDataUrl === 'string' ? game.socialCoverDataUrl : '',
       sort_order: gameIndex
     });
