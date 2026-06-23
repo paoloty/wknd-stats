@@ -3296,6 +3296,24 @@
                 suppressNextNavHistoryPushRef.current = true;
                 syncHistoryShareUrl(null, 'replace');
             }, [activeTab, selectedHistoryGameId, selectedHistoryGame]);
+
+            useEffect(() => {
+                if (!selectedHistoryGameId) return;
+                if (!selectedHistoryGame) return;
+                if (selectedHistoryGame._detailLoaded) return;
+                let cancelled = false;
+                apiRequest(`/api/games/${encodeURIComponent(selectedHistoryGameId)}/detail`)
+                    .then((data) => {
+                        if (cancelled) return;
+                        setGames((prev) => prev.map((g) =>
+                            g.id === selectedHistoryGameId
+                                ? { ...g, gameLog: data.gameLog || [], periodSnapshots: data.periodSnapshots || [], _detailLoaded: true }
+                                : g
+                        ));
+                    })
+                    .catch(() => {});
+                return () => { cancelled = true; };
+            }, [selectedHistoryGameId, selectedHistoryGame?._detailLoaded]);
             const currentLiveGameLog = getCurrentGameLogSegment(gameLog);
             const currentLiveGame = games.find((game) => game.status === 'LIVE') || null;
             const ROLE_PRESENCE_STALE_MS = 30000;
@@ -4730,6 +4748,7 @@
             }, [games]);
 
             useEffect(() => {
+                if (activeTab !== 'live') return;
                 const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const socketHost = window.location.host || 'localhost:3000';
                 const connectSocket = () => {
@@ -4816,8 +4835,13 @@
                                         : remoteGames;
                                     const now = Date.now();
 
+                                    const prevGameMap = new Map((prevGames || []).map(g => [String(g?.id || ''), g]));
                                     const resolvedGames = merged.map((remoteGame) => {
                                         const gameId = String(remoteGame?.id || '');
+                                        const prevGame = prevGameMap.get(gameId);
+                                        if (prevGame?._detailLoaded) {
+                                            remoteGame = { ...remoteGame, gameLog: prevGame.gameLog, periodSnapshots: prevGame.periodSnapshots, _detailLoaded: true };
+                                        }
                                         const pending = pendingYoutubeSaveRef.current[gameId];
                                         if (!pending) return remoteGame;
 
@@ -4916,12 +4940,12 @@
                         socket.close();
                     }
                 };
-            }, []);
+            }, [activeTab]);
 
-            // Periodic heartbeat: every 30 s re-fetch any missed live events and
-            // retry any pending session PUT/DELETE so a short network blip or a
-            // dropped WS message doesn't leave the app desynced indefinitely.
+            // Heartbeat + HTTP fallback only run on the live tab — other tabs
+            // have no need for polling since data is static between games.
             useEffect(() => {
+                if (activeTab !== 'live') return;
                 const heartbeat = window.setInterval(() => {
                     const socket = syncSocketRef.current;
                     const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
@@ -4933,12 +4957,10 @@
                     flushPendingActiveSessionSync();
                 }, 30000);
                 return () => window.clearInterval(heartbeat);
-            }, []);
+            }, [activeTab]);
 
-            // Near-realtime HTTP fallback for environments where WS upgrade is
-            // unavailable/intermittent (some proxies/mobile paths). This keeps
-            // session + action sync flowing across devices without manual refresh.
             useEffect(() => {
+                if (activeTab !== 'live') return;
                 const fallback = window.setInterval(() => {
                     const socket = syncSocketRef.current;
                     const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
@@ -4950,7 +4972,7 @@
                     flushPendingActiveSessionSync();
                 }, 2500);
                 return () => window.clearInterval(fallback);
-            }, []);
+            }, [activeTab]);
 
             useEffect(() => {
                 const handleOnline = () => {
@@ -5354,6 +5376,8 @@
                             // Covers are managed via dedicated endpoints and server-side preservation.
                             delete nextGame.socialCoverDataUrl;
                             delete nextGame.socialCoverLen;
+                            delete nextGame.gameLog;
+                            delete nextGame.periodSnapshots;
                             return nextGame;
                         });
                         const payload = await apiRequest('/api/state', {
@@ -5408,13 +5432,13 @@
                 return normalizeTeamsForStorage(mergedTeams);
             };
 
-            const exportGameLogPayload = (game) => ({
+            const exportGameLogPayload = (game, detail = {}) => ({
                 type: 'wknd-game-log',
                 version: 2,
                 exportedAt: new Date().toISOString(),
                 gameId: game?.id || '',
-                gameLog: Array.isArray(game?.gameLog) ? game.gameLog : [],
-                periodSnapshots: Array.isArray(game?.periodSnapshots) ? game.periodSnapshots : [],
+                gameLog: Array.isArray(detail.gameLog) ? detail.gameLog : (Array.isArray(game?.gameLog) ? game.gameLog : []),
+                periodSnapshots: Array.isArray(detail.periodSnapshots) ? detail.periodSnapshots : (Array.isArray(game?.periodSnapshots) ? game.periodSnapshots : []),
                 dnpPlayers: Array.isArray(game?.dnpPlayers) ? game.dnpPlayers : [],
                 teamAId: game?.teamAId || '',
                 teamBId: game?.teamBId || '',
@@ -5437,11 +5461,15 @@
                 teams: getGameLogExportTeams(game)
             });
 
-            const handleExportGameLog = (game) => {
+            const handleExportGameLog = async (game) => {
                 if (!game) return;
 
                 try {
-                    const exportPayload = exportGameLogPayload(game);
+                    let detail = {};
+                    if (!game._detailLoaded && game.id) {
+                        try { detail = await apiRequest(`/api/games/${encodeURIComponent(game.id)}/detail`); } catch (_) {}
+                    }
+                    const exportPayload = exportGameLogPayload(game, detail);
                     const fileName = `wknd_gamelog_${String(game.id || 'game').replace(/[^a-zA-Z0-9_-]+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
                     const dataStr = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(exportPayload, null, 2))}`;
                     const downloadAnchor = document.createElement('a');

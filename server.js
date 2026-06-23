@@ -756,13 +756,17 @@ const selectPlayersStmt = db.prepare(`
   ORDER BY p.sort_order ASC, p.id ASC
 `);
 const selectGamesStmt = db.prepare(`
-  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, LENGTH(social_cover_data_url) AS social_cover_data_len, dnp_players_json, under_review
+  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score,
+         youtube_url, game_writeup, potg_writeup, manual_potg_player_id,
+         LENGTH(social_cover_data_url) AS social_cover_data_len, dnp_players_json, under_review
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
 const selectGameCoverByIdStmt = db.prepare('SELECT social_cover_data_url FROM games WHERE id = ?');
 const selectAllGameCoversStmt = db.prepare('SELECT id, social_cover_data_url FROM games');
 const updateGameCoverStmt = db.prepare('UPDATE games SET social_cover_data_url = ? WHERE id = ?');
+const selectGameDetailByIdStmt = db.prepare('SELECT game_log_json, period_snapshots_json FROM games WHERE id = ?');
+const selectAllGameLogsStmt = db.prepare('SELECT id, game_log_json, period_snapshots_json FROM games');
 const selectGamePlayerStatsStmt = db.prepare(`
   SELECT game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
   FROM game_player_stats
@@ -2394,8 +2398,6 @@ function readState() {
     teamAScore: toInt(game.team_a_score),
     teamBScore: toInt(game.team_b_score),
     playerStats: statsByGame.get(game.id) || {},
-    gameLog: parseJsonSafe(game.game_log_json, []),
-    periodSnapshots: parseJsonSafe(game.period_snapshots_json, []),
     dnpPlayers: parseJsonSafe(game.dnp_players_json, []),
     underReview: toInt(game.under_review) === 1,
     youtubeUrl: game.youtube_url || '',
@@ -4052,6 +4054,7 @@ app.put('/api/games/:gameId', (req, res) => {
   try {
     const existingCoverRow = selectGameCoverByIdStmt.get(gameId);
     const existingCoverUrl = String(existingCoverRow?.social_cover_data_url || '');
+    const existingDetailRow = selectGameDetailByIdStmt.get(gameId);
     const upsertGameTransaction = db.transaction(() => {
       // Remove this game's player stats and re-insert (safe upsert pattern).
       db.prepare('DELETE FROM game_player_stats WHERE game_id = ?').run(gameId);
@@ -4066,8 +4069,12 @@ app.put('/api/games/:gameId', (req, res) => {
         team_b_name: game.teamBName || '',
         team_a_score: toInt(game.teamAScore),
         team_b_score: toInt(game.teamBScore),
-        game_log_json: JSON.stringify(Array.isArray(game.gameLog) ? game.gameLog : []),
-        period_snapshots_json: JSON.stringify(Array.isArray(game.periodSnapshots) ? game.periodSnapshots : []),
+        game_log_json: Array.isArray(game.gameLog) && game.gameLog.length > 0
+          ? JSON.stringify(game.gameLog)
+          : (existingDetailRow?.game_log_json || '[]'),
+        period_snapshots_json: Array.isArray(game.periodSnapshots) && game.periodSnapshots.length > 0
+          ? JSON.stringify(game.periodSnapshots)
+          : (existingDetailRow?.period_snapshots_json || '[]'),
         dnp_players_json: JSON.stringify(Array.isArray(game.dnpPlayers) ? game.dnpPlayers : []),
         under_review: game.underReview ? 1 : 0,
         youtube_url: typeof game.youtubeUrl === 'string' ? game.youtubeUrl : '',
@@ -4126,20 +4133,35 @@ app.put('/api/state', async (req, res) => {
     const existingCoverByGameId = new Map(
       existingCovers.map((row) => [String(row.id || ''), String(row.social_cover_data_url || '')])
     );
-    const gamesWithPreservedCovers = games.map((game) => {
+    const existingLogs = selectAllGameLogsStmt.all();
+    const existingLogByGameId = new Map(existingLogs.map((row) => [String(row.id || ''), row]));
+
+    const gamesWithPreservedData = games.map((game) => {
       if (!game || typeof game !== 'object') return game;
-      if (typeof game.socialCoverDataUrl === 'string') return game;
-      const existingCover = existingCoverByGameId.get(String(game.id || ''));
-      if (!existingCover) return game;
-      return {
-        ...game,
-        socialCoverDataUrl: existingCover
-      };
+      const id = String(game.id || '');
+      let next = game;
+
+      if (typeof game.socialCoverDataUrl !== 'string') {
+        const existingCover = existingCoverByGameId.get(id);
+        if (existingCover) next = { ...next, socialCoverDataUrl: existingCover };
+      }
+
+      const hasLog = Array.isArray(game.gameLog) && game.gameLog.length > 0;
+      const hasSnapshots = Array.isArray(game.periodSnapshots) && game.periodSnapshots.length > 0;
+      if (!hasLog || !hasSnapshots) {
+        const existingLog = existingLogByGameId.get(id);
+        if (existingLog) {
+          if (!hasLog) next = { ...next, gameLog: parseJsonSafe(existingLog.game_log_json, []) };
+          if (!hasSnapshots) next = { ...next, periodSnapshots: parseJsonSafe(existingLog.period_snapshots_json, []) };
+        }
+      }
+
+      return next;
     });
 
     const teamsWithCachedImages = await persistPlayerImagesForTeams(teams);
-    writeState(teamsWithCachedImages, gamesWithPreservedCovers);
-    res.json({ ok: true, teams: teamsWithCachedImages, games: gamesWithPreservedCovers });
+    writeState(teamsWithCachedImages, gamesWithPreservedData);
+    res.json({ ok: true, teams: teamsWithCachedImages, games: gamesWithPreservedData });
   } catch (error) {
     res.status(500).json({ error: 'Failed to persist state.' });
   }
@@ -4308,6 +4330,24 @@ app.delete('/api/games/:gameId', (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete game.' });
   }
+});
+
+app.get('/api/games/:gameId/detail', (req, res) => {
+  const gameId = String(req.params.gameId || '').trim();
+  if (!gameId) {
+    res.status(400).json({ error: 'gameId is required.' });
+    return;
+  }
+  const row = selectGameDetailByIdStmt.get(gameId);
+  if (!row) {
+    res.status(404).json({ error: 'Game not found.' });
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    gameLog: parseJsonSafe(row.game_log_json, []),
+    periodSnapshots: parseJsonSafe(row.period_snapshots_json, [])
+  });
 });
 
 app.put('/api/games/:gameId/video', (req, res) => {
