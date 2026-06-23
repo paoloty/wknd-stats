@@ -1228,7 +1228,9 @@ function buildRecapDescription(game) {
 
 function buildSocialMetaTags({ req, game, teams = [] }) {
   const origin = `${req.protocol}://${req.get('host')}`;
-  const canonicalPath = game ? `/?view=game&gameId=${encodeURIComponent(game.id)}` : '/';
+  const canonicalPath = game
+    ? `/history/game/${encodeURIComponent(game.id)}`
+    : '/';
   const canonicalUrl = `${origin}${canonicalPath}`;
   const title = buildRecapTitle(game);
   const description = buildRecapDescription(game);
@@ -1237,23 +1239,63 @@ function buildSocialMetaTags({ req, game, teams = [] }) {
     ? `${origin}/api/social-cover/${encodeURIComponent(game.id)}.png?v=${encodeURIComponent(imageVersion)}`
     : `${origin}/api/social-cover/default.png?v=${encodeURIComponent(imageVersion)}`;
 
-  return [
+  const teamAName = normalizeSocialCoverText(game?.teamAName || '');
+  const teamBName = normalizeSocialCoverText(game?.teamBName || '');
+  const imageAlt = game
+    ? `${teamAName} ${game.teamAScore ?? ''} – ${game.teamBScore ?? ''} ${teamBName} · WKND Basketball Game Recap`
+    : 'WKND Basketball League – Live Scores & Stats';
+
+  const potg = game ? derivePlayerOfTheGameFromState(game, teams) : null;
+  const potgName = normalizeSocialCoverText(potg?.name || '');
+  const potgStats = normalizeSocialCoverText(potg?.statsLine || '');
+
+  const publishedIso = game?.date
+    ? (() => { try { return new Date(game.date).toISOString(); } catch { return null; } })()
+    : null;
+
+  const tags = [
     `<title>${escapeHtml(title)}</title>`,
-    `<meta name="description" content="${escapeHtml(description)}">`,
+    `<meta name="description" content="${escapeHtml(trimForMeta(description, 190))}">`,
     `<link rel="canonical" href="${escapeHtml(canonicalUrl)}">`,
+
     `<meta property="og:type" content="article">`,
-    `<meta property="og:site_name" content="WKND League Stats">`,
-    `<meta property="og:title" content="${escapeHtml(title)}">`,
-    `<meta property="og:description" content="${escapeHtml(description)}">`,
+    `<meta property="og:site_name" content="WKND Basketball League">`,
+    `<meta property="og:locale" content="en_US">`,
+    `<meta property="og:title" content="${escapeHtml(trimForMeta(title, 110))}">`,
+    `<meta property="og:description" content="${escapeHtml(trimForMeta(description, 190))}">`,
     `<meta property="og:url" content="${escapeHtml(canonicalUrl)}">`,
     `<meta property="og:image" content="${escapeHtml(imageUrl)}">`,
+    `<meta property="og:image:secure_url" content="${escapeHtml(imageUrl)}">`,
+    `<meta property="og:image:type" content="image/png">`,
     `<meta property="og:image:width" content="1200">`,
     `<meta property="og:image:height" content="630">`,
+    `<meta property="og:image:alt" content="${escapeHtml(imageAlt)}">`,
+  ];
+
+  if (publishedIso) {
+    tags.push(`<meta property="article:published_time" content="${escapeHtml(publishedIso)}">`);
+    tags.push(`<meta property="article:section" content="Basketball">`);
+    tags.push(`<meta property="article:tag" content="WKND Basketball">`);
+    if (teamAName) tags.push(`<meta property="article:tag" content="${escapeHtml(teamAName)}">`);
+    if (teamBName) tags.push(`<meta property="article:tag" content="${escapeHtml(teamBName)}">`);
+    if (potgName) tags.push(`<meta property="article:tag" content="${escapeHtml(potgName)}">`);
+  }
+
+  tags.push(
     `<meta name="twitter:card" content="summary_large_image">`,
-    `<meta name="twitter:title" content="${escapeHtml(title)}">`,
-    `<meta name="twitter:description" content="${escapeHtml(description)}">`,
-    `<meta name="twitter:image" content="${escapeHtml(imageUrl)}">`
-  ].join('\n    ');
+    `<meta name="twitter:title" content="${escapeHtml(trimForMeta(title, 110))}">`,
+    `<meta name="twitter:description" content="${escapeHtml(trimForMeta(description, 190))}">`,
+    `<meta name="twitter:image" content="${escapeHtml(imageUrl)}">`,
+    `<meta name="twitter:image:alt" content="${escapeHtml(imageAlt)}">`,
+    `<meta name="twitter:label1" content="Final Score">`,
+    `<meta name="twitter:data1" content="${escapeHtml(game ? `${teamAName} ${game.teamAScore ?? 0} – ${game.teamBScore ?? 0} ${teamBName}` : 'WKND Basketball')}">`,
+    ...(potgName ? [
+      `<meta name="twitter:label2" content="Player of the Game">`,
+      `<meta name="twitter:data2" content="${escapeHtml(`${potgName}${potgStats ? ` · ${potgStats}` : ''}`)}">`
+    ] : [])
+  );
+
+  return tags.join('\n    ');
 }
 
 function buildPlayerSocialMetaTags({ req, player, team }) {
@@ -1303,32 +1345,76 @@ async function buildSocialCoverPng(game, teams = [], baseOrigin = '') {
   requireSharp();
   const W = 1200;
   const H = 630;
-  const teamA = (Array.isArray(teams) ? teams : []).find((team) => team.id === game?.teamAId) || null;
-  const teamB = (Array.isArray(teams) ? teams : []).find((team) => team.id === game?.teamBId) || null;
-  const colorA = String(teamA?.color || '#10b981');
-  const colorB = String(teamB?.color || '#3b82f6');
-  const teamAName = String(game?.teamAName || 'HOME').toUpperCase();
-  const teamBName = String(game?.teamBName || 'AWAY').toUpperCase();
-  const teamAScore = Number(game?.teamAScore || 0);
-  const teamBScore = Number(game?.teamBScore || 0);
-  const dateText = String(game?.date || '').trim();
-  const potg = game ? derivePlayerOfTheGameFromState(game, teams) : null;
-  const potgName = normalizeSocialCoverText(potg?.name || '');
-  const potgStats = normalizeSocialCoverText(potg?.statsLine || '');
-  const potgMeta = normalizeSocialCoverText(`#${potg?.number || '-'} • ${potg?.teamName || ''}`);
-  const potgInitial = getInitials(potgName || '?');
-  const potgTeamColor = String(potg?.teamColor || '#f97316');
-  const winner = teamAScore > teamBScore ? teamAName : (teamBScore > teamAScore ? teamBName : null);
-  const resultText = winner ? `${winner} WINS` : 'FINAL SCORE';
-  const snippet = normalizeSocialCoverText(String(game?.gameWriteup || '').trim()).slice(0, 120);
-  const snippetText = snippet ? `"${snippet}${snippet.length === 120 ? '...' : ''}"` : '';
 
-  const avatarCx = W / 2;
-  const avatarCy = 432;
-  const avatarR = 44;
+  // ── Default cover (no game) ───────────────────────────────────────────────
+  if (!game) {
+    const defaultSvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#020817"/>
+      <stop offset="100%" stop-color="#0d1424"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f97316" stop-opacity="0.07"/>
+      <stop offset="100%" stop-color="#f97316" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#bg)"/>
+  <rect width="${W}" height="${H}" fill="url(#glow)"/>
+  <rect x="0" y="0" width="${W}" height="6" fill="#f97316"/>
+  <rect x="0" y="${H - 6}" width="${W}" height="6" fill="#f97316" opacity="0.4"/>
+  <text x="${W / 2}" y="260" fill="#ffffff" text-anchor="middle" font-size="96" font-weight="900" font-family="${SVG_FONT_STACK}">WKND</text>
+  <text x="${W / 2}" y="316" fill="#f97316" text-anchor="middle" font-size="24" font-weight="700" font-family="${SVG_FONT_STACK}">BASKETBALL LEAGUE</text>
+  <line x1="400" y1="350" x2="800" y2="350" stroke="#1e293b" stroke-width="2"/>
+  <text x="${W / 2}" y="390" fill="#334155" text-anchor="middle" font-size="18" font-weight="600" font-family="${SVG_FONT_STACK}">LIVE SCORES · STATS · RECAPS</text>
+</svg>`);
+    let logoOverlay = null;
+    const logoPath = resolveSocialCoverLogoPath();
+    if (logoPath) {
+      try {
+        logoOverlay = await sharp(logoPath).resize({ width: 220, height: 44, fit: 'contain', withoutEnlargement: true }).png().toBuffer();
+      } catch (_) {}
+    }
+    return sharp(defaultSvg)
+      .composite(logoOverlay ? [{ input: logoOverlay, left: 40, top: 28 }] : [])
+      .png({ compressionLevel: 9 })
+      .toBuffer();
+  }
+
+  // ── Game cover ────────────────────────────────────────────────────────────
+  const teamA = (Array.isArray(teams) ? teams : []).find((t) => t.id === game.teamAId) || null;
+  const teamB = (Array.isArray(teams) ? teams : []).find((t) => t.id === game.teamBId) || null;
+  const colorA = escapeHtml(String(teamA?.color || '#10b981'));
+  const colorB = escapeHtml(String(teamB?.color || '#3b82f6'));
+  const teamAName = escapeHtml(String(game.teamAName || 'HOME').toUpperCase());
+  const teamBName = escapeHtml(String(game.teamBName || 'AWAY').toUpperCase());
+  const teamAScore = Number(game.teamAScore || 0);
+  const teamBScore = Number(game.teamBScore || 0);
+  const dateText = escapeHtml(String(game.date || '').trim().split('T')[0].replace(/\s+\d{1,2}:\d{2}.*$/i, ''));
+
+  const winA = teamAScore > teamBScore;
+  const winB = teamBScore > teamAScore;
+  const resultLine = winA ? `${teamAName} WINS` : winB ? `${teamBName} WINS` : 'FINAL · DRAW';
+  const resultColor = winA ? colorA : winB ? colorB : '#475569';
+
+  // POTG
+  const potg = derivePlayerOfTheGameFromState(game, teams);
+  const potgName = escapeHtml(normalizeSocialCoverText(potg?.name || ''));
+  const potgStats = escapeHtml(normalizeSocialCoverText(potg?.statsLine || ''));
+  const potgMeta = escapeHtml(normalizeSocialCoverText(`#${potg?.number || '–'}  ·  ${potg?.teamName || ''}`));
+  const potgInitials = escapeHtml(getInitials(potg?.name || '?'));
+  const potgColor = escapeHtml(String(potg?.teamColor || '#f97316'));
+  const potgNameSize = !potgName ? 44 : potgName.length <= 18 ? 46 : potgName.length <= 24 ? 38 : 30;
+
+  // Avatar dims (left-anchored in POTG zone)
+  const avatarR = 68;
+  const avatarCx = 92;
+  const avatarCy = 462;
   const avatarSize = avatarR * 2;
-  const avatarLeft = avatarCx - avatarR;
-  const avatarTop = avatarCy - avatarR;
+
+  // Team-name adaptive font size
+  const teamNameSize = Math.max(teamAName.length, teamBName.length) <= 10 ? 28 : 22;
+
   let logoOverlay = null;
   let avatarOverlay = null;
   const logoPath = resolveSocialCoverLogoPath();
@@ -1336,81 +1422,140 @@ async function buildSocialCoverPng(game, teams = [], baseOrigin = '') {
   if (logoPath) {
     try {
       logoOverlay = await sharp(logoPath)
-        .resize({ width: 220, height: 44, fit: 'contain', withoutEnlargement: true })
+        .resize({ width: 200, height: 40, fit: 'contain', withoutEnlargement: true })
         .png()
         .toBuffer();
-    } catch (_) {
-      logoOverlay = null;
-    }
+    } catch (_) {}
   }
 
   if (potg?.pictureUrl) {
     try {
-      const avatarSource = await readImageBufferFromSource(potg.pictureUrl, baseOrigin);
-      if (avatarSource) {
+      const src = await readImageBufferFromSource(potg.pictureUrl, baseOrigin);
+      if (src) {
         const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarR}" cy="${avatarR}" r="${avatarR}" fill="#fff"/></svg>`);
-        avatarOverlay = await sharp(avatarSource)
+        avatarOverlay = await sharp(src)
           .rotate()
           .resize(avatarSize, avatarSize, { fit: 'cover', position: 'centre' })
           .composite([{ input: mask, blend: 'dest-in' }])
           .png({ compressionLevel: 9 })
           .toBuffer();
       }
-    } catch (_) {
-      avatarOverlay = null;
-    }
+    } catch (_) {}
   }
 
-  const svg = Buffer.from(`
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  const svg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0f172a"/>
-      <stop offset="100%" stop-color="#1e293b"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020817"/>
+      <stop offset="100%" stop-color="#0b1220"/>
     </linearGradient>
-    <pattern id="diag" width="52" height="52" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
-      <rect width="26" height="52" fill="rgba(255,255,255,0.05)"/>
-    </pattern>
+    <linearGradient id="tintA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${colorA}" stop-opacity="0.13"/>
+      <stop offset="100%" stop-color="${colorA}" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="tintB" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${colorB}" stop-opacity="0"/>
+      <stop offset="100%" stop-color="${colorB}" stop-opacity="0.13"/>
+    </linearGradient>
+    <linearGradient id="potgFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020817" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#020817" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="nameClipA"><rect x="0" y="0" width="530" height="200"/></clipPath>
+    <clipPath id="nameClipB"><rect x="670" y="0" width="530" height="200"/></clipPath>
   </defs>
+
+  <!-- Background -->
   <rect width="${W}" height="${H}" fill="url(#bg)"/>
-  <rect width="${W}" height="${H}" fill="url(#diag)"/>
+  <rect width="600" height="${H}" fill="url(#tintA)"/>
+  <rect x="600" width="600" height="${H}" fill="url(#tintB)"/>
 
-  <rect x="0" y="0" width="${W / 2}" height="6" fill="${escapeHtml(colorA)}"/>
-  <rect x="${W / 2}" y="0" width="${W / 2}" height="6" fill="${escapeHtml(colorB)}"/>
-  <rect x="0" y="${H - 6}" width="${W / 2}" height="6" fill="${escapeHtml(colorA)}"/>
-  <rect x="${W / 2}" y="${H - 6}" width="${W / 2}" height="6" fill="${escapeHtml(colorB)}"/>
+  <!-- Top bars -->
+  <rect x="0" y="0" width="600" height="6" fill="${colorA}"/>
+  <rect x="600" y="0" width="600" height="6" fill="${colorB}"/>
 
-  <rect x="1000" y="28" width="160" height="32" rx="8" fill="#1e293b"/>
+  <!-- Side accent bars -->
+  <rect x="0" y="6" width="5" height="${H - 12}" fill="${colorA}" opacity="0.65"/>
+  <rect x="${W - 5}" y="6" width="5" height="${H - 12}" fill="${colorB}" opacity="0.65"/>
 
-  <text x="${W - 44}" y="56" fill="#94a3b8" text-anchor="end" font-size="24" font-family="${SVG_FONT_STACK}">${escapeHtml(dateText)}</text>
+  <!-- Bottom bars -->
+  <rect x="0" y="${H - 6}" width="600" height="6" fill="${colorA}" opacity="0.5"/>
+  <rect x="600" y="${H - 6}" width="600" height="6" fill="${colorB}" opacity="0.5"/>
 
-  <text x="80" y="140" fill="${escapeHtml(colorA)}" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamAName)}</text>
-  <text x="80" y="300" fill="#ffffff" font-size="170" font-family="${SVG_FONT_STACK}" font-weight="800">${teamAScore}</text>
+  <!-- WKND brand top-left -->
+  <text x="52" y="50" fill="#ffffff" font-size="17" font-weight="800" font-family="${SVG_FONT_STACK}">WKND</text>
+  <text x="52" y="66" fill="${colorA}" font-size="8" font-weight="700" font-family="${SVG_FONT_STACK}">BASKETBALL</text>
 
-  <text x="${W - 80}" y="140" fill="${escapeHtml(colorB)}" text-anchor="end" font-size="44" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(teamBName)}</text>
-  <text x="${W - 80}" y="300" fill="#ffffff" text-anchor="end" font-size="170" font-family="${SVG_FONT_STACK}" font-weight="800">${teamBScore}</text>
+  <!-- ── SCORE ZONE (y: 72–368) ── -->
 
-  <text x="${W / 2}" y="238" fill="#334155" text-anchor="middle" font-size="56" font-family="${SVG_FONT_STACK}" font-weight="700">VS</text>
-  <text x="${W / 2}" y="310" fill="#64748b" text-anchor="middle" font-size="40" font-family="${SVG_FONT_STACK}">${escapeHtml(resultText)}</text>
-  <line x1="64" y1="352" x2="1136" y2="352" stroke="#334155" stroke-width="3"/>
+  <!-- Team A name -->
+  <text x="290" y="118" fill="${colorA}" text-anchor="middle" font-size="${teamNameSize}" font-weight="700" font-family="${SVG_FONT_STACK}" clip-path="url(#nameClipA)">${teamAName}</text>
 
+  <!-- Team A score -->
+  <text x="290" y="308" fill="${winA ? '#ffffff' : '#94a3b8'}" text-anchor="middle" font-size="152" font-weight="900" font-family="${SVG_FONT_STACK}">${teamAScore}</text>
+
+  <!-- Team A winner underline -->
+  ${winA ? `<rect x="168" y="320" width="244" height="5" rx="2.5" fill="${colorA}"/>` : ''}
+
+  <!-- Center vertical divider -->
+  <line x1="600" y1="78" x2="600" y2="362" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Center: FINAL label -->
+  <text x="600" y="154" fill="#334155" text-anchor="middle" font-size="13" font-weight="700" font-family="${SVG_FONT_STACK}">FINAL SCORE</text>
+
+  <!-- Center: result line -->
+  <text x="600" y="176" fill="${resultColor}" text-anchor="middle" font-size="12" font-weight="700" font-family="${SVG_FONT_STACK}">${resultLine}</text>
+
+  <!-- VS circle -->
+  <circle cx="600" cy="248" r="30" fill="#0b1624" stroke="#1e293b" stroke-width="1"/>
+  <text x="600" y="254" fill="#334155" text-anchor="middle" font-size="14" font-weight="700" font-family="${SVG_FONT_STACK}">VS</text>
+
+  <!-- Team B name -->
+  <text x="910" y="118" fill="${colorB}" text-anchor="middle" font-size="${teamNameSize}" font-weight="700" font-family="${SVG_FONT_STACK}" clip-path="url(#nameClipB)">${teamBName}</text>
+
+  <!-- Team B score -->
+  <text x="910" y="308" fill="${winB ? '#ffffff' : '#94a3b8'}" text-anchor="middle" font-size="152" font-weight="900" font-family="${SVG_FONT_STACK}">${teamBScore}</text>
+
+  <!-- Team B winner underline -->
+  ${winB ? `<rect x="788" y="320" width="244" height="5" rx="2.5" fill="${colorB}"/>` : ''}
+
+  <!-- Separator -->
+  <line x1="40" y1="362" x2="${W - 40}" y2="362" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ── POTG ZONE (y: 362–562) ── -->
   ${potg ? `
-  <text x="${W / 2}" y="368" fill="#f97316" text-anchor="middle" font-size="24" font-family="${SVG_FONT_STACK}" font-weight="700">PLAYER OF THE GAME</text>
-  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 4}" fill="${escapeHtml(potgTeamColor)}66"/>
-  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 1}" fill="#0b1220"/>
-  ${avatarOverlay ? '' : `<text x="${avatarCx}" y="${avatarCy + 12}" text-anchor="middle" fill="#f8fafc" font-size="36" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgInitial)}</text>`}
-  <text x="${W / 2}" y="514" fill="#94a3b8" text-anchor="middle" font-size="24" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(potgMeta)}</text>
-  <text x="${W / 2}" y="554" fill="#ffffff" text-anchor="middle" font-size="56" font-family="${SVG_FONT_STACK}" font-weight="800">${escapeHtml(potgName)}</text>
-  <text x="${W / 2}" y="584" fill="#e2e8f0" text-anchor="middle" font-size="36" font-family="${SVG_FONT_STACK}" font-weight="700">${escapeHtml(potgStats)}</text>
-  ` : ''}
+  <!-- Avatar glow rings -->
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 14}" fill="${potgColor}" fill-opacity="0.06"/>
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 6}" fill="${potgColor}" fill-opacity="0.10"/>
+  <!-- Avatar base (filled with dark if no photo) -->
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR}" fill="#0b1220"/>
+  ${!avatarOverlay ? `<text x="${avatarCx}" y="${avatarCy + 14}" text-anchor="middle" fill="#334155" font-size="40" font-weight="800" font-family="${SVG_FONT_STACK}">${potgInitials}</text>` : ''}
+  <!-- Avatar ring -->
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 2}" fill="none" stroke="${potgColor}" stroke-width="2.5"/>
 
-  ${snippetText ? `<text x="${W / 2}" y="610" fill="#475569" text-anchor="middle" font-size="20" font-style="italic" font-family="${SVG_FONT_STACK}">${escapeHtml(snippetText)}</text>` : ''}
-</svg>
-  `);
+  <!-- POTG text -->
+  <text x="192" y="398" fill="#f97316" font-size="13" font-weight="700" font-family="${SVG_FONT_STACK}">PLAYER OF THE GAME</text>
+  <text x="192" y="${398 + potgNameSize + 10}" fill="#ffffff" font-size="${potgNameSize}" font-weight="800" font-family="${SVG_FONT_STACK}">${potgName}</text>
+  <text x="192" y="${398 + potgNameSize + 10 + 36}" fill="#e2e8f0" font-size="24" font-weight="700" font-family="${SVG_FONT_STACK}">${potgStats}</text>
+  <text x="192" y="${398 + potgNameSize + 10 + 36 + 28}" fill="#64748b" font-size="16" font-family="${SVG_FONT_STACK}">${potgMeta}</text>
+  ` : `
+  <!-- No POTG: show writeup snippet if available -->
+  <text x="${W / 2}" y="468" fill="#334155" text-anchor="middle" font-size="18" font-weight="600" font-family="${SVG_FONT_STACK}">WKNDBASKETBALL.COM</text>
+  `}
+
+  <!-- POTG zone bottom fade -->
+  <rect x="0" y="468" width="${W}" height="94" fill="url(#potgFade)"/>
+
+  <!-- Footer separator -->
+  <line x1="40" y1="562" x2="${W - 40}" y2="562" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Footer text -->
+  <text x="${W / 2}" y="596" fill="#2d3f55" text-anchor="middle" font-size="12" font-weight="600" font-family="${SVG_FONT_STACK}">WKNDBASKETBALL.COM</text>
+</svg>`);
 
   const layers = [];
   if (avatarOverlay) {
-    layers.push({ input: avatarOverlay, left: avatarLeft, top: avatarTop });
+    layers.push({ input: avatarOverlay, left: avatarCx - avatarR, top: avatarCy - avatarR });
   }
   if (logoOverlay) {
     layers.push({ input: logoOverlay, left: 40, top: 28 });
@@ -1592,107 +1737,163 @@ async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOri
   requireSharp();
   const W = 1200;
   const H = 630;
+
   const base = await sharp(customImageBuffer)
     .rotate()
     .resize(W, H, { fit: 'cover', position: 'centre' })
     .png({ compressionLevel: 9 })
     .toBuffer();
 
-  const teamA = (Array.isArray(teams) ? teams : []).find((team) => team.id === game?.teamAId) || null;
-  const teamB = (Array.isArray(teams) ? teams : []).find((team) => team.id === game?.teamBId) || null;
-  const colorA = String(teamA?.color || '#10b981');
-  const colorB = String(teamB?.color || '#ef4444');
+  const teamA = (Array.isArray(teams) ? teams : []).find((t) => t.id === game?.teamAId) || null;
+  const teamB = (Array.isArray(teams) ? teams : []).find((t) => t.id === game?.teamBId) || null;
+  const colorA = escapeHtml(String(teamA?.color || '#10b981'));
+  const colorB = escapeHtml(String(teamB?.color || '#3b82f6'));
+  const teamAName = escapeHtml(String(game?.teamAName || 'HOME').toUpperCase());
+  const teamBName = escapeHtml(String(game?.teamBName || 'AWAY').toUpperCase());
+  const teamAScore = Number(game?.teamAScore || 0);
+  const teamBScore = Number(game?.teamBScore || 0);
+  const dateText = escapeHtml(String(game?.date || '').trim().split('T')[0].replace(/\s+\d{1,2}:\d{2}.*$/i, ''));
+  const winA = teamAScore > teamBScore;
+  const winB = teamBScore > teamAScore;
+  const resultLine = winA ? `${teamAName} WINS` : winB ? `${teamBName} WINS` : 'FINAL · DRAW';
+  const resultColor = winA ? colorA : winB ? colorB : '#64748b';
+  const isOT = !!(game?.overtime || game?.ot || game?.isOT);
+  const finalLabel = escapeHtml(isOT ? 'FINAL / OT' : 'FINAL SCORE');
 
-  const scoreTextRight = W - 34;
-  const scoreTextTop = H - 102;
-  const scoreLineGap = 30;
-  const scoreBarW = 260;
-  const scoreBarH = 8;
-  const scoreBarX = scoreTextRight - scoreBarW;
-  const scoreBarY = scoreTextTop + 46;
   const potg = derivePlayerOfTheGameFromState(game, teams);
+  const potgName = escapeHtml(normalizeSocialCoverText(potg?.name || ''));
+  const potgStats = escapeHtml(normalizeSocialCoverText(potg?.statsLine || ''));
+  const potgMeta = escapeHtml(normalizeSocialCoverText(`#${potg?.number || '–'}  ·  ${potg?.teamName || ''}`));
+  const potgInitials = escapeHtml(getInitials(potg?.name || '?'));
+  const potgColor = escapeHtml(String(potg?.teamColor || '#f97316'));
+  const potgNameSize = !potgName ? 38 : potgName.length <= 18 ? 40 : potgName.length <= 24 ? 34 : 28;
 
-  const potgBlockTop = H - 130;
-  const potgBlockHeight = 72;
-  const potgLabelY = potgBlockTop + 14;
-  const potgNameY = potgBlockTop + 44;
-  const potgStatsY = potgBlockTop + 66;
-  const avatarX = 64;
-  const avatarY = potgBlockTop + (potgBlockHeight / 2);
-  const avatarR = potgBlockHeight / 2;
+  // Avatar in POTG zone
+  const avatarR = 60;
+  const avatarCx = 88;
+  const avatarCy = 522;
   const avatarSize = avatarR * 2;
-  const avatarLeft = avatarX - avatarR;
-  const avatarTop = avatarY - avatarR;
-  const contentLeft = avatarX + avatarR + 16;
+
   let logoOverlay = null;
+  let avatarOverlay = null;
   const logoPath = resolveSocialCoverLogoPath();
 
   if (logoPath) {
     try {
       logoOverlay = await sharp(logoPath)
-        .resize({ width: 220, height: 44, fit: 'contain', withoutEnlargement: true })
+        .resize({ width: 180, height: 36, fit: 'contain', withoutEnlargement: true })
         .png()
         .toBuffer();
-    } catch (_) {
-      logoOverlay = null;
-    }
+    } catch (_) {}
   }
 
-  const avatarBaseSvg = Buffer.from(`
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-  ${potg ? `
-  <circle cx="${avatarX}" cy="${avatarY}" r="${avatarR + 3}" fill="${escapeHtml(String(potg.teamColor || '#f97316'))}66"/>
-  <circle cx="${avatarX}" cy="${avatarY}" r="${avatarR}" fill="#0b1220"/>
-  ` : ''}
-</svg>
-  `);
-
-  const compositeLayers = [{ input: avatarBaseSvg, top: 0, left: 0 }];
   if (potg?.pictureUrl) {
-    const avatarSource = await readImageBufferFromSource(potg.pictureUrl, baseOrigin);
-    if (avatarSource) {
-      const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarR}" cy="${avatarR}" r="${avatarR}" fill="#fff"/></svg>`);
-      const clippedAvatar = await sharp(avatarSource)
-        .rotate()
-        .resize(avatarSize, avatarSize, { fit: 'cover', position: 'centre' })
-        .composite([{ input: mask, blend: 'dest-in' }])
-        .png({ compressionLevel: 9 })
-        .toBuffer();
-      compositeLayers.push({ input: clippedAvatar, top: avatarTop, left: avatarLeft });
-    }
+    try {
+      const src = await readImageBufferFromSource(potg.pictureUrl, baseOrigin);
+      if (src) {
+        const mask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarR}" cy="${avatarR}" r="${avatarR}" fill="#fff"/></svg>`);
+        avatarOverlay = await sharp(src)
+          .rotate()
+          .resize(avatarSize, avatarSize, { fit: 'cover', position: 'centre' })
+          .composite([{ input: mask, blend: 'dest-in' }])
+          .png({ compressionLevel: 9 })
+          .toBuffer();
+      }
+    } catch (_) {}
   }
 
-  const overlaySvg = Buffer.from(`
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  const overlaySvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#020617" flood-opacity="0.9"/>
+    <filter id="txt" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="1" stdDeviation="4" flood-color="#000000" flood-opacity="0.9"/>
     </filter>
-    <linearGradient id="bottomFade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="rgba(2,6,23,0.0)"/>
-      <stop offset="100%" stop-color="rgba(2,6,23,0.94)"/>
+    <linearGradient id="topFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020817" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#020817" stop-opacity="0"/>
     </linearGradient>
+    <linearGradient id="botFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020817" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#020817" stop-opacity="0.94"/>
+    </linearGradient>
+    <filter id="card" x="-40%" y="-30%" width="180%" height="200%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.72"/>
+    </filter>
+    <linearGradient id="cardSheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="scoreClip"><rect x="955" y="474" width="200" height="96" rx="12"/></clipPath>
   </defs>
 
-  <rect x="0" y="${Math.round(H * 0.75)}" width="${W}" height="${Math.round(H * 0.25)}" fill="url(#bottomFade)"/>
+  <!-- Top gradient (header readability) -->
+  <rect x="0" y="0" width="${W}" height="160" fill="url(#topFade)"/>
 
-  <text x="${scoreTextRight}" y="${scoreTextTop}" text-anchor="end" fill="${escapeHtml(colorA)}" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamAName || '').toUpperCase())} ${Number(game?.teamAScore || 0)}</text>
-  <text x="${scoreTextRight}" y="${scoreTextTop + scoreLineGap}" text-anchor="end" fill="${escapeHtml(colorB)}" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">${escapeHtml(String(game?.teamBName || '').toUpperCase())} ${Number(game?.teamBScore || 0)}</text>
+  <!-- Bottom gradient (POTG readability) -->
+  <rect x="0" y="400" width="${W}" height="230" fill="url(#botFade)"/>
 
-  <rect x="${scoreBarX}" y="${scoreBarY}" width="${scoreBarW / 2}" height="${scoreBarH}" fill="${escapeHtml(colorA)}"/>
-  <rect x="${scoreBarX + (scoreBarW / 2)}" y="${scoreBarY}" width="${scoreBarW / 2}" height="${scoreBarH}" fill="${escapeHtml(colorB)}"/>
+  <!-- ── BORDERS (match auto-generated cover) ── -->
+  <rect x="0" y="0" width="600" height="6" fill="${colorA}"/>
+  <rect x="600" y="0" width="600" height="6" fill="${colorB}"/>
+  <rect x="0" y="6" width="5" height="${H - 12}" fill="${colorA}" opacity="0.65"/>
+  <rect x="${W - 5}" y="6" width="5" height="${H - 12}" fill="${colorB}" opacity="0.65"/>
+  <rect x="0" y="${H - 6}" width="600" height="6" fill="${colorA}" opacity="0.5"/>
+  <rect x="600" y="${H - 6}" width="600" height="6" fill="${colorB}" opacity="0.5"/>
 
+  <!-- WKND brand -->
+  <text x="52" y="48" fill="#ffffff" font-size="16" font-weight="800" font-family="${SVG_FONT_STACK}" filter="url(#txt)">WKND</text>
+  <text x="52" y="63" fill="${colorA}" font-size="8" font-weight="700" font-family="${SVG_FONT_STACK}" filter="url(#txt)">BASKETBALL</text>
+
+  <!-- ── Score card: one unified card, bottom-right ──
+       x=955–1155 (200px), y=474–570. Center y=522 = POTG avatarCy.
+       Col divider at x=1055. Left col center x=1005, right x=1105.  -->
+
+  <!-- Card: shadow + dark glass body -->
+  <rect x="955" y="474" width="200" height="96" rx="12" fill="#040c18" fill-opacity="0.80" filter="url(#card)" stroke="#ffffff" stroke-opacity="0.10" stroke-width="1"/>
+
+  <!-- Column color tints — winner more saturated, loser very light -->
+  <rect x="955" y="474" width="100" height="96" fill="${colorA}" fill-opacity="${winA ? '0.38' : '0.10'}" clip-path="url(#scoreClip)"/>
+  <rect x="1055" y="474" width="100" height="96" fill="${colorB}" fill-opacity="${winB ? '0.38' : '0.10'}" clip-path="url(#scoreClip)"/>
+
+  <!-- Glass sheen over the color tints -->
+  <rect x="956" y="475" width="198" height="26" rx="11" fill="url(#cardSheen)"/>
+
+  <!-- Row divider -->
+  <line x1="963" y1="500" x2="1147" y2="500" stroke="#ffffff" stroke-width="1" stroke-opacity="0.08"/>
+
+  <!-- Column divider -->
+  <line x1="1055" y1="482" x2="1055" y2="562" stroke="#ffffff" stroke-width="1" stroke-opacity="0.08"/>
+
+  <!-- Row 1: team names -->
+  <text x="1005" y="493" fill="#ffffff" text-anchor="middle" font-size="12" font-weight="700" font-family="${SVG_FONT_STACK}" clip-path="url(#scoreClip)" filter="url(#txt)" opacity="${winA ? '1' : '0.45'}">${teamAName}</text>
+  <text x="1105" y="493" fill="#ffffff" text-anchor="middle" font-size="12" font-weight="700" font-family="${SVG_FONT_STACK}" clip-path="url(#scoreClip)" filter="url(#txt)" opacity="${winB ? '1' : '0.45'}">${teamBName}</text>
+
+  <!-- Row 2: big scores — 48px, centered in lower zone, equal 12px top+bottom padding -->
+  <text x="1005" y="548" fill="#ffffff" text-anchor="middle" font-size="48" font-weight="900" font-family="${SVG_FONT_STACK}" clip-path="url(#scoreClip)" filter="url(#txt)" opacity="${winA ? '1' : '0.38'}">${teamAScore}</text>
+  <text x="1105" y="548" fill="#ffffff" text-anchor="middle" font-size="48" font-weight="900" font-family="${SVG_FONT_STACK}" clip-path="url(#scoreClip)" filter="url(#txt)" opacity="${winB ? '1' : '0.38'}">${teamBScore}</text>
+
+  <!-- ── POTG ZONE ── -->
   ${potg ? `
-  <circle cx="${avatarX}" cy="${avatarY}" r="${avatarR}" fill="none" stroke="${escapeHtml(String(potg.teamColor || '#f97316'))}" stroke-width="2"/>
-  ${compositeLayers.length === 1 ? `<text x="${avatarX}" y="${avatarY + 12}" text-anchor="middle" fill="#f8fafc" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="800" filter="url(#shadow)">${escapeHtml(getInitials(potg.name))}</text>` : ''}
-  <text x="${contentLeft}" y="${potgLabelY}" fill="#f97316" font-size="14" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">PLAYER OF THE GAME</text>
-  <text x="${contentLeft}" y="${potgNameY}" fill="#ffffff" font-size="30" font-family="${SVG_FONT_STACK}" font-weight="800" filter="url(#shadow)">${escapeHtml(potg.name)}</text>
-  <text x="${contentLeft}" y="${potgStatsY}" fill="#e2e8f0" font-size="18" font-family="${SVG_FONT_STACK}" font-weight="700" filter="url(#shadow)">${escapeHtml(potg.statsLine)}</text>
-  ` : ''}
-</svg>
-  `);
+  <!-- Avatar glow rings -->
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 12}" fill="${potgColor}" fill-opacity="0.08"/>
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 5}" fill="${potgColor}" fill-opacity="0.12"/>
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR}" fill="#020817" fill-opacity="0.7"/>
+  ${!avatarOverlay ? `<text x="${avatarCx}" y="${avatarCy + 12}" text-anchor="middle" fill="#475569" font-size="34" font-weight="800" font-family="${SVG_FONT_STACK}" filter="url(#txt)">${potgInitials}</text>` : ''}
+  <circle cx="${avatarCx}" cy="${avatarCy}" r="${avatarR + 2}" fill="none" stroke="${potgColor}" stroke-width="2" stroke-opacity="0.9"/>
 
-  const layers = [...compositeLayers, { input: overlaySvg, top: 0, left: 0 }];
+  <text x="180" y="452" fill="#f97316" font-size="13" font-weight="700" font-family="${SVG_FONT_STACK}" filter="url(#txt)">PLAYER OF THE GAME</text>
+  <text x="180" y="${452 + potgNameSize + 8}" fill="#ffffff" font-size="${potgNameSize}" font-weight="800" font-family="${SVG_FONT_STACK}" filter="url(#txt)">${potgName}</text>
+  <text x="180" y="${452 + potgNameSize + 8 + 32}" fill="#e2e8f0" font-size="22" font-weight="700" font-family="${SVG_FONT_STACK}" filter="url(#txt)">${potgStats}</text>
+  <text x="180" y="${452 + potgNameSize + 8 + 32 + 24}" fill="#94a3b8" font-size="15" font-family="${SVG_FONT_STACK}" filter="url(#txt)">${potgMeta}</text>
+  ` : ''}
+
+  <!-- Footer -->
+  <text x="${W / 2}" y="617" fill="#334155" text-anchor="middle" font-size="11" font-weight="600" font-family="${SVG_FONT_STACK}" filter="url(#txt)">WKNDBASKETBALL.COM</text>
+</svg>`);
+
+  const layers = [{ input: overlaySvg, top: 0, left: 0 }];
+  if (avatarOverlay) {
+    layers.push({ input: avatarOverlay, left: avatarCx - avatarR, top: avatarCy - avatarR });
+  }
   if (logoOverlay) {
     layers.push({ input: logoOverlay, left: 40, top: 28 });
   }

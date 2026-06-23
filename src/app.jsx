@@ -10385,7 +10385,7 @@
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#2d3f55';
                 ctx.font = 'bold 9px system-ui, sans-serif';
-                ctx.fillText('WKND BASKETBALL LEAGUE', W / 2, footerY + 21);
+                ctx.fillText('WKNDBASKETBALL.COM', W / 2, footerY + 21);
 
                 // ── Share or download ────────────────────────────────────────
                 const filename = `wknd-leaders-${entry.id}-${mode}.png`;
@@ -14482,33 +14482,17 @@
 
                                                                 {/* Social cover image */}
                                                                 <div className="flex items-start gap-3 bg-slate-900/60 border border-slate-800 rounded-xl p-3">
-                                                                    {/* Mini preview */}
-                                                                    <div className="shrink-0 w-[120px] h-[63px] rounded-lg overflow-hidden border border-slate-700 bg-slate-950">
-                                                                        {game.socialCoverDataUrl ? (
-                                                                            <div className="relative w-full h-full">
-                                                                                <img src={game.socialCoverDataUrl} alt="Custom social cover preview" className="w-full h-full object-cover" />
-                                                                                <div
-                                                                                    aria-hidden="true"
-                                                                                    className="pointer-events-none absolute left-0 right-0 bottom-0"
-                                                                                    style={{ height: '25%', background: 'linear-gradient(to top, rgba(2,6,23,0.94) 0%, rgba(2,6,23,0) 100%)' }}
-                                                                                />
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="w-full h-full flex flex-col justify-between p-1.5" style={{ background: 'linear-gradient(135deg,#0f172a 60%,#1e293b)' }}>
-                                                                                <div className="flex justify-between items-center">
-                                                                                    <span className="text-[6px] font-black uppercase" style={{ color: teamAObj?.color || '#10b981' }}>{(game.teamAName || '').slice(0, 6)}</span>
-                                                                                    <span className="text-[6px] text-slate-500">vs</span>
-                                                                                    <span className="text-[6px] font-black uppercase" style={{ color: teamBObj?.color || '#ef4444' }}>{(game.teamBName || '').slice(0, 6)}</span>
-                                                                                </div>
-                                                                                <div className="flex justify-between items-end px-1">
-                                                                                    <span className="text-[18px] font-black leading-none text-white">{game.teamAScore}</span>
-                                                                                    <span className="text-[18px] font-black leading-none text-white">{game.teamBScore}</span>
-                                                                                </div>
-                                                                                <div className="flex">
-                                                                                    <div className="h-0.5 flex-1 rounded-l" style={{ background: teamAObj?.color || '#10b981' }} />
-                                                                                    <div className="h-0.5 flex-1 rounded-r" style={{ background: teamBObj?.color || '#ef4444' }} />
-                                                                                </div>
-                                                                            </div>
+                                                                    {/* Live server-rendered preview */}
+                                                                    <div className="shrink-0 w-[180px] h-[95px] rounded-lg overflow-hidden border border-slate-700 bg-slate-950 relative">
+                                                                        <img
+                                                                            key={`${game.id}-${game.socialCoverDataUrl ? `c${String(game.socialCoverDataUrl).length}` : 'auto'}`}
+                                                                            src={`/api/social-cover/${encodeURIComponent(game.id)}.png?v=${game.socialCoverDataUrl ? `c${String(game.socialCoverDataUrl).length}` : 'auto'}`}
+                                                                            alt="Social cover preview"
+                                                                            className="w-full h-full object-cover"
+                                                                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                                        />
+                                                                        {game.socialCoverDataUrl && (
+                                                                            <div className="absolute bottom-1 right-1 bg-amber-500/80 text-[7px] font-bold text-black px-1 py-0.5 rounded leading-none">CUSTOM</div>
                                                                         )}
                                                                     </div>
                                                                     <div className="flex-1 min-w-0">
