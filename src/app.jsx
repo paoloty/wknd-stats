@@ -5446,7 +5446,7 @@
                     teamAScore: Number(game?.teamAScore || 0),
                     teamBScore: Number(game?.teamBScore || 0),
                     underReview: Boolean(game?.underReview),
-                    playerStats: game?.playerStats || {},
+                    playerStats: detail.playerStats || game?.playerStats || {},
                     gameWriteup: game?.gameWriteup || '',
                     potgWriteup: game?.potgWriteup || '',
                     youtubeUrl: game?.youtubeUrl || ''
@@ -6333,7 +6333,7 @@
 
                             const mappedPlayerStats = {};
 
-                            Object.entries(game.playerStats).forEach(([impPlayerId, stats]) => {
+                            Object.entries(game.playerStats || {}).forEach(([impPlayerId, stats]) => {
                                 let impPlayerObj = null;
                                 for (let t of parsedData.teams) {
                                     impPlayerObj = t.players.find(p => p.id === impPlayerId);
