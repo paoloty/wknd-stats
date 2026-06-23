@@ -141,6 +141,7 @@
             // Added State to toggle roster view mode between 'averages' and 'totals'
             const [rosterViewMode, setRosterViewMode] = useState('averages');
             const [selectedRosterPlayer, setSelectedRosterPlayer] = useState(null);
+            const [selectedPlayerGameStats, setSelectedPlayerGameStats] = useState(null);
             const [standingsStatMode, setStandingsStatMode] = useState('totals');
             const [leadersStatMode, setLeadersStatMode] = useState('perGame');
             const [awardsPagePublicEnabled, setAwardsPagePublicEnabled] = useState(false);
@@ -3284,10 +3285,18 @@
                     .then((data) => {
                         if (cancelled) return;
                         setGames((prev) => prev.map((g) =>
-                            g.id === selectedHistoryGameId
-                                ? { ...g, gameLog: data.gameLog || [], periodSnapshots: data.periodSnapshots || [], playerStats: data.playerStats || {}, _detailLoaded: true }
-                                : g
+                            g.id !== selectedHistoryGameId ? g :
+                            { ...g, gameLog: data.gameLog || [], periodSnapshots: data.periodSnapshots || [], playerStats: data.playerStats || {}, _detailLoaded: true }
                         ));
+                        // Re-evaluate tab for auto-detected POTG (manual POTG is handled at open time)
+                        if (!String(selectedHistoryGame?.manualPotgPlayerId || '').trim()) {
+                            const teamAObj = teams.find((t) => t.id === selectedHistoryGame?.teamAId);
+                            const teamBObj = teams.find((t) => t.id === selectedHistoryGame?.teamBId);
+                            const loadedGame = { ...selectedHistoryGame, playerStats: data.playerStats || {}, _detailLoaded: true };
+                            if (getPlayerOfTheGame(loadedGame, teamAObj, teamBObj)) {
+                                setHistoryDetailTab((prev) => prev === 'scoring' ? 'potg' : prev);
+                            }
+                        }
                     })
                     .catch(() => {});
                 return () => { cancelled = true; };
@@ -4244,6 +4253,17 @@
                 }
                 setHistoryWriteupInput(selectedHistoryGame?.gameWriteup || '');
             }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.gameWriteup : '']);
+
+            useEffect(() => {
+                const playerId = selectedRosterPlayer?.playerId;
+                if (!playerId) { setSelectedPlayerGameStats(null); return; }
+                let cancelled = false;
+                setSelectedPlayerGameStats(null);
+                apiRequest(`/api/players/${encodeURIComponent(playerId)}/game-stats`)
+                    .then((data) => { if (!cancelled) setSelectedPlayerGameStats(data.statsByGame || {}); })
+                    .catch(() => { if (!cancelled) setSelectedPlayerGameStats({}); });
+                return () => { cancelled = true; };
+            }, [selectedRosterPlayer?.playerId]);
 
             const AUTO_GENERATE_POTG_WRITEUP = false;
 
@@ -9854,15 +9874,15 @@
                 };
             };
 
-            const getPlayerRecentGamesSummaries = (teamId, playerId, limit = null) => {
+            const getPlayerRecentGamesSummaries = (teamId, playerId, limit = null, statsByGame = null) => {
                 if (!teamId || !playerId) return [];
 
-                const sortedGames = [...games]
+                const teamGames = games
                     .filter((g) => g.teamAId === teamId || g.teamBId === teamId)
-                    .sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a))
+                    .sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a));
                 const visibleGames = Number.isFinite(limit) && Number(limit) > 0
-                    ? sortedGames.slice(0, Number(limit))
-                    : sortedGames;
+                    ? teamGames.slice(0, Number(limit))
+                    : teamGames;
 
                 return visibleGames
                     .map((game) => {
@@ -9871,7 +9891,9 @@
                         const teamScore = isHome ? game.teamAScore : game.teamBScore;
                         const opponentScore = isHome ? game.teamBScore : game.teamAScore;
                         const explicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(playerId);
-                        const playerStats = game.playerStats?.[playerId] || null;
+                        const playerStats = statsByGame
+                            ? (statsByGame[game.id] || null)
+                            : (game.playerStats?.[playerId] || null);
                         const didPlay = !!playerStats && !explicitDnp;
 
                         return {
@@ -9895,7 +9917,7 @@
                 : null;
             const selectedRosterAthleteAverages = selectedRosterAthlete ? getAverages(selectedRosterAthlete) : null;
             const selectedRosterAthleteRecentGames = selectedRosterPlayer
-                ? getPlayerRecentGamesSummaries(selectedRosterPlayer.teamId, selectedRosterPlayer.playerId)
+                ? getPlayerRecentGamesSummaries(selectedRosterPlayer.teamId, selectedRosterPlayer.playerId, null, selectedPlayerGameStats)
                 : null;
 
             const getPlayerPerStyleScore = (stats = {}) => {
@@ -10525,9 +10547,15 @@
 
             const getDefaultHistoryDetailTab = (game) => {
                 if (!game) return 'scoring';
-                const teamAObj = teams.find((t) => t.id === game.teamAId);
-                const teamBObj = teams.find((t) => t.id === game.teamBId);
-                return getPlayerOfTheGame(game, teamAObj, teamBObj) ? 'potg' : 'scoring';
+                // manualPotgPlayerId is available from bootstrap — check it first
+                if (String(game.manualPotgPlayerId || '').trim()) return 'potg';
+                // Auto-detected POTG requires playerStats (lazy-loaded); default to scoring
+                if (game._detailLoaded) {
+                    const teamAObj = teams.find((t) => t.id === game.teamAId);
+                    const teamBObj = teams.find((t) => t.id === game.teamBId);
+                    return getPlayerOfTheGame(game, teamAObj, teamBObj) ? 'potg' : 'scoring';
+                }
+                return 'scoring';
             };
 
             const buildShareableGameLogUrl = (gameId) => {

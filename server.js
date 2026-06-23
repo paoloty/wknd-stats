@@ -776,6 +776,11 @@ const selectGamePlayerStatsByIdStmt = db.prepare(`
   FROM game_player_stats
   WHERE game_id = ?
 `);
+const selectGameStatsByPlayerIdStmt = db.prepare(`
+  SELECT game_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
+  FROM game_player_stats
+  WHERE player_id = ?
+`);
 const selectPlayerTeamIdStmt = db.prepare('SELECT team_id FROM players WHERE id = ?');
 const selectPlayerByIdAndTeamStmt = db.prepare(`
   SELECT id, team_id, name, number, positions, height, picture_url, birthday, email, social, contact, writeup
@@ -4275,6 +4280,25 @@ app.put('/api/players/:playerId/profile', async (req, res) => {
     console.error('PUT /api/players/:playerId/profile error:', error);
     res.status(500).json({ error: 'Failed to persist player profile.' });
   }
+});
+
+app.get('/api/players/:playerId/game-stats', (req, res) => {
+  const playerId = String(req.params.playerId || '').trim();
+  if (!playerId) { res.status(400).json({ error: 'playerId is required.' }); return; }
+  const rows = selectGameStatsByPlayerIdStmt.all(playerId);
+  const statsByGame = {};
+  rows.forEach((r) => {
+    statsByGame[r.game_id] = {
+      pts: toInt(r.pts), ast: toInt(r.ast), reb: toInt(r.reb),
+      stl: toInt(r.stl), blk: toInt(r.blk), to: toInt(r.turnover),
+      pf: toInt(r.pf), fg2m: toInt(r.fg2m), fg3m: toInt(r.fg3m),
+      fg2m_miss: toInt(r.fg2m_miss), fg3m_miss: toInt(r.fg3m_miss),
+      ftm: toInt(r.ftm), ft_miss: toInt(r.ft_miss),
+      min: String(r.minutes || '').trim()
+    };
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ statsByGame });
 });
 
 app.delete('/api/teams/:teamId', (req, res) => {
