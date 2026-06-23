@@ -4940,8 +4940,12 @@
             // session + action sync flowing across devices without manual refresh.
             useEffect(() => {
                 const fallback = window.setInterval(() => {
-                    pullActiveSessionSnapshot();
-                    fetchMissingLiveEvents();
+                    const socket = syncSocketRef.current;
+                    const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
+                    if (!socketIsOpen) {
+                        pullActiveSessionSnapshot();
+                        fetchMissingLiveEvents();
+                    }
                     flushPendingLiveEvents();
                     flushPendingActiveSessionSync();
                 }, 2500);
@@ -5349,6 +5353,7 @@
                             // Full-state saves should not resend embedded cover images.
                             // Covers are managed via dedicated endpoints and server-side preservation.
                             delete nextGame.socialCoverDataUrl;
+                            delete nextGame.socialCoverLen;
                             return nextGame;
                         });
                         const payload = await apiRequest('/api/state', {
@@ -10675,7 +10680,7 @@
                     });
 
                     setGames((prev) => prev.map((game) => (
-                        game.id === gameId ? { ...game, socialCoverDataUrl: dataUrl } : game
+                        game.id === gameId ? { ...game, socialCoverDataUrl: dataUrl, socialCoverLen: dataUrl ? dataUrl.length : 0 } : game
                     )));
                     showToast('Custom social cover uploaded for this game.', 'success');
                 } catch (error) {
@@ -10690,7 +10695,7 @@
                         method: 'DELETE'
                     });
                     setGames((prev) => prev.map((game) => (
-                        game.id === gameId ? { ...game, socialCoverDataUrl: '' } : game
+                        game.id === gameId ? { ...game, socialCoverDataUrl: '', socialCoverLen: 0 } : game
                     )));
                     showToast('Custom social cover removed. Using generated cover.', 'info');
                 } catch (error) {
@@ -14485,13 +14490,13 @@
                                                                     {/* Live server-rendered preview */}
                                                                     <div className="shrink-0 w-[180px] h-[95px] rounded-lg overflow-hidden border border-slate-700 bg-slate-950 relative">
                                                                         <img
-                                                                            key={`${game.id}-${game.socialCoverDataUrl ? `c${String(game.socialCoverDataUrl).length}` : 'auto'}`}
-                                                                            src={`/api/social-cover/${encodeURIComponent(game.id)}.png?v=${game.socialCoverDataUrl ? `c${String(game.socialCoverDataUrl).length}` : 'auto'}`}
+                                                                            key={`${game.id}-${(game.socialCoverLen || game.socialCoverDataUrl?.length) ? `c${game.socialCoverLen || game.socialCoverDataUrl.length}` : 'auto'}`}
+                                                                            src={`/api/social-cover/${encodeURIComponent(game.id)}.png?v=${(game.socialCoverLen || game.socialCoverDataUrl?.length) ? `c${game.socialCoverLen || game.socialCoverDataUrl.length}` : 'auto'}`}
                                                                             alt="Social cover preview"
                                                                             className="w-full h-full object-cover"
                                                                             onError={(e) => { e.currentTarget.style.display = 'none'; }}
                                                                         />
-                                                                        {game.socialCoverDataUrl && (
+                                                                        {(game.socialCoverLen > 0 || game.socialCoverDataUrl) && (
                                                                             <div className="absolute bottom-1 right-1 bg-amber-500/80 text-[7px] font-bold text-black px-1 py-0.5 rounded leading-none">CUSTOM</div>
                                                                         )}
                                                                     </div>
@@ -14512,7 +14517,7 @@
                                                                                 <Icons.Image />
                                                                                 Download Cover
                                                                             </button>
-                                                                            {game.socialCoverDataUrl && (
+                                                                            {(game.socialCoverLen > 0 || game.socialCoverDataUrl) && (
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => handleClearCustomCover(game.id)}

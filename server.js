@@ -756,10 +756,13 @@ const selectPlayersStmt = db.prepare(`
   ORDER BY p.sort_order ASC, p.id ASC
 `);
 const selectGamesStmt = db.prepare(`
-  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review
+  SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, LENGTH(social_cover_data_url) AS social_cover_data_len, dnp_players_json, under_review
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
+const selectGameCoverByIdStmt = db.prepare('SELECT social_cover_data_url FROM games WHERE id = ?');
+const selectAllGameCoversStmt = db.prepare('SELECT id, social_cover_data_url FROM games');
+const updateGameCoverStmt = db.prepare('UPDATE games SET social_cover_data_url = ? WHERE id = ?');
 const selectGamePlayerStatsStmt = db.prepare(`
   SELECT game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
   FROM game_player_stats
@@ -1199,7 +1202,7 @@ function getSocialImageVersion(game, teams = []) {
     String(game.teamBScore || ''),
     String(game.gameWriteup || ''),
     String(game.potgWriteup || ''),
-    String(game.socialCoverDataUrl || ''),
+    String(game.socialCoverLen || 0),
     String(game.manualPotgPlayerId || ''),
     String(potg?.playerId || ''),
     String(potg?.pictureUrl || ''),
@@ -1338,6 +1341,48 @@ function buildPlayerSocialMetaTags({ req, player, team }) {
     `<meta name="twitter:title" content="${escapeHtml(title)}">`,
     `<meta name="twitter:description" content="${escapeHtml(trimForMeta(description, 190))}">`,
     `<meta name="twitter:image" content="${escapeHtml(imageUrl)}">`
+  ].join('\n    ');
+}
+
+function buildStandingsSocialMetaTags({ req, state }) {
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const canonicalUrl = `${origin}/standings`;
+  const teams = state.teams || [];
+  const games = (state.games || []).filter(g =>
+    g.teamAScore != null && g.teamBScore != null &&
+    (Number(g.teamAScore) + Number(g.teamBScore)) > 0
+  );
+  const winsMap = {};
+  games.forEach(g => {
+    if (Number(g.teamAScore || 0) > Number(g.teamBScore || 0)) winsMap[g.teamAId] = (winsMap[g.teamAId] || 0) + 1;
+    if (Number(g.teamBScore || 0) > Number(g.teamAScore || 0)) winsMap[g.teamBId] = (winsMap[g.teamBId] || 0) + 1;
+  });
+  const leader = teams.map(t => ({ ...t, w: winsMap[t.id] || 0 })).sort((a, b) => b.w - a.w)[0];
+  const title = 'WKND Basketball League — Season Standings';
+  const description = leader?.w > 0
+    ? `${normalizeSocialCoverText(leader.name)} leads with ${leader.w} win${leader.w !== 1 ? 's' : ''}. See the full season standings.`
+    : 'View the current WKND Basketball League season standings.';
+  const imageUrl = `${origin}/api/social-cover/standings.png`;
+  return [
+    `<title>${escapeHtml(title)}</title>`,
+    `<meta name="description" content="${escapeHtml(trimForMeta(description, 190))}">`,
+    `<link rel="canonical" href="${escapeHtml(canonicalUrl)}">`,
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:site_name" content="WKND Basketball League">`,
+    `<meta property="og:locale" content="en_US">`,
+    `<meta property="og:title" content="${escapeHtml(title)}">`,
+    `<meta property="og:description" content="${escapeHtml(trimForMeta(description, 190))}">`,
+    `<meta property="og:url" content="${escapeHtml(canonicalUrl)}">`,
+    `<meta property="og:image" content="${escapeHtml(imageUrl)}">`,
+    `<meta property="og:image:secure_url" content="${escapeHtml(imageUrl)}">`,
+    `<meta property="og:image:type" content="image/png">`,
+    `<meta property="og:image:width" content="1200">`,
+    `<meta property="og:image:height" content="630">`,
+    `<meta property="og:image:alt" content="WKND Basketball League Season Standings">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${escapeHtml(title)}">`,
+    `<meta name="twitter:description" content="${escapeHtml(trimForMeta(description, 190))}">`,
+    `<meta name="twitter:image" content="${escapeHtml(imageUrl)}">`,
   ].join('\n    ');
 }
 
@@ -2035,6 +2080,122 @@ async function buildPlayerSocialCoverPng(player, team, baseOrigin = '') {
     .toBuffer();
 }
 
+async function buildStandingsSocialCoverPng(state) {
+  requireSharp();
+  const W = 1200, H = 630;
+  const teams = state.teams || [];
+  const games = (state.games || []).filter(g =>
+    g.teamAScore != null && g.teamBScore != null &&
+    (Number(g.teamAScore) + Number(g.teamBScore)) > 0
+  );
+
+  const standings = teams.map(team => {
+    const rec = {
+      name: normalizeSocialCoverText(team.name || 'Team'),
+      color: escapeHtml(String(team.color || '#f97316')),
+      wins: 0, losses: 0, gamesPlayed: 0, pointsFor: 0, pointsAgainst: 0
+    };
+    games.forEach(g => {
+      if (g.teamAId !== team.id && g.teamBId !== team.id) return;
+      const tf = g.teamAId === team.id ? (Number(g.teamAScore) || 0) : (Number(g.teamBScore) || 0);
+      const ta = g.teamAId === team.id ? (Number(g.teamBScore) || 0) : (Number(g.teamAScore) || 0);
+      rec.gamesPlayed++;
+      rec.pointsFor += tf;
+      rec.pointsAgainst += ta;
+      if (tf > ta) rec.wins++;
+      else if (tf < ta) rec.losses++;
+    });
+    const q = rec.pointsAgainst > 0 ? rec.pointsFor / rec.pointsAgainst : (rec.pointsFor > 0 ? Infinity : 1);
+    return { ...rec, quotient: q, pct: rec.gamesPlayed > 0 ? rec.wins / rec.gamesPlayed : 0 };
+  }).sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (a.losses !== b.losses) return a.losses - b.losses;
+    if (b.quotient !== a.quotient) return b.quotient - a.quotient;
+    return b.pointsFor - a.pointsFor;
+  });
+
+  const visible = standings.slice(0, 6);
+  const N = visible.length;
+  const topColor = visible[0]?.color || '#f97316';
+  const secondColor = visible[1]?.color || topColor;
+  const maxGP = standings.reduce((m, t) => Math.max(m, t.gamesPlayed), 0);
+
+  const headerH = 100;
+  const footerH = 42;
+  const contentH = H - headerH - footerH;
+  const rowH = N > 0 ? Math.min(94, Math.floor(contentH / N)) : 94;
+  const totalH = rowH * N;
+  const startY = headerH + Math.floor((contentH - totalH) / 2);
+
+  const rowsSvg = visible.map((team, i) => {
+    const rank = i + 1;
+    const isLeader = rank === 1;
+    const rowY = startY + i * rowH;
+    const midY = rowY + Math.floor(rowH / 2);
+    const { color, name, wins, losses, pct } = team;
+    const barW = Math.round(pct * 340);
+
+    return `
+    ${isLeader ? `
+    <rect x="40" y="${rowY}" width="1120" height="${rowH}" fill="${color}" fill-opacity="0.10"/>
+    <rect x="40" y="${rowY}" width="1120" height="2" fill="${color}" fill-opacity="0.45"/>` : ''}
+    <text x="68" y="${midY + 9}" text-anchor="middle" fill="${isLeader ? color : '#2d3a4a'}" font-size="${isLeader ? 28 : 20}" font-weight="900" font-family="${SVG_FONT_STACK}">${rank}</text>
+    <rect x="108" y="${rowY + 14}" width="4" height="${rowH - 28}" rx="2" fill="${color}" opacity="${isLeader ? '1' : '0.6'}"/>
+    <text x="126" y="${midY + 8}" fill="${isLeader ? '#ffffff' : '#94a3b8'}" font-size="${isLeader ? 22 : 18}" font-weight="${isLeader ? '800' : '600'}" font-family="${SVG_FONT_STACK}" clip-path="url(#nameClip)">${escapeHtml(name)}</text>
+    <text x="638" y="${midY - 6}" text-anchor="middle" fill="#2d3a4a" font-size="10" font-weight="700" font-family="${SVG_FONT_STACK}">W</text>
+    <text x="638" y="${midY + 14}" text-anchor="middle" fill="${isLeader ? '#ffffff' : '#e2e8f0'}" font-size="${isLeader ? 26 : 22}" font-weight="${isLeader ? '900' : '700'}" font-family="${SVG_FONT_STACK}">${wins}</text>
+    <text x="718" y="${midY - 6}" text-anchor="middle" fill="#2d3a4a" font-size="10" font-weight="700" font-family="${SVG_FONT_STACK}">L</text>
+    <text x="718" y="${midY + 14}" text-anchor="middle" fill="${isLeader ? '#64748b' : '#475569'}" font-size="${isLeader ? 26 : 22}" font-weight="600" font-family="${SVG_FONT_STACK}">${losses}</text>
+    <rect x="800" y="${midY - 4}" width="340" height="8" rx="4" fill="#0c1624"/>
+    ${barW > 0 ? `<rect x="800" y="${midY - 4}" width="${barW}" height="8" rx="4" fill="${color}" opacity="${isLeader ? '1' : '0.55'}"/>` : ''}
+    ${i < N - 1 ? `<line x1="40" y1="${rowY + rowH}" x2="1160" y2="${rowY + rowH}" stroke="#0c1624" stroke-width="1"/>` : ''}`;
+  }).join('');
+
+  const svg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <defs>
+    <radialGradient id="hg" cx="50%" cy="0%" r="70%" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="${topColor}" stop-opacity="0.13"/>
+      <stop offset="100%" stop-color="${topColor}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hdr" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1526"/>
+      <stop offset="100%" stop-color="#020817"/>
+    </linearGradient>
+    <clipPath id="nameClip"><rect x="126" y="0" width="470" height="${H}"/></clipPath>
+  </defs>
+
+  <rect width="${W}" height="${H}" fill="#020817"/>
+  <rect width="${W}" height="${H}" fill="url(#hg)"/>
+
+  <rect x="0" y="0" width="600" height="6" fill="${topColor}"/>
+  <rect x="600" y="0" width="600" height="6" fill="${secondColor}"/>
+  <rect x="0" y="6" width="5" height="${H - 12}" fill="${topColor}" opacity="0.65"/>
+  <rect x="${W - 5}" y="6" width="5" height="${H - 12}" fill="${secondColor}" opacity="0.65"/>
+  <rect x="0" y="${H - 6}" width="600" height="6" fill="${topColor}" opacity="0.5"/>
+  <rect x="600" y="${H - 6}" width="600" height="6" fill="${secondColor}" opacity="0.5"/>
+
+  <rect x="0" y="0" width="${W}" height="${headerH}" fill="url(#hdr)"/>
+
+  <text x="52" y="50" fill="#ffffff" font-size="16" font-weight="800" font-family="${SVG_FONT_STACK}">WKND</text>
+  <text x="52" y="65" fill="${topColor}" font-size="8" font-weight="700" font-family="${SVG_FONT_STACK}">BASKETBALL</text>
+
+  <text x="600" y="50" text-anchor="middle" fill="#ffffff" font-size="28" font-weight="800" font-family="${SVG_FONT_STACK}">SEASON STANDINGS</text>
+  ${maxGP > 0 ? `<text x="600" y="71" text-anchor="middle" fill="#334155" font-size="12" font-weight="600" font-family="${SVG_FONT_STACK}">THROUGH ${maxGP} GAME${maxGP !== 1 ? 'S' : ''}</text>` : ''}
+
+  <text x="970" y="56" text-anchor="middle" fill="#2d3a4a" font-size="10" font-weight="700" font-family="${SVG_FONT_STACK}">WIN %</text>
+  <rect x="800" y="63" width="340" height="3" rx="1.5" fill="#0c1624"/>
+  <rect x="800" y="63" width="340" height="3" rx="1.5" fill="${topColor}" opacity="0.2"/>
+
+  <line x1="40" y1="${headerH}" x2="1160" y2="${headerH}" stroke="#0c1624" stroke-width="1"/>
+
+  ${rowsSvg}
+
+  <text x="${W / 2}" y="${H - 14}" fill="#1e293b" text-anchor="middle" font-size="11" font-weight="600" font-family="${SVG_FONT_STACK}">WKNDBASKETBALL.COM</text>
+</svg>`);
+
+  return sharp(svg).png({ compressionLevel: 9 }).toBuffer();
+}
+
 function getStylizePreset(directionText) {
   const text = String(directionText || '').toLowerCase();
   const preset = {
@@ -2146,7 +2307,14 @@ async function generatePlayerArtDirection(playerName, teamName, stylePrompt, gam
   return fallback;
 }
 
+let _stateCache = null;
+let _stateCacheTs = 0;
+const STATE_CACHE_TTL_MS = 1500;
+function invalidateStateCache() { _stateCache = null; }
+
 function readState() {
+  const now = Date.now();
+  if (_stateCache && now - _stateCacheTs < STATE_CACHE_TTL_MS) return _stateCache;
   const teams = selectTeamsStmt.all();
   const players = selectPlayersStmt.all();
   const games = selectGamesStmt.all();
@@ -2234,13 +2402,12 @@ function readState() {
     gameWriteup: game.game_writeup || '',
     potgWriteup: game.potg_writeup || '',
     manualPotgPlayerId: game.manual_potg_player_id || '',
-    socialCoverDataUrl: game.social_cover_data_url || ''
+    socialCoverLen: toInt(game.social_cover_data_len)
   }));
 
-  return {
-    teams: hydratedTeams,
-    games: hydratedGames
-  };
+  _stateCache = { teams: hydratedTeams, games: hydratedGames };
+  _stateCacheTs = Date.now();
+  return _stateCache;
 }
 
 const writeTeamsTransaction = db.transaction((nextTeams) => {
@@ -2579,6 +2746,7 @@ function buildSyncPayload() {
 
 function broadcastSync(overrides = {}) {
   if (!wss) return;
+  invalidateStateCache();
   const payload = JSON.stringify({ type: 'sync', sourceClientId: overrides.sourceClientId || null, ...buildSyncPayload() });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) {
@@ -2996,6 +3164,7 @@ function renderInjectedIndex(req, res) {
       (String(req.query.view || '').toLowerCase() === 'game')
       || (pathParts[0] === 'history' && pathParts[1] === 'game')
     );
+    const isStandingsView = pathParts[0] === 'standings' && pathParts.length === 1;
     const isPlayerView = pathParts[0] === 'teams' && pathParts[1] === 'player' && pathParts[2] && pathParts[3];
     const playerViewTeamId = isPlayerView ? decodeURIComponent(String(pathParts[2] || '').trim()) : '';
     const playerViewPlayerId = isPlayerView ? decodeURIComponent(String(pathParts[3] || '').trim()) : '';
@@ -3023,7 +3192,9 @@ function renderInjectedIndex(req, res) {
     let gaHeadSnippet = '';
 
     try {
-      if (isPlayerView && playerViewPlayer) {
+      if (isStandingsView) {
+        metaTags = buildStandingsSocialMetaTags({ req, state });
+      } else if (isPlayerView && playerViewPlayer) {
         metaTags = buildPlayerSocialMetaTags({ req, player: playerViewPlayer, team: playerViewTeam });
       } else {
         metaTags = buildSocialMetaTags({ req, game, teams });
@@ -3162,6 +3333,23 @@ app.get('/api/social-cover/default.png', async (_req, res) => {
   }
 });
 
+app.get('/api/social-cover/standings.png', async (req, res) => {
+  try {
+    if (!sharp) {
+      res.status(501).json({ error: 'Social cover generation is disabled in this build because sharp is not installed.' });
+      return;
+    }
+    const state = readState();
+    const png = await buildStandingsSocialCoverPng(state);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(png);
+  } catch (err) {
+    console.error('Standings cover error:', err);
+    res.status(500).json({ error: 'Failed to build standings cover.' });
+  }
+});
+
 app.get('/api/social-cover/:gameId.png', async (req, res) => {
   try {
     if (!sharp) {
@@ -3173,7 +3361,8 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
     const state = readState();
     const game = (state.games || []).find((item) => item.id === gameId) || null;
     let png = null;
-    const customDataUrl = String(game?.socialCoverDataUrl || '').trim();
+    const coverRow = selectGameCoverByIdStmt.get(gameId);
+    const customDataUrl = String(coverRow?.social_cover_data_url || '').trim();
     const parsedCustom = parseImageDataUrl(customDataUrl);
     if (parsedCustom) {
       png = await buildCustomSocialCoverPng(game, state.teams || [], parsedCustom.buffer, baseOrigin);
@@ -3861,6 +4050,8 @@ app.put('/api/games/:gameId', (req, res) => {
   }
 
   try {
+    const existingCoverRow = selectGameCoverByIdStmt.get(gameId);
+    const existingCoverUrl = String(existingCoverRow?.social_cover_data_url || '');
     const upsertGameTransaction = db.transaction(() => {
       // Remove this game's player stats and re-insert (safe upsert pattern).
       db.prepare('DELETE FROM game_player_stats WHERE game_id = ?').run(gameId);
@@ -3883,7 +4074,7 @@ app.put('/api/games/:gameId', (req, res) => {
         game_writeup: typeof game.gameWriteup === 'string' ? game.gameWriteup : '',
         potg_writeup: typeof game.potgWriteup === 'string' ? game.potgWriteup : '',
         manual_potg_player_id: typeof game.manualPotgPlayerId === 'string' ? game.manualPotgPlayerId : '',
-        social_cover_data_url: typeof game.socialCoverDataUrl === 'string' ? game.socialCoverDataUrl : '',
+        social_cover_data_url: typeof game.socialCoverDataUrl === 'string' ? game.socialCoverDataUrl : existingCoverUrl,
         sort_order: 0
       });
 
@@ -3931,10 +4122,9 @@ app.put('/api/state', async (req, res) => {
   }
 
   try {
-    const existingState = readState();
-    const existingGames = Array.isArray(existingState?.games) ? existingState.games : [];
+    const existingCovers = selectAllGameCoversStmt.all();
     const existingCoverByGameId = new Map(
-      existingGames.map((game) => [String(game?.id || ''), String(game?.socialCoverDataUrl || '')])
+      existingCovers.map((row) => [String(row.id || ''), String(row.social_cover_data_url || '')])
     );
     const gamesWithPreservedCovers = games.map((game) => {
       if (!game || typeof game !== 'object') return game;
@@ -4173,17 +4363,15 @@ app.put('/api/games/:gameId/social-cover', (req, res) => {
     return;
   }
 
-  const state = readState();
-  const game = (state.games || []).find((item) => item.id === gameId);
-  if (!game) {
+  const existing = selectGameCoverByIdStmt.get(gameId);
+  if (!existing) {
     res.status(404).json({ error: 'Game not found.' });
     return;
   }
 
-  const nextGames = (state.games || []).map((item) => (
-    item.id === gameId ? { ...item, socialCoverDataUrl: imageDataUrl } : item
-  ));
-  writeState(state.teams || [], nextGames);
+  updateGameCoverStmt.run(imageDataUrl, gameId);
+  invalidateStateCache();
+  broadcastSync();
   res.json({ ok: true });
 });
 
@@ -4194,17 +4382,15 @@ app.delete('/api/games/:gameId/social-cover', (req, res) => {
     return;
   }
 
-  const state = readState();
-  const game = (state.games || []).find((item) => item.id === gameId);
-  if (!game) {
+  const existing = selectGameCoverByIdStmt.get(gameId);
+  if (!existing) {
     res.status(404).json({ error: 'Game not found.' });
     return;
   }
 
-  const nextGames = (state.games || []).map((item) => (
-    item.id === gameId ? { ...item, socialCoverDataUrl: '' } : item
-  ));
-  writeState(state.teams || [], nextGames);
+  updateGameCoverStmt.run('', gameId);
+  invalidateStateCache();
+  broadcastSync();
   res.json({ ok: true });
 });
 
