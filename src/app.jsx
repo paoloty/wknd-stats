@@ -135,13 +135,17 @@
             const [teams, setTeams] = useState([]);
             const [games, setGames] = useState([]);
             const [statActions, setStatActions] = useState([]);
-            const [activeTab, setActiveTab] = useState('live');
+            const [activeTab, setActiveTab] = useState('standings');
             const [toast, setToast] = useState(null);
 
             // Added State to toggle roster view mode between 'averages' and 'totals'
             const [rosterViewMode, setRosterViewMode] = useState('averages');
             const [selectedRosterPlayer, setSelectedRosterPlayer] = useState(null);
             const [selectedPlayerGameStats, setSelectedPlayerGameStats] = useState(null);
+            const CURRENT_SEASON = 3;
+            const [selectedSeason, setSelectedSeason] = useState(CURRENT_SEASON);
+            const [gameMetaSeason, setGameMetaSeason] = useState(CURRENT_SEASON);
+            const [gameMetaSeriesId, setGameMetaSeriesId] = useState('');
             const [standingsStatMode, setStandingsStatMode] = useState('totals');
             const [leadersStatMode, setLeadersStatMode] = useState('perGame');
             const [awardsPagePublicEnabled, setAwardsPagePublicEnabled] = useState(false);
@@ -766,7 +770,7 @@
                         setActiveTab('teams');
                         setPendingSharedRosterPlayer({ teamId: route.teamId, playerId: route.playerId });
                     } else if (route.type === 'tab') {
-                        setActiveTab(normalizeTabId(route.activeTab || 'live'));
+                        setActiveTab(normalizeTabId(route.activeTab || 'standings'));
                     }
                 } catch (e) {}
             }, []);
@@ -792,7 +796,7 @@
                     if (!state || !state.__wkndNav) return;
 
                     suppressNextNavHistoryPushRef.current = true;
-                    setActiveTab(normalizeTabId(state.activeTab || 'live'));
+                    setActiveTab(normalizeTabId(state.activeTab || 'standings'));
                     setSelectedHistoryGameId(state.selectedHistoryGameId || null);
                     setSelectedRosterPlayer(state.selectedRosterPlayer || null);
                     if (state.activeTab === 'history' && state.historyDetailTab) {
@@ -3059,7 +3063,20 @@
                     writeupSnippet: String(g.gameWriteup || '').trim().slice(0, 140)
                 }))
             ];
-            const teamStandings = teams.map((team) => {
+            const availableSeasons = (() => {
+                const seasonSet = new Set(games.map((g) => g.season || CURRENT_SEASON));
+                return Array.from(seasonSet).sort((a, b) => b - a);
+            })();
+
+            const seasonRegularGames = games.filter(
+                (g) => (g.season || CURRENT_SEASON) === selectedSeason && (g.gameType || 'regular') === 'regular'
+            );
+            const seasonPlayoffGames = games.filter(
+                (g) => (g.season || CURRENT_SEASON) === selectedSeason && g.gameType === 'playoff'
+            );
+            const hasPlayoffGames = seasonPlayoffGames.length > 0;
+
+            const buildStandingsFromGames = (filteredGames) => teams.map((team) => {
                 const rec = {
                     id: team.id,
                     name: team.name,
@@ -3070,32 +3087,68 @@
                     pointsFor: 0,
                     pointsAgainst: 0
                 };
-
-                games.forEach((g) => {
+                filteredGames.forEach((g) => {
                     if (g.teamAId !== team.id && g.teamBId !== team.id) return;
                     const teamScore = g.teamAId === team.id ? (g.teamAScore || 0) : (g.teamBScore || 0);
                     const oppScore = g.teamAId === team.id ? (g.teamBScore || 0) : (g.teamAScore || 0);
+                    if (teamScore === 0 && oppScore === 0) return;
                     rec.gamesPlayed += 1;
                     rec.pointsFor += teamScore;
                     rec.pointsAgainst += oppScore;
                     if (teamScore > oppScore) rec.wins += 1;
                     if (teamScore < oppScore) rec.losses += 1;
                 });
-
                 const q = rec.pointsAgainst > 0
                     ? rec.pointsFor / rec.pointsAgainst
                     : (rec.pointsFor > 0 ? Number.POSITIVE_INFINITY : 1);
-
-                return {
-                    ...rec,
-                    quotient: q
-                };
+                return { ...rec, quotient: q };
             }).sort((a, b) => {
                 if (b.wins !== a.wins) return b.wins - a.wins;
                 if (a.losses !== b.losses) return a.losses - b.losses;
                 if (b.quotient !== a.quotient) return b.quotient - a.quotient;
                 return b.pointsFor - a.pointsFor;
             });
+
+            const teamStandings = buildStandingsFromGames(seasonRegularGames);
+
+            const playoffBracket = (() => {
+                const seeds = teamStandings.slice(0, 4);
+                if (seeds.length < 2) return null;
+
+                const seriesGames = (sid) => seasonPlayoffGames.filter((g) => g.seriesId === sid);
+                const computeSeries = (games, highId, lowId, winsToAdvanceHigh, winsToAdvanceLow) => {
+                    let highWins = 0;
+                    let lowWins = 0;
+                    const results = games.map((g) => {
+                        const highScore = g.teamAId === highId ? (g.teamAScore || 0) : (g.teamBScore || 0);
+                        const lowScore = g.teamAId === lowId ? (g.teamAScore || 0) : (g.teamBScore || 0);
+                        const highWon = highScore > lowScore;
+                        if (highWon) highWins++; else lowWins++;
+                        return { highScore, lowScore, highWon, id: g.id };
+                    });
+                    const winnerId = highWins >= winsToAdvanceHigh ? highId
+                        : lowWins >= winsToAdvanceLow ? lowId
+                        : null;
+                    return { highWins, lowWins, results, winnerId };
+                };
+
+                const s1 = seeds[0];
+                const s2 = seeds[1];
+                const s3 = seeds[2] || null;
+                const s4 = seeds[3] || null;
+
+                const semiA = s4 ? computeSeries(seriesGames('semi-a'), s1.id, s4.id, 1, 2) : null;
+                const semiB = s3 ? computeSeries(seriesGames('semi-b'), s2.id, s3.id, 1, 2) : null;
+
+                const finalTeam1Id = semiA?.winnerId || s1?.id;
+                const finalTeam2Id = semiB?.winnerId || s2?.id;
+                const finalTeam1 = teamStandings.find((t) => t.id === finalTeam1Id) || s1;
+                const finalTeam2 = teamStandings.find((t) => t.id === finalTeam2Id) || s2;
+                const finalSeries = computeSeries(seriesGames('final'), finalTeam1Id, finalTeam2Id, 2, 2);
+
+                return { seeds, semiA, semiB, finalTeam1, finalTeam2, finalSeries };
+            })();
+
             const standingsLeaderDefs = [
                 { id: 'pts', label: 'PTS', tabLabel: 'Points' },
                 { id: 'reb', label: 'REB', tabLabel: 'Rebounds' },
@@ -4068,6 +4121,11 @@
                 }
                 setHistoryVideoInput(selectedHistoryGame?.youtubeUrl || '');
             }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.youtubeUrl : '']);
+
+            useEffect(() => {
+                setGameMetaSeason(selectedHistoryGame?.season || CURRENT_SEASON);
+                setGameMetaSeriesId(selectedHistoryGame?.seriesId || '');
+            }, [selectedHistoryGameId]);
 
             useEffect(() => {
                 if (!selectedHistoryGameId) {
@@ -5608,6 +5666,43 @@
                     setGames(games);
                     writeCachedAppState(teams, games, statActions, { dirty: true });
                     showToast(String(error?.message || 'Could not save YouTube link right now. Please try again.'), 'error');
+                }
+            };
+
+            const PLAYOFF_SERIES_OPTIONS = [
+                { value: '', label: 'Regular Season', gameType: 'regular', playoffRound: '' },
+                { value: 'semi-a', label: 'Semifinal A  (#1 vs #4)', gameType: 'playoff', playoffRound: 'semi' },
+                { value: 'semi-b', label: 'Semifinal B  (#2 vs #3)', gameType: 'playoff', playoffRound: 'semi' },
+                { value: 'final', label: 'Finals  (Best of 3)', gameType: 'playoff', playoffRound: 'final' }
+            ];
+
+            const handleSaveGameMeta = async (gameId) => {
+                if (!gameId) return;
+                const seriesOpt = PLAYOFF_SERIES_OPTIONS.find((o) => o.value === gameMetaSeriesId) || PLAYOFF_SERIES_OPTIONS[0];
+                const updatedGames = games.map((existingGame) => {
+                    if (existingGame.id !== gameId) return existingGame;
+                    return {
+                        ...existingGame,
+                        season: gameMetaSeason,
+                        seriesId: seriesOpt.value,
+                        gameType: seriesOpt.gameType,
+                        playoffRound: seriesOpt.playoffRound
+                    };
+                });
+                const updatedGame = updatedGames.find((g) => g.id === gameId);
+                writeCachedAppState(teams, updatedGames, statActions, { dirty: true });
+                setGames(updatedGames);
+                try {
+                    await apiRequest(`/api/games/${encodeURIComponent(gameId)}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ game: updatedGame })
+                    });
+                    writeCachedAppState(teams, updatedGames, statActions, { dirty: false });
+                    showToast('Game info updated.', 'success');
+                } catch (error) {
+                    setGames(games);
+                    writeCachedAppState(teams, games, statActions, { dirty: true });
+                    showToast('Could not save game info. Please try again.', 'error');
                 }
             };
 
@@ -13904,7 +13999,25 @@
                         {activeTab === 'standings' && (
                             <div className="space-y-4">
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                    <h3 className="text-xl font-bold text-white font-sans">Team Standings</h3>
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="text-xl font-bold text-white font-sans">Team Standings</h3>
+                                        {availableSeasons.length > 1 && (
+                                            <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5">
+                                                {availableSeasons.map((s) => (
+                                                    <button
+                                                        key={`season-tab-${s}`}
+                                                        onClick={() => setSelectedSeason(s)}
+                                                        className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${selectedSeason === s ? 'bg-orange-500 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                                                    >
+                                                        {s === CURRENT_SEASON ? `S${s} ★` : `S${s}`}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {availableSeasons.length <= 1 && (
+                                            <span className="text-[11px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2.5 py-1 rounded-lg">Season {selectedSeason}</span>
+                                        )}
+                                    </div>
                                     <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5 w-fit">
                                         <button
                                             onClick={() => setStandingsStatMode('totals')}
@@ -13920,7 +14033,7 @@
                                         </button>
                                     </div>
                                 </div>
-                                <p className="text-xs text-slate-400">Ordered by wins, then quotient ($pointsFor / pointsAgainst$) for tie-breaking. Points columns and stat leaders follow the selected mode.</p>
+                                <p className="text-xs text-slate-400">Regular season games only. Ordered by wins, then quotient (pointsFor / pointsAgainst) for tie-breaking.</p>
 
                                 {games.length === 0 ? (
                                     <p className="text-center py-8 text-xs text-slate-500 italic bg-slate-900 rounded-xl border border-slate-800">No completed games yet. Standings will appear once games are logged.</p>
@@ -14012,6 +14125,152 @@
                                                 </div>
                                             </div>
                                         </div>
+
+                                        {/* PLAYOFF PICTURE */}
+                                        {playoffBracket && (
+                                            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                                                <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between">
+                                                    <h4 className="text-[11px] font-extrabold uppercase tracking-widest text-slate-300">
+                                                        {hasPlayoffGames ? 'Playoff Bracket' : 'Playoff Picture'}
+                                                    </h4>
+                                                    {!hasPlayoffGames && (
+                                                        <span className="text-[10px] text-slate-500 italic">Projected · based on current standings</span>
+                                                    )}
+                                                </div>
+                                                <div className="p-4 space-y-4">
+                                                    {/* SEMIFINALS */}
+                                                    <div>
+                                                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Semifinals · Twice to Beat</p>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                            {[
+                                                                { label: 'Semi A', highSeed: playoffBracket.seeds[0], lowSeed: playoffBracket.seeds[3], series: playoffBracket.semiA },
+                                                                { label: 'Semi B', highSeed: playoffBracket.seeds[1], lowSeed: playoffBracket.seeds[2], series: playoffBracket.semiB }
+                                                            ].map(({ label, highSeed, lowSeed, series }) => {
+                                                                if (!highSeed || !lowSeed) return null;
+                                                                const highIdx = teamStandings.findIndex((t) => t.id === highSeed.id);
+                                                                const lowIdx = teamStandings.findIndex((t) => t.id === lowSeed.id);
+                                                                const highAdvanced = series?.winnerId === highSeed.id;
+                                                                const lowAdvanced = series?.winnerId === lowSeed.id;
+                                                                const isComplete = Boolean(series?.winnerId);
+                                                                return (
+                                                                    <div key={label} className="bg-slate-950/60 rounded-xl border border-slate-800 overflow-hidden">
+                                                                        <div className="px-3 py-1.5 bg-slate-950/80 border-b border-slate-800">
+                                                                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{label}</span>
+                                                                        </div>
+                                                                        {[
+                                                                            { team: highSeed, idx: highIdx, wins: series?.highWins || 0, winsNeeded: 1, advanced: highAdvanced, isHigh: true },
+                                                                            { team: lowSeed, idx: lowIdx, wins: series?.lowWins || 0, winsNeeded: 2, advanced: lowAdvanced, isHigh: false }
+                                                                        ].map(({ team, idx, wins, winsNeeded, advanced, isHigh }) => (
+                                                                            <div
+                                                                                key={team.id}
+                                                                                className={`flex items-center justify-between px-3 py-2.5 gap-2 border-b border-slate-800/50 last:border-b-0 ${advanced ? 'bg-emerald-500/5' : isComplete && !advanced ? 'opacity-40' : ''}`}
+                                                                            >
+                                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                                    <span className={`text-[10px] font-black ${isHigh ? 'text-orange-300' : 'text-slate-500'}`}>#{idx + 1}</span>
+                                                                                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: team.color || '#94a3b8' }} />
+                                                                                    <span className="text-xs font-bold text-slate-200 truncate">{team.name}</span>
+                                                                                    {isHigh && !hasPlayoffGames && (
+                                                                                        <span className="text-[9px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded">2×BEAT</span>
+                                                                                    )}
+                                                                                    {advanced && <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">ADV</span>}
+                                                                                </div>
+                                                                                {hasPlayoffGames ? (
+                                                                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                                                                        {Array.from({ length: winsNeeded }).map((_, i) => (
+                                                                                            <span key={i} className={`w-3 h-3 rounded-full border ${i < wins ? 'bg-emerald-500 border-emerald-400' : 'bg-transparent border-slate-600'}`} />
+                                                                                        ))}
+                                                                                        <span className="text-[10px] font-black text-slate-300 ml-1">{wins}</span>
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <span className="text-[10px] text-slate-500 flex-shrink-0">needs {winsNeeded}W</span>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                        {hasPlayoffGames && series?.results?.length > 0 && (
+                                                                            <div className="px-3 pb-2 pt-1 flex flex-col gap-0.5">
+                                                                                {series.results.map((r, i) => (
+                                                                                    <button
+                                                                                        key={r.id || i}
+                                                                                        onClick={() => { if (r.id) { setSelectedHistoryGameId(r.id); setActiveTab('history'); } }}
+                                                                                        className={`text-[10px] flex justify-between w-full px-1.5 py-0.5 rounded transition-colors ${r.id ? 'text-slate-400 hover:text-orange-300 hover:bg-slate-800/60 cursor-pointer' : 'text-slate-500 cursor-default'}`}
+                                                                                    >
+                                                                                        <span>Game {i + 1}</span>
+                                                                                        <span className="font-mono">{r.highScore}–{r.lowScore}</span>
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* FINALS */}
+                                                    <div>
+                                                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Finals · Best of 3</p>
+                                                        <div className="bg-slate-950/60 rounded-xl border border-slate-700 overflow-hidden">
+                                                            <div className="px-3 py-1.5 bg-slate-950/80 border-b border-slate-800">
+                                                                <span className="text-[10px] font-bold uppercase tracking-widest text-orange-400">Championship</span>
+                                                            </div>
+                                                            {(() => {
+                                                                const t1 = playoffBracket.finalTeam1;
+                                                                const t2 = playoffBracket.finalTeam2;
+                                                                const fs = playoffBracket.finalSeries;
+                                                                const t1Wins = fs?.highWins || 0;
+                                                                const t2Wins = fs?.lowWins || 0;
+                                                                const champion = fs?.winnerId
+                                                                    ? teamStandings.find((t) => t.id === fs.winnerId)
+                                                                    : null;
+                                                                const isReady = hasPlayoffGames && (playoffBracket.semiA?.winnerId || playoffBracket.semiB?.winnerId);
+                                                                return (
+                                                                    <>
+                                                                        {[
+                                                                            { team: t1, wins: t1Wins, isChamp: champion?.id === t1?.id },
+                                                                            { team: t2, wins: t2Wins, isChamp: champion?.id === t2?.id }
+                                                                        ].map(({ team, wins, isChamp }) => team && (
+                                                                            <div
+                                                                                key={team.id}
+                                                                                className={`flex items-center justify-between px-3 py-3 gap-2 border-b border-slate-800/50 last:border-b-0 ${isChamp ? 'bg-yellow-500/5' : fs?.winnerId && !isChamp ? 'opacity-40' : ''}`}
+                                                                            >
+                                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: team.color || '#94a3b8' }} />
+                                                                                    <span className={`text-xs font-bold truncate ${isChamp ? 'text-yellow-300' : 'text-slate-200'}`}>{team.name}</span>
+                                                                                    {!isReady && !hasPlayoffGames && <span className="text-[10px] text-slate-600 italic">(projected)</span>}
+                                                                                    {isChamp && <span className="text-[9px] font-black text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 px-1.5 py-0.5 rounded">CHAMPION</span>}
+                                                                                </div>
+                                                                                {hasPlayoffGames && (
+                                                                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                                                                        {Array.from({ length: 2 }).map((_, i) => (
+                                                                                            <span key={i} className={`w-3 h-3 rounded-full border ${i < wins ? 'bg-yellow-500 border-yellow-400' : 'bg-transparent border-slate-600'}`} />
+                                                                                        ))}
+                                                                                        <span className="text-[10px] font-black text-slate-300 ml-1">{wins}</span>
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        ))}
+                                                                        {hasPlayoffGames && fs?.results?.length > 0 && (
+                                                                            <div className="px-3 pb-2 pt-1 flex flex-col gap-0.5">
+                                                                                {fs.results.map((r, i) => (
+                                                                                    <button
+                                                                                        key={r.id || i}
+                                                                                        onClick={() => { if (r.id) { setSelectedHistoryGameId(r.id); setActiveTab('history'); } }}
+                                                                                        className={`text-[10px] flex justify-between w-full px-1.5 py-0.5 rounded transition-colors ${r.id ? 'text-slate-400 hover:text-orange-300 hover:bg-slate-800/60 cursor-pointer' : 'text-slate-500 cursor-default'}`}
+                                                                                    >
+                                                                                        <span>Game {i + 1}</span>
+                                                                                        <span className="font-mono">{r.highScore}–{r.lowScore}</span>
+                                                                                    </button>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -14229,7 +14488,8 @@
                                             { id: 'home', label: game.teamAName },
                                             { id: 'away', label: game.teamBName },
                                             { id: 'video', label: 'Video' },
-                                            { id: 'pbp', label: 'Play-by-Play' }
+                                            { id: 'pbp', label: 'Play-by-Play' },
+                                            ...(canOperateLive ? [{ id: 'game-info', label: 'Game Info' }] : [])
                                         ];
 
                                         return (
@@ -15029,6 +15289,54 @@
                                                 )}
 
                                                 {/* PLAY-BY-PLAY */}
+                                                {historyDetailTab === 'game-info' && canOperateLive && (
+                                                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-4">
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Season</label>
+                                                                <div className="flex gap-1 flex-wrap">
+                                                                    {[1, 2, 3, 4, 5].map((s) => (
+                                                                        <button
+                                                                            key={s}
+                                                                            type="button"
+                                                                            onClick={() => setGameMetaSeason(s)}
+                                                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${gameMetaSeason === s ? 'bg-orange-500 text-white border-orange-400' : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200'}`}
+                                                                        >
+                                                                            S{s}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Playoff Series</label>
+                                                                <select
+                                                                    value={gameMetaSeriesId}
+                                                                    onChange={(e) => setGameMetaSeriesId(e.target.value)}
+                                                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none cursor-pointer"
+                                                                >
+                                                                    {PLAYOFF_SERIES_OPTIONS.map((opt) => (
+                                                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        {gameMetaSeriesId && (
+                                                            <p className="text-[10px] text-orange-300 bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-1.5">
+                                                                This game will count as a <strong>playoff game</strong> and appear in the bracket under {PLAYOFF_SERIES_OPTIONS.find((o) => o.value === gameMetaSeriesId)?.label}.
+                                                            </p>
+                                                        )}
+                                                        <div className="flex justify-end">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleSaveGameMeta(game.id)}
+                                                                className="px-4 py-2 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+                                                            >
+                                                                Save Game Info
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                                 {historyDetailTab === 'pbp' && (
                                                     <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3 mt-4">
                                                         <div className="flex items-center justify-between gap-2">

@@ -347,6 +347,36 @@ function ensureGamesUnderReviewColumn() {
   }
 }
 
+function ensureGamesSeasonColumns() {
+  const columns = db.prepare('PRAGMA table_info(games)').all();
+  const names = columns.map((c) => c.name);
+  if (!names.includes('season')) {
+    db.exec('ALTER TABLE games ADD COLUMN season INTEGER NOT NULL DEFAULT 3');
+  }
+  if (!names.includes('game_type')) {
+    db.exec("ALTER TABLE games ADD COLUMN game_type TEXT NOT NULL DEFAULT 'regular'");
+  }
+  if (!names.includes('playoff_round')) {
+    db.exec("ALTER TABLE games ADD COLUMN playoff_round TEXT NOT NULL DEFAULT ''");
+  }
+  if (!names.includes('series_id')) {
+    db.exec("ALTER TABLE games ADD COLUMN series_id TEXT NOT NULL DEFAULT ''");
+  }
+}
+
+function ensureAwardsTable() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS awards (
+      id TEXT PRIMARY KEY,
+      season INTEGER NOT NULL,
+      award_type TEXT NOT NULL,
+      player_id TEXT,
+      team_id TEXT,
+      notes TEXT
+    )
+  `);
+}
+
 function ensurePlayerProfileColumns() {
   const columns = db.prepare('PRAGMA table_info(players)').all();
   const wanted = [
@@ -644,6 +674,8 @@ ensureGamesPeriodSnapshotsColumn();
 ensureGamesSocialCoverColumn();
 ensureGamesDnpColumn();
 ensureGamesUnderReviewColumn();
+ensureGamesSeasonColumns();
+ensureAwardsTable();
 ensurePlayerProfileColumns();
 ensurePlayerTotalsTable();
 ensurePlayersTableWithoutLegacyStats();
@@ -703,9 +735,9 @@ const upsertPlayerTotalsStmt = db.prepare(`
 
 const insertGameStmt = db.prepare(`
   INSERT INTO games (
-    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review, sort_order
+    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review, season, game_type, playoff_round, series_id, sort_order
   ) VALUES (
-    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @manual_potg_player_id, @social_cover_data_url, @dnp_players_json, @under_review, @sort_order
+    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @manual_potg_player_id, @social_cover_data_url, @dnp_players_json, @under_review, @season, @game_type, @playoff_round, @series_id, @sort_order
   )
 `);
 
@@ -758,14 +790,15 @@ const selectPlayersStmt = db.prepare(`
 const selectGamesStmt = db.prepare(`
   SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score,
          youtube_url, game_writeup, potg_writeup, manual_potg_player_id,
-         LENGTH(social_cover_data_url) AS social_cover_data_len, dnp_players_json, under_review
+         LENGTH(social_cover_data_url) AS social_cover_data_len, dnp_players_json, under_review,
+         season, game_type, playoff_round, series_id
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
 const selectGameCoverByIdStmt = db.prepare('SELECT social_cover_data_url FROM games WHERE id = ?');
 const selectAllGameCoversStmt = db.prepare('SELECT id, social_cover_data_url FROM games');
 const updateGameCoverStmt = db.prepare('UPDATE games SET social_cover_data_url = ? WHERE id = ?');
-const selectGameDetailByIdStmt = db.prepare('SELECT game_log_json, period_snapshots_json FROM games WHERE id = ?');
+const selectGameDetailByIdStmt = db.prepare('SELECT game_log_json, period_snapshots_json, season, game_type, playoff_round, series_id FROM games WHERE id = ?');
 const selectAllGameLogsStmt = db.prepare('SELECT id, game_log_json, period_snapshots_json FROM games');
 const selectGamePlayerStatsStmt = db.prepare(`
   SELECT game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
@@ -2392,7 +2425,11 @@ function readState() {
     gameWriteup: game.game_writeup || '',
     potgWriteup: game.potg_writeup || '',
     manualPotgPlayerId: game.manual_potg_player_id || '',
-    socialCoverLen: toInt(game.social_cover_data_len)
+    socialCoverLen: toInt(game.social_cover_data_len),
+    season: toInt(game.season) || 3,
+    gameType: game.game_type || 'regular',
+    playoffRound: game.playoff_round || '',
+    seriesId: game.series_id || ''
   }));
 
   _stateCache = { teams: hydratedTeams, games: hydratedGames };
@@ -2475,6 +2512,10 @@ const writeGamesTransaction = db.transaction((nextGames) => {
       potg_writeup: typeof game.potgWriteup === 'string' ? game.potgWriteup : '',
       manual_potg_player_id: typeof game.manualPotgPlayerId === 'string' ? game.manualPotgPlayerId : '',
       social_cover_data_url: typeof game.socialCoverDataUrl === 'string' ? game.socialCoverDataUrl : '',
+      season: toInt(game.season) || 3,
+      game_type: game.gameType || 'regular',
+      playoff_round: game.playoffRound || '',
+      series_id: game.seriesId || '',
       sort_order: gameIndex
     });
 
@@ -4070,6 +4111,10 @@ app.put('/api/games/:gameId', (req, res) => {
         potg_writeup: typeof game.potgWriteup === 'string' ? game.potgWriteup : '',
         manual_potg_player_id: typeof game.manualPotgPlayerId === 'string' ? game.manualPotgPlayerId : '',
         social_cover_data_url: typeof game.socialCoverDataUrl === 'string' ? game.socialCoverDataUrl : existingCoverUrl,
+        season: toInt(game.season) || toInt(existingDetailRow?.season) || 3,
+        game_type: game.gameType || existingDetailRow?.game_type || 'regular',
+        playoff_round: game.playoffRound || existingDetailRow?.playoff_round || '',
+        series_id: game.seriesId || existingDetailRow?.series_id || '',
         sort_order: 0
       });
 
