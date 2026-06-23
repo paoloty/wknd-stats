@@ -771,6 +771,11 @@ const selectGamePlayerStatsStmt = db.prepare(`
   SELECT game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
   FROM game_player_stats
 `);
+const selectGamePlayerStatsByIdStmt = db.prepare(`
+  SELECT player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
+  FROM game_player_stats
+  WHERE game_id = ?
+`);
 const selectPlayerTeamIdStmt = db.prepare('SELECT team_id FROM players WHERE id = ?');
 const selectPlayerByIdAndTeamStmt = db.prepare(`
   SELECT id, team_id, name, number, positions, height, picture_url, birthday, email, social, contact, writeup
@@ -2322,7 +2327,6 @@ function readState() {
   const teams = selectTeamsStmt.all();
   const players = selectPlayersStmt.all();
   const games = selectGamesStmt.all();
-  const gamePlayerStats = selectGamePlayerStatsStmt.all();
 
   const playersByTeam = new Map();
   players.forEach((player) => {
@@ -2366,27 +2370,6 @@ function readState() {
     players: playersByTeam.get(team.id) || []
   }));
 
-  const statsByGame = new Map();
-  gamePlayerStats.forEach((row) => {
-    const gameStats = statsByGame.get(row.game_id) || {};
-    gameStats[row.player_id] = {
-      pts: toInt(row.pts),
-      ast: toInt(row.ast),
-      reb: toInt(row.reb),
-      stl: toInt(row.stl),
-      blk: toInt(row.blk),
-      to: toInt(row.turnover),
-      pf: toInt(row.pf),
-      fg2m: toInt(row.fg2m),
-      fg3m: toInt(row.fg3m),
-      fg2m_miss: toInt(row.fg2m_miss),
-      fg3m_miss: toInt(row.fg3m_miss),
-      ftm: toInt(row.ftm),
-      ft_miss: toInt(row.ft_miss),
-      min: String(row.minutes || '').trim()
-    };
-    statsByGame.set(row.game_id, gameStats);
-  });
 
   const hydratedGames = games.map((game) => ({
     id: game.id,
@@ -2397,7 +2380,7 @@ function readState() {
     teamBName: game.team_b_name,
     teamAScore: toInt(game.team_a_score),
     teamBScore: toInt(game.team_b_score),
-    playerStats: statsByGame.get(game.id) || {},
+    playerStats: {},
     dnpPlayers: parseJsonSafe(game.dnp_players_json, []),
     underReview: toInt(game.under_review) === 1,
     youtubeUrl: game.youtube_url || '',
@@ -4136,6 +4119,21 @@ app.put('/api/state', async (req, res) => {
     const existingLogs = selectAllGameLogsStmt.all();
     const existingLogByGameId = new Map(existingLogs.map((row) => [String(row.id || ''), row]));
 
+    const existingAllStats = selectGamePlayerStatsStmt.all();
+    const existingStatsByGameId = new Map();
+    existingAllStats.forEach((row) => {
+      const gameStats = existingStatsByGameId.get(String(row.game_id)) || {};
+      gameStats[row.player_id] = {
+        pts: toInt(row.pts), ast: toInt(row.ast), reb: toInt(row.reb),
+        stl: toInt(row.stl), blk: toInt(row.blk), to: toInt(row.turnover),
+        pf: toInt(row.pf), fg2m: toInt(row.fg2m), fg3m: toInt(row.fg3m),
+        fg2m_miss: toInt(row.fg2m_miss), fg3m_miss: toInt(row.fg3m_miss),
+        ftm: toInt(row.ftm), ft_miss: toInt(row.ft_miss),
+        min: String(row.minutes || '').trim()
+      };
+      existingStatsByGameId.set(String(row.game_id), gameStats);
+    });
+
     const gamesWithPreservedData = games.map((game) => {
       if (!game || typeof game !== 'object') return game;
       const id = String(game.id || '');
@@ -4154,6 +4152,12 @@ app.put('/api/state', async (req, res) => {
           if (!hasLog) next = { ...next, gameLog: parseJsonSafe(existingLog.game_log_json, []) };
           if (!hasSnapshots) next = { ...next, periodSnapshots: parseJsonSafe(existingLog.period_snapshots_json, []) };
         }
+      }
+
+      const hasStats = next.playerStats && typeof next.playerStats === 'object' && Object.keys(next.playerStats).length > 0;
+      if (!hasStats) {
+        const existingStats = existingStatsByGameId.get(id);
+        if (existingStats) next = { ...next, playerStats: existingStats };
       }
 
       return next;
@@ -4343,10 +4347,31 @@ app.get('/api/games/:gameId/detail', (req, res) => {
     res.status(404).json({ error: 'Game not found.' });
     return;
   }
+  const statsRows = selectGamePlayerStatsByIdStmt.all(gameId);
+  const playerStats = {};
+  statsRows.forEach((r) => {
+    playerStats[r.player_id] = {
+      pts: toInt(r.pts),
+      ast: toInt(r.ast),
+      reb: toInt(r.reb),
+      stl: toInt(r.stl),
+      blk: toInt(r.blk),
+      to: toInt(r.turnover),
+      pf: toInt(r.pf),
+      fg2m: toInt(r.fg2m),
+      fg3m: toInt(r.fg3m),
+      fg2m_miss: toInt(r.fg2m_miss),
+      fg3m_miss: toInt(r.fg3m_miss),
+      ftm: toInt(r.ftm),
+      ft_miss: toInt(r.ft_miss),
+      min: String(r.minutes || '').trim()
+    };
+  });
   res.setHeader('Cache-Control', 'no-store');
   res.json({
     gameLog: parseJsonSafe(row.game_log_json, []),
-    periodSnapshots: parseJsonSafe(row.period_snapshots_json, [])
+    periodSnapshots: parseJsonSafe(row.period_snapshots_json, []),
+    playerStats
   });
 });
 

@@ -3142,44 +3142,22 @@
                 { id: 'pf', label: 'PF', tabLabel: 'Fouls' }
             ];
             const getTeamTotalValue = (team, key) => {
-                const teamId = String(team?.id || '').trim();
-                const playerIds = new Set((Array.isArray(team?.players) ? team.players : []).map((player) => String(player?.id || '').trim()).filter(Boolean));
-                const totals = (games || []).reduce((acc, game) => {
-                    if (!game || (game.teamAId !== teamId && game.teamBId !== teamId)) {
-                        return acc;
-                    }
-
-                    const playerStats = game?.playerStats || {};
-                    Object.entries(playerStats).forEach(([playerId, stats]) => {
-                        if (!playerIds.has(String(playerId || '').trim())) return;
-                        const s = stats || {};
-                        acc.pts += Number(s.pts || 0);
-                        acc.reb += Number(s.reb || 0);
-                        acc.ast += Number(s.ast || 0);
-                        acc.stl += Number(s.stl || 0);
-                        acc.blk += Number(s.blk || 0);
-                        acc.to += Number(s.to || 0);
-                        acc.pf += Number(s.pf || 0);
-                        acc.fg2m += Number(s.fg2m || 0);
-                        acc.fg2m_miss += Number(s.fg2m_miss || 0);
-                        acc.fg3m += Number(s.fg3m || 0);
-                        acc.fg3m_miss += Number(s.fg3m_miss || 0);
-                    });
-
+                const players = Array.isArray(team?.players) ? team.players : [];
+                const totals = players.reduce((acc, player) => {
+                    const s = player?.totalStats || {};
+                    acc.pts += Number(s.pts || 0);
+                    acc.reb += Number(s.reb || 0);
+                    acc.ast += Number(s.ast || 0);
+                    acc.stl += Number(s.stl || 0);
+                    acc.blk += Number(s.blk || 0);
+                    acc.to += Number(s.to || 0);
+                    acc.pf += Number(s.pf || 0);
+                    acc.fg2m += Number(s.fg2m || 0);
+                    acc.fg2m_miss += Number(s.fg2m_miss || 0);
+                    acc.fg3m += Number(s.fg3m || 0);
+                    acc.fg3m_miss += Number(s.fg3m_miss || 0);
                     return acc;
-                }, {
-                    pts: 0,
-                    reb: 0,
-                    ast: 0,
-                    stl: 0,
-                    blk: 0,
-                    to: 0,
-                    pf: 0,
-                    fg2m: 0,
-                    fg2m_miss: 0,
-                    fg3m: 0,
-                    fg3m_miss: 0
-                });
+                }, { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg2m_miss: 0, fg3m: 0, fg3m_miss: 0 });
 
                 if (key === 'fgPct') {
                     const made = totals.fg2m + totals.fg3m;
@@ -3307,7 +3285,7 @@
                         if (cancelled) return;
                         setGames((prev) => prev.map((g) =>
                             g.id === selectedHistoryGameId
-                                ? { ...g, gameLog: data.gameLog || [], periodSnapshots: data.periodSnapshots || [], _detailLoaded: true }
+                                ? { ...g, gameLog: data.gameLog || [], periodSnapshots: data.periodSnapshots || [], playerStats: data.playerStats || {}, _detailLoaded: true }
                                 : g
                         ));
                     })
@@ -4441,8 +4419,7 @@
                     })();
                     if (cachedState?.dirty && !isSharedGameUrl) {
                         const cachedGames = Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : [];
-                        const cachedTeams = rebuildCareerStatsFromGames(normalizeTeamsForStorage(cachedState.teams), cachedGames);
-                        setTeams(cachedTeams);
+                        setTeams(normalizeTeamsForStorage(cachedState.teams));
                         setGames(cachedGames);
                         setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
                         // Do not return here. Dirty cache is only a temporary local snapshot;
@@ -4464,18 +4441,15 @@
                                 underReview: Boolean(game?.underReview)
                             }))
                             .sort((a, b) => b.id.localeCompare(a.id));
-                        const rebuiltTeams = rebuildCareerStatsFromGames(normalizedTeams, normalizedGames);
-
-                        setTeams(rebuiltTeams);
+                        setTeams(normalizedTeams);
                         setGames(normalizedGames);
                         setStatActions(loadedActions);
-                        writeCachedAppState(rebuiltTeams, normalizedGames, loadedActions, { dirty: false });
+                        writeCachedAppState(normalizedTeams, normalizedGames, loadedActions, { dirty: false });
                         gamesBootstrappedRef.current = true;
                     } catch (e) {
                         if (cachedState) {
                             const cachedGames = Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : [];
-                            const cachedTeams = rebuildCareerStatsFromGames(normalizeTeamsForStorage(cachedState.teams), cachedGames);
-                            setTeams(cachedTeams);
+                            setTeams(normalizeTeamsForStorage(cachedState.teams));
                             setGames(cachedGames);
                             setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
                             gamesBootstrappedRef.current = true;
@@ -4840,7 +4814,7 @@
                                         const gameId = String(remoteGame?.id || '');
                                         const prevGame = prevGameMap.get(gameId);
                                         if (prevGame?._detailLoaded) {
-                                            remoteGame = { ...remoteGame, gameLog: prevGame.gameLog, periodSnapshots: prevGame.periodSnapshots, _detailLoaded: true };
+                                            remoteGame = { ...remoteGame, gameLog: prevGame.gameLog, periodSnapshots: prevGame.periodSnapshots, playerStats: prevGame.playerStats, _detailLoaded: true };
                                         }
                                         const pending = pendingYoutubeSaveRef.current[gameId];
                                         if (!pending) return remoteGame;
@@ -4869,7 +4843,7 @@
                                         return nextGame;
                                     });
 
-                                    setTeams(rebuildCareerStatsFromGames(normalizedRemoteTeams, resolvedGames));
+                                    setTeams(normalizedRemoteTeams);
                                     return resolvedGames;
                                 });
                             }
@@ -5391,10 +5365,9 @@
                         const persistedGames = Array.isArray(payload?.games)
                             ? payload.games
                             : updatedGames;
-                        const rebuiltTeams = rebuildCareerStatsFromGames(persistedTeams, persistedGames);
-                        setTeams(rebuiltTeams);
+                        setTeams(persistedTeams);
                         setGames(persistedGames);
-                        writeCachedAppState(rebuiltTeams, persistedGames, statActions, { dirty: false });
+                        writeCachedAppState(persistedTeams, persistedGames, statActions, { dirty: false });
                     }
                     return true;
                 } catch (error) {
@@ -9267,42 +9240,7 @@
                 ft_miss: 0
             });
 
-            const rebuildCareerStatsFromGames = (baseTeams, sourceGames) => {
-                const resetTeams = (baseTeams || []).map((team) => ({
-                    ...team,
-                    players: (team.players || []).map((player) => ({
-                        ...player,
-                        gamesPlayed: 0,
-                        totalStats: createEmptyPlayerTotals()
-                    }))
-                }));
 
-                const playerLookup = new Map();
-                resetTeams.forEach((team, teamIndex) => {
-                    (team.players || []).forEach((player, playerIndex) => {
-                        playerLookup.set(player.id, { teamIndex, playerIndex });
-                    });
-                });
-
-                (sourceGames || []).forEach((game) => {
-                    const statsByPlayer = game?.playerStats || {};
-                    const dnpSet = new Set(Array.isArray(game?.dnpPlayers) ? game.dnpPlayers : []);
-
-                    Object.entries(statsByPlayer).forEach(([playerId, statLine]) => {
-                        if (dnpSet.has(playerId)) return;
-                        const playerRef = playerLookup.get(playerId);
-                        if (!playerRef) return;
-
-                        const player = resetTeams[playerRef.teamIndex].players[playerRef.playerIndex];
-                        player.gamesPlayed = (player.gamesPlayed || 0) + 1;
-                        PLAYER_STAT_FIELDS.forEach((field) => {
-                            player.totalStats[field] = (player.totalStats[field] || 0) + (Number(statLine?.[field] || 0) || 0);
-                        });
-                    });
-                });
-
-                return resetTeams;
-            };
 
             const handleToggleHistoricDnp = async (gameId, playerId) => {
                 if (!isLoggedIn) return;
@@ -9335,7 +9273,14 @@
                         };
                     });
 
-                    const updatedTeams = rebuildCareerStatsFromGames(teams, updatedGames);
+                    const gamesPlayedDelta = currentlyDnp ? 1 : -1;
+                    const updatedTeams = teams.map((team) => ({
+                        ...team,
+                        players: team.players.map((player) => {
+                            if (player.id !== playerId) return player;
+                            return { ...player, gamesPlayed: Math.max(0, (player.gamesPlayed || 0) + gamesPlayedDelta) };
+                        })
+                    }));
                     setGames(updatedGames);
                     setTeams(updatedTeams);
                     await saveFullState(updatedTeams, updatedGames);
@@ -9996,18 +9941,11 @@
             };
 
             const leaguePlayerPool = teams.flatMap((t) => t.players.map((p) => {
-                const aggregate = getArchivedPlayerAggregate(t.id, p.id);
                 const playerForLeaders = {
                     ...p,
                     team: t.name,
                     teamId: t.id,
-                    gamesPlayed: aggregate.gamesPlayed,
-                    totalStats: aggregate.totalStats,
-                    perStyleScore: getPlayerSeasonPerStyleScore({
-                        ...p,
-                        gamesPlayed: aggregate.gamesPlayed,
-                        totalStats: aggregate.totalStats
-                    })
+                    perStyleScore: getPlayerSeasonPerStyleScore(p)
                 };
 
                 return {
