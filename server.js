@@ -1256,6 +1256,49 @@ function buildSocialMetaTags({ req, game, teams = [] }) {
   ].join('\n    ');
 }
 
+function buildPlayerSocialMetaTags({ req, player, team }) {
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const teamId = String(player?.teamId || team?.id || '').trim();
+  const playerId = String(player?.id || '').trim();
+  const canonicalPath = `/teams/player/${encodeURIComponent(teamId)}/${encodeURIComponent(playerId)}`;
+  const canonicalUrl = `${origin}${canonicalPath}`;
+
+  const playerName = normalizeSocialCoverText(player?.name || 'Player');
+  const teamName = normalizeSocialCoverText(team?.name || '');
+  const gp = Number(player?.gamesPlayed || 0);
+  const stats = player?.totalStats || {};
+  const ptsAvg = gp > 0 ? (Number(stats.pts || 0) / gp).toFixed(1) : '0.0';
+  const rebAvg = gp > 0 ? (Number(stats.reb || 0) / gp).toFixed(1) : '0.0';
+  const astAvg = gp > 0 ? (Number(stats.ast || 0) / gp).toFixed(1) : '0.0';
+
+  const title = `${playerName} · WKND Basketball`;
+  const description = gp > 0
+    ? `${playerName} — ${gp} GP · ${ptsAvg} PTS · ${rebAvg} REB · ${astAvg} AST per game${teamName ? ` for ${teamName}` : ''}.`
+    : `${playerName}${teamName ? ` · ${teamName}` : ''} · WKND Basketball League.`;
+
+  const versionSource = [playerName, teamName, gp, ptsAvg, rebAvg, astAvg, String(player?.pictureUrl || '')].join('|');
+  const imageVersion = crypto.createHash('sha1').update(versionSource).digest('hex').slice(0, 12);
+  const imageUrl = `${origin}/api/social-cover/player/${encodeURIComponent(playerId)}.png?v=${encodeURIComponent(imageVersion)}`;
+
+  return [
+    `<title>${escapeHtml(title)}</title>`,
+    `<meta name="description" content="${escapeHtml(trimForMeta(description, 190))}">`,
+    `<link rel="canonical" href="${escapeHtml(canonicalUrl)}">`,
+    `<meta property="og:type" content="profile">`,
+    `<meta property="og:site_name" content="WKND League Stats">`,
+    `<meta property="og:title" content="${escapeHtml(title)}">`,
+    `<meta property="og:description" content="${escapeHtml(trimForMeta(description, 190))}">`,
+    `<meta property="og:url" content="${escapeHtml(canonicalUrl)}">`,
+    `<meta property="og:image" content="${escapeHtml(imageUrl)}">`,
+    `<meta property="og:image:width" content="1200">`,
+    `<meta property="og:image:height" content="630">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${escapeHtml(title)}">`,
+    `<meta name="twitter:description" content="${escapeHtml(trimForMeta(description, 190))}">`,
+    `<meta name="twitter:image" content="${escapeHtml(imageUrl)}">`
+  ].join('\n    ');
+}
+
 async function buildSocialCoverPng(game, teams = [], baseOrigin = '') {
   requireSharp();
   const W = 1200;
@@ -1655,6 +1698,137 @@ async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOri
   }
 
   return sharp(base)
+    .composite(layers)
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
+async function buildPlayerSocialCoverPng(player, team, baseOrigin = '') {
+  requireSharp();
+  const W = 1200;
+  const H = 630;
+  const teamColor = escapeHtml(String(team?.color || '#f97316'));
+  const teamName = normalizeSocialCoverText(team?.name || '').toUpperCase();
+  const playerName = normalizeSocialCoverText(player?.name || 'Player').toUpperCase();
+  const number = escapeHtml(String(player?.number || ''));
+  const positions = Array.isArray(player?.positions) ? player.positions.join(' · ') : '';
+
+  const gp = Number(player?.gamesPlayed || 0);
+  const stats = player?.totalStats || {};
+  const ptsAvg = gp > 0 ? (Number(stats.pts || 0) / gp).toFixed(1) : '–';
+  const rebAvg = gp > 0 ? (Number(stats.reb || 0) / gp).toFixed(1) : '–';
+  const astAvg = gp > 0 ? (Number(stats.ast || 0) / gp).toFixed(1) : '–';
+  const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
+  const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+  const fgPct = fgAtt > 0 ? `${Math.round((fgMade / fgAtt) * 100)}%` : '–';
+
+  const nameParts = playerName.split(' ');
+  const firstName = escapeHtml(nameParts[0] || '');
+  const lastName = escapeHtml(nameParts.slice(1).join(' ') || '');
+  const maxLen = Math.max((nameParts[0] || '').length, nameParts.slice(1).join(' ').length);
+  const nameFontSize = maxLen <= 7 ? 96 : maxLen <= 10 ? 80 : maxLen <= 13 ? 66 : maxLen <= 16 ? 54 : 44;
+  const nameLineSpacing = nameFontSize + 12;
+  const firstNameY = lastName ? 238 : 285;
+  const lastNameY = firstNameY + nameLineSpacing;
+
+  const sublineItems = [number ? `#${number}` : null, teamName || null, positions || null].filter(Boolean);
+  const subline = escapeHtml(sublineItems.join('  ·  '));
+
+  const photoWidth = 520;
+  const photoLeft = W - photoWidth;
+
+  let photoBuffer = null;
+  if (player?.pictureUrl) {
+    try {
+      const src = await readImageBufferFromSource(player.pictureUrl, baseOrigin);
+      if (src) {
+        photoBuffer = await sharp(src)
+          .rotate()
+          .resize(photoWidth, H, { fit: 'cover', position: 'centre' })
+          .png()
+          .toBuffer();
+      }
+    } catch (_) {}
+  }
+
+  let logoBuffer = null;
+  const logoPath = resolveSocialCoverLogoPath();
+  if (logoPath) {
+    try {
+      logoBuffer = await sharp(logoPath)
+        .resize({ width: 160, height: 32, fit: 'contain', withoutEnlargement: true })
+        .png()
+        .toBuffer();
+    } catch (_) {}
+  }
+
+  const bgSvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#020817"/>
+      <stop offset="55%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#bg)"/>
+</svg>`);
+
+  const overlaySvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#020817" stop-opacity="1"/>
+      <stop offset="55%" stop-color="#020817" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#020817" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="textClip">
+      <rect x="0" y="0" width="720" height="${H}"/>
+    </clipPath>
+  </defs>
+
+  ${photoBuffer ? `<rect x="${photoLeft - 80}" y="0" width="${photoWidth + 80}" height="${H}" fill="url(#fade)"/>` : ''}
+
+  <rect x="0" y="0" width="${W}" height="6" fill="${teamColor}"/>
+  <rect x="0" y="${H - 6}" width="${W}" height="6" fill="${teamColor}"/>
+
+  <text x="60" y="52" fill="#ffffff" font-size="18" font-weight="800" font-family="${SVG_FONT_STACK}">WKND</text>
+  <text x="60" y="68" fill="${teamColor}" font-size="9" font-weight="700" font-family="${SVG_FONT_STACK}">BASKETBALL</text>
+
+  <text x="60" y="142" fill="${teamColor}" font-size="17" font-weight="700" font-family="${SVG_FONT_STACK}">${subline}</text>
+
+  <text x="60" y="${firstNameY}" fill="#ffffff" font-size="${nameFontSize}" font-weight="800" font-family="${SVG_FONT_STACK}" clip-path="url(#textClip)">${firstName}</text>
+  ${lastName ? `<text x="60" y="${lastNameY}" fill="#ffffff" font-size="${nameFontSize}" font-weight="800" font-family="${SVG_FONT_STACK}" clip-path="url(#textClip)">${lastName}</text>` : ''}
+
+  <line x1="60" y1="402" x2="680" y2="402" stroke="#1e293b" stroke-width="2"/>
+
+  <text x="60" y="458" fill="${teamColor}" font-size="46" font-weight="900" font-family="${SVG_FONT_STACK}">${gp}</text>
+  <text x="60" y="484" fill="#475569" font-size="14" font-weight="600" font-family="${SVG_FONT_STACK}">GP</text>
+
+  <text x="200" y="458" fill="#ffffff" font-size="46" font-weight="900" font-family="${SVG_FONT_STACK}">${escapeHtml(ptsAvg)}</text>
+  <text x="200" y="484" fill="#475569" font-size="14" font-weight="600" font-family="${SVG_FONT_STACK}">PTS</text>
+
+  <text x="340" y="458" fill="#ffffff" font-size="46" font-weight="900" font-family="${SVG_FONT_STACK}">${escapeHtml(rebAvg)}</text>
+  <text x="340" y="484" fill="#475569" font-size="14" font-weight="600" font-family="${SVG_FONT_STACK}">REB</text>
+
+  <text x="480" y="458" fill="#ffffff" font-size="46" font-weight="900" font-family="${SVG_FONT_STACK}">${escapeHtml(astAvg)}</text>
+  <text x="480" y="484" fill="#475569" font-size="14" font-weight="600" font-family="${SVG_FONT_STACK}">AST</text>
+
+  <text x="620" y="458" fill="#ffffff" font-size="46" font-weight="900" font-family="${SVG_FONT_STACK}">${escapeHtml(fgPct)}</text>
+  <text x="620" y="484" fill="#475569" font-size="14" font-weight="600" font-family="${SVG_FONT_STACK}">FG%</text>
+
+  <text x="60" y="516" fill="#334155" font-size="12" font-weight="600" font-family="${SVG_FONT_STACK}">SEASON AVERAGES PER GAME</text>
+
+  ${!photoBuffer ? `
+  <circle cx="980" cy="315" r="148" fill="#1e293b" stroke="${teamColor}" stroke-width="2" stroke-opacity="0.35"/>
+  <text x="980" y="355" text-anchor="middle" fill="#334155" font-size="72" font-weight="800" font-family="${SVG_FONT_STACK}">${escapeHtml(getInitials(player?.name || ''))}</text>
+  ` : ''}
+</svg>`);
+
+  const layers = [];
+  if (photoBuffer) layers.push({ input: photoBuffer, left: photoLeft, top: 0 });
+  layers.push({ input: overlaySvg, top: 0, left: 0 });
+  if (logoBuffer) layers.push({ input: logoBuffer, left: 40, top: 28 });
+
+  return sharp(bgSvg)
     .composite(layers)
     .png({ compressionLevel: 9 })
     .toBuffer();
@@ -2621,16 +2795,38 @@ function renderInjectedIndex(req, res) {
       (String(req.query.view || '').toLowerCase() === 'game')
       || (pathParts[0] === 'history' && pathParts[1] === 'game')
     );
+    const isPlayerView = pathParts[0] === 'teams' && pathParts[1] === 'player' && pathParts[2] && pathParts[3];
+    const playerViewTeamId = isPlayerView ? decodeURIComponent(String(pathParts[2] || '').trim()) : '';
+    const playerViewPlayerId = isPlayerView ? decodeURIComponent(String(pathParts[3] || '').trim()) : '';
+
     const state = readState();
     const game = isGameView ? ((state.games || []).find((item) => item.id === gameId) || null) : null;
     const teams = state.teams || [];
+
+    let playerViewPlayer = null;
+    let playerViewTeam = null;
+    if (isPlayerView && playerViewPlayerId) {
+      for (const team of teams) {
+        const match = (team.players || []).find((p) => p.id === playerViewPlayerId);
+        if (match) {
+          playerViewPlayer = match;
+          playerViewTeam = team;
+          break;
+        }
+      }
+    }
+
     const indexPath = path.join(__dirname, 'index.html');
     const html = fs.readFileSync(indexPath, 'utf8');
     let metaTags = '';
     let gaHeadSnippet = '';
 
     try {
-      metaTags = buildSocialMetaTags({ req, game, teams });
+      if (isPlayerView && playerViewPlayer) {
+        metaTags = buildPlayerSocialMetaTags({ req, player: playerViewPlayer, team: playerViewTeam });
+      } else {
+        metaTags = buildSocialMetaTags({ req, game, teams });
+      }
     } catch {
       metaTags = '';
     }
@@ -2793,13 +2989,50 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
   }
 });
 
+app.get('/api/social-cover/player/:playerId.png', async (req, res) => {
+  try {
+    if (!sharp) {
+      res.status(501).json({ error: 'Social cover generation is disabled in this build because sharp is not installed.' });
+      return;
+    }
+    const playerId = String(req.params.playerId || '').trim();
+    if (!playerId) {
+      res.status(400).json({ error: 'Missing playerId.' });
+      return;
+    }
+    const baseOrigin = `${req.protocol}://${req.get('host')}`;
+    const state = readState();
+    const teams = state.teams || [];
+    let foundPlayer = null;
+    let foundTeam = null;
+    for (const team of teams) {
+      const match = (team.players || []).find((p) => p.id === playerId);
+      if (match) {
+        foundPlayer = match;
+        foundTeam = team;
+        break;
+      }
+    }
+    if (!foundPlayer) {
+      res.status(404).json({ error: 'Player not found.' });
+      return;
+    }
+    const png = await buildPlayerSocialCoverPng(foundPlayer, foundTeam, baseOrigin);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(png);
+  } catch {
+    res.status(500).json({ error: 'Failed to build player social cover.' });
+  }
+});
+
 app.post('/api/generate-writeup', async (req, res) => {
   if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
     res.status(400).json({ error: 'Neither Gemini nor OpenAI API key is configured on the server.' });
     return;
   }
 
-  const { game, playerOfTheGame, bestPerformers, standoutPerformersByTeam, playByPlay, finalMoments, leadSwingSummary, lineupPatternSummary } = req.body || {};
+  const { game, playerOfTheGame, originalPlayerOfTheGame, potgSelectionMode, bestPerformers, standoutPerformersByTeam, playByPlay, finalMoments, leadSwingSummary, lineupPatternSummary } = req.body || {};
   if (!game || typeof game !== 'object') {
     res.status(400).json({ error: 'Body must include game object.' });
     return;
@@ -2841,6 +3074,29 @@ app.post('/api/generate-writeup', async (req, res) => {
   const teamBStandoutLines = Array.isArray(standoutPerformersByTeam?.teamB)
     ? standoutPerformersByTeam.teamB.slice(0, 2).map(formatPerformerLine)
     : [];
+
+  // If manual POTG override, ensure original best player appears at the top of outstanding performers
+  if (potgSelectionMode === 'manual' && originalPlayerOfTheGame) {
+    const originalTeamName = originalPlayerOfTheGame.teamName || '';
+    const formattedOriginal = formatPerformerLine(originalPlayerOfTheGame);
+    const isInTeamA = originalTeamName === (game.teamAName || '');
+    const targetList = isInTeamA ? teamAStandoutLines : teamBStandoutLines;
+    
+    // Check if original player already mentioned in their team's standout list
+    const alreadyMentioned = targetList.some(line => 
+      (originalPlayerOfTheGame.number && line.includes(`#${originalPlayerOfTheGame.number}`)) ||
+      (originalPlayerOfTheGame.name && line.includes(originalPlayerOfTheGame.name))
+    );
+    
+    // Add original player at the TOP of list if not already mentioned
+    if (!alreadyMentioned) {
+      if (isInTeamA) {
+        teamAStandoutLines.unshift(formattedOriginal);
+      } else {
+        teamBStandoutLines.unshift(formattedOriginal);
+      }
+    }
+  }
 
   const potgLine = playerOfTheGame
     ? `#${playerOfTheGame.number || '-'} ${playerOfTheGame.name || 'Unknown'} (${playerOfTheGame.teamName || 'Unknown Team'}) - PTS ${Number(playerOfTheGame?.stats?.pts || 0)}, REB ${Number(playerOfTheGame?.stats?.reb || 0)}, AST ${Number(playerOfTheGame?.stats?.ast || 0)}, STL ${Number(playerOfTheGame?.stats?.stl || 0)}, BLK ${Number(playerOfTheGame?.stats?.blk || 0)}`

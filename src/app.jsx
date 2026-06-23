@@ -5113,6 +5113,46 @@
                 awaitingPeriodStartRef.current = awaitingPeriodStart;
             }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, dnpPlayers, lineupRevision, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, awaitingPeriodStart]);
 
+            const isQuotaExceededStorageError = (error) => {
+                if (!error) return false;
+                const name = String(error?.name || '');
+                const message = String(error?.message || '');
+                return name === 'QuotaExceededError' || /quota/i.test(message);
+            };
+
+            const buildCompactLiveSessionCache = (session) => {
+                const safeSession = session && typeof session === 'object' ? session : {};
+                return {
+                    ...safeSession,
+                    // Keep session identity and latest state, but cap the heaviest arrays.
+                    periodSnapshots: Array.isArray(safeSession.periodSnapshots) ? safeSession.periodSnapshots.slice(-16) : [],
+                    gameLog: Array.isArray(safeSession.gameLog) ? safeSession.gameLog.slice(-200) : [],
+                    loggedHistory: Array.isArray(safeSession.loggedHistory) ? safeSession.loggedHistory.slice(-80) : []
+                };
+            };
+
+            const persistActiveLiveSessionToLocal = (session) => {
+                try {
+                    localStorage.setItem('active_live_session', JSON.stringify(session));
+                    return true;
+                } catch (error) {
+                    if (!isQuotaExceededStorageError(error)) {
+                        return false;
+                    }
+                }
+
+                try {
+                    const compactSession = buildCompactLiveSessionCache(session);
+                    localStorage.setItem('active_live_session', JSON.stringify(compactSession));
+                    return true;
+                } catch (_) {
+                    try {
+                        localStorage.removeItem('active_live_session');
+                    } catch (__){ }
+                    return false;
+                }
+            };
+
             useEffect(() => {
                 if (suppressLiveSessionSyncRef.current) {
                     const hasPendingLocalEvents = (pendingLiveEventsRef.current || []).length > 0;
@@ -5149,13 +5189,13 @@
                     sessionRevisionRef.current = nextSessionRevision;
                     lastLocalSessionUpdatedAtRef.current = sessionUpdatedAt;
                     const session = { teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, clockControlRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
-                    localStorage.setItem('active_live_session', JSON.stringify(session));
+                    const persistedLocally = persistActiveLiveSessionToLocal(session);
                     hadLiveSessionRef.current = true;
                     setSyncDebug((prev) => ({
                         ...prev,
                         pendingQueue: (pendingLiveEventsRef.current || []).length,
                         lastPersist: `PUT QUEUED ${new Date().toLocaleTimeString()}`,
-                        persistError: ''
+                        persistError: persistedLocally ? '' : 'Local session cache skipped (storage full).'
                     }));
                     queueActiveSessionSync('put', session);
                     flushPendingActiveSessionSync();
@@ -5739,6 +5779,17 @@
                         .sort((a, b) => b.perScore - a.perScore || b.stats.pts - a.stats.pts)
                         .slice(0, 8);
 
+                    // Compute original auto-derived POTG for context when a manual POTG differs
+                    const autoPlayerOfTheGame = (() => {
+                        const manualPotgSet = String(game?.manualPotgPlayerId || '').trim();
+                        if (!manualPotgSet) return playerOfTheGame; // No manual override, use current
+                        // Recompute without manual override to find who would naturally be POTG
+                        const topAll = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])].sort((a, b) => Number(b.perScore || 0) - Number(a.perScore || 0));
+                        return topAll[0] || null;
+                    })();
+
+                    const potgSelectionMode = game?.manualPotgPlayerId ? 'manual' : 'auto';
+
                     const orderedGameLog = [...(Array.isArray(game.gameLog) ? game.gameLog : [])].reverse();
                     const isRecapNoiseEvent = (entry, idx, allEntries) => {
                         const text = String(entry?.text || '').toLowerCase();
@@ -5944,6 +5995,14 @@
                                 perScore: Number(playerOfTheGame.perScore || 0),
                                 stats: playerOfTheGame.stats || {}
                             } : null,
+                            originalPlayerOfTheGame: (potgSelectionMode === 'manual' && autoPlayerOfTheGame && autoPlayerOfTheGame.id !== playerOfTheGame?.id) ? {
+                                name: autoPlayerOfTheGame.name,
+                                number: autoPlayerOfTheGame.number,
+                                teamName: autoPlayerOfTheGame.teamName,
+                                perScore: Number(autoPlayerOfTheGame.perScore || 0),
+                                stats: autoPlayerOfTheGame.stats || {}
+                            } : null,
+                            potgSelectionMode,
                             bestPerformers,
                             standoutPerformersByTeam,
                             playByPlay: pbpForPrompt,
@@ -6667,7 +6726,7 @@
                     awaitingPeriodStart,
                     sessionUpdatedAt
                 };
-                localStorage.setItem('active_live_session', JSON.stringify(session));
+                persistActiveLiveSessionToLocal(session);
                 hadLiveSessionRef.current = true;
                 try {
                     const putResult = await apiRequest('/api/active-session', {
@@ -10049,6 +10108,313 @@
                 return String(Number(stats[metricKey] || 0));
             };
 
+            const shareLeaderBlock = async (entry, mode) => {
+                const top10 = entry.ranked.slice(0, 10);
+                if (top10.length === 0) { showToast('No players to share yet.', 'error'); return; }
+
+                const colorMap = {
+                    pts: '#fb923c', reb: '#34d399', ast: '#60a5fa', stl: '#2dd4bf',
+                    blk: '#a78bfa', to: '#f87171', fgPct: '#22d3ee', fg3Pct: '#38bdf8', pf: '#fb7185'
+                };
+                const accent = colorMap[entry.id] || '#f97316';
+
+                const tryLoadImg = (src) => new Promise((resolve) => {
+                    if (!src) { resolve(null); return; }
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => resolve(img);
+                    img.onerror = () => resolve(null);
+                    img.src = src;
+                });
+
+                const W = 440;
+                const barH = 6;
+                const brandH = 54;
+                const heroH = 262;
+                const divH = 30;
+                const rowH = 40;
+                const footerH = 32;
+                const listCount = Math.min(top10.length - 1, 9);
+                const H = barH + brandH + heroH + divH + listCount * rowH + footerH + barH;
+
+                const canvas = document.createElement('canvas');
+                canvas.width = W;
+                canvas.height = H;
+                const ctx = canvas.getContext('2d');
+
+                // ── Background gradient ──────────────────────────────────────
+                const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+                bgGrad.addColorStop(0, '#020817');
+                bgGrad.addColorStop(1, '#0d1424');
+                ctx.fillStyle = bgGrad;
+                ctx.fillRect(0, 0, W, H);
+
+                // ── Top accent bar ───────────────────────────────────────────
+                const topBarGrad = ctx.createLinearGradient(0, 0, W, 0);
+                topBarGrad.addColorStop(0, accent);
+                topBarGrad.addColorStop(1, accent + 'bb');
+                ctx.fillStyle = topBarGrad;
+                ctx.fillRect(0, 0, W, barH);
+
+                // ── Bottom accent bar ────────────────────────────────────────
+                ctx.fillStyle = accent + '88';
+                ctx.fillRect(0, H - barH, W, barH);
+
+                // ── Brand header ─────────────────────────────────────────────
+                const brandY = barH;
+                ctx.textAlign = 'left';
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 17px system-ui, sans-serif';
+                ctx.fillText('WKND', 20, brandY + 26);
+                ctx.fillStyle = accent;
+                ctx.font = 'bold 8px system-ui, sans-serif';
+                ctx.fillText('BASKETBALL', 20, brandY + 40);
+
+                // Mode pill (top right)
+                ctx.font = 'bold 9px system-ui, sans-serif';
+                const modeLabel = mode === 'perGame' ? 'PER GAME' : 'ACCUMULATED';
+                const modeLabelW = ctx.measureText(modeLabel).width + 18;
+                ctx.fillStyle = '#ffffff0d';
+                ctx.strokeStyle = '#ffffff18';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(W - 20 - modeLabelW, brandY + 14, modeLabelW, 20, 4);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = '#64748b';
+                ctx.textAlign = 'center';
+                ctx.fillText(modeLabel, W - 20 - modeLabelW / 2, brandY + 27);
+
+                // ── Hero section: #1 player ──────────────────────────────────
+                const heroY = barH + brandH;
+                const heroCX = W / 2;
+                const avatarR = 52;
+                const avatarCY = heroY + 94;
+
+                // Hero bg: subtle radial glow
+                const glowGrad = ctx.createRadialGradient(heroCX, avatarCY, 0, heroCX, avatarCY, 130);
+                glowGrad.addColorStop(0, accent + '28');
+                glowGrad.addColorStop(0.55, accent + '0a');
+                glowGrad.addColorStop(1, 'transparent');
+                ctx.fillStyle = glowGrad;
+                ctx.fillRect(0, heroY, W, heroH);
+
+                // "LEAGUE LEADER" label above avatar
+                ctx.textAlign = 'center';
+                ctx.fillStyle = accent;
+                ctx.font = 'bold 9px system-ui, sans-serif';
+                ctx.fillText('—  LEAGUE LEADER  —', heroCX, heroY + 20);
+
+                // Avatar glow rings (outermost to innermost)
+                const rings = [
+                    { r: avatarR + 18, alpha: 0.06, lw: 14 },
+                    { r: avatarR + 9,  alpha: 0.12, lw: 8  },
+                    { r: avatarR + 3,  alpha: 0.30, lw: 3  },
+                ];
+                rings.forEach(({ r, alpha, lw }) => {
+                    ctx.save();
+                    ctx.globalAlpha = alpha;
+                    ctx.strokeStyle = accent;
+                    ctx.lineWidth = lw;
+                    ctx.beginPath();
+                    ctx.arc(heroCX, avatarCY, r, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                });
+
+                // Avatar image
+                const heroImg = await tryLoadImg(top10[0].pictureUrl);
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(heroCX, avatarCY, avatarR, 0, Math.PI * 2);
+                ctx.clip();
+                if (heroImg) {
+                    ctx.drawImage(heroImg, heroCX - avatarR, avatarCY - avatarR, avatarR * 2, avatarR * 2);
+                } else {
+                    const pGrad = ctx.createLinearGradient(heroCX - avatarR, avatarCY - avatarR, heroCX + avatarR, avatarCY + avatarR);
+                    pGrad.addColorStop(0, '#1e293b');
+                    pGrad.addColorStop(1, '#0f172a');
+                    ctx.fillStyle = pGrad;
+                    ctx.fill();
+                }
+                ctx.restore();
+                if (!heroImg) {
+                    const ini = (top10[0].name || '?').split(' ').map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+                    ctx.fillStyle = '#64748b';
+                    ctx.font = 'bold 26px system-ui, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(ini, heroCX, avatarCY + 9);
+                }
+
+                // Solid avatar ring
+                ctx.strokeStyle = accent;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.arc(heroCX, avatarCY, avatarR, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // "#1" badge pill below avatar
+                const badgePillW = 40;
+                const badgePillH = 22;
+                const badgePillX = heroCX - badgePillW / 2;
+                const badgePillY = avatarCY + avatarR - 10;
+                ctx.fillStyle = accent;
+                ctx.beginPath();
+                ctx.roundRect(badgePillX, badgePillY, badgePillW, badgePillH, 11);
+                ctx.fill();
+                ctx.fillStyle = '#000000';
+                ctx.font = 'bold 11px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('#1', heroCX, badgePillY + 15);
+
+                // Player name
+                const nameY = avatarCY + avatarR + 30;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 22px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(top10[0].name || '', heroCX, nameY);
+
+                // Team
+                ctx.fillStyle = '#64748b';
+                ctx.font = '12px system-ui, sans-serif';
+                ctx.fillText(top10[0].team || '', heroCX, nameY + 18);
+
+                // Big stat value with glow
+                const statVal = String(formatLeaderMetric(top10[0], entry.valueKey, mode));
+                const statY = nameY + 66;
+                ctx.save();
+                ctx.shadowColor = accent;
+                ctx.shadowBlur = 24;
+                ctx.fillStyle = accent;
+                ctx.font = 'bold 58px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(statVal, heroCX, statY);
+                ctx.restore();
+
+                // Stat label under value
+                ctx.fillStyle = '#475569';
+                ctx.font = 'bold 11px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(entry.statLabel, heroCX, statY + 18);
+
+                // ── Divider ──────────────────────────────────────────────────
+                const divY = heroY + heroH;
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(20, divY + divH / 2, W - 40, 1);
+                const divLabel = 'TOP 10';
+                ctx.font = 'bold 9px system-ui, sans-serif';
+                const divLabelW = ctx.measureText(divLabel).width + 20;
+                ctx.fillStyle = '#020817';
+                ctx.fillRect(heroCX - divLabelW / 2, divY + 4, divLabelW, divH - 8);
+                ctx.fillStyle = '#334155';
+                ctx.textAlign = 'center';
+                ctx.fillText(divLabel, heroCX, divY + divH / 2 + 4);
+
+                // ── List: #2–#10 ─────────────────────────────────────────────
+                const listY = divY + divH;
+                const listAvatarR = 16;
+                const listAvatarCX = 48;
+
+                for (let i = 1; i <= listCount; i++) {
+                    const player = top10[i];
+                    const rowY = listY + (i - 1) * rowH;
+                    const cy = rowY + rowH / 2;
+
+                    if (i > 1) {
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fillRect(16, rowY, W - 32, 1);
+                    }
+
+                    // Rank
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = '#475569';
+                    ctx.font = 'bold 10px system-ui, sans-serif';
+                    ctx.fillText(`#${i + 1}`, 20, cy + 4);
+
+                    // Avatar
+                    const img = await tryLoadImg(player.pictureUrl);
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(listAvatarCX, cy, listAvatarR, 0, Math.PI * 2);
+                    ctx.clip();
+                    if (img) {
+                        ctx.drawImage(img, listAvatarCX - listAvatarR, cy - listAvatarR, listAvatarR * 2, listAvatarR * 2);
+                    } else {
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                    if (!img) {
+                        const ini = (player.name || '?').split(' ').map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+                        ctx.textAlign = 'center';
+                        ctx.fillStyle = '#64748b';
+                        ctx.font = 'bold 9px system-ui, sans-serif';
+                        ctx.fillText(ini, listAvatarCX, cy + 3);
+                    }
+                    ctx.strokeStyle = '#334155';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.arc(listAvatarCX, cy, listAvatarR, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    // Name + team
+                    const textX = listAvatarCX + listAvatarR + 10;
+                    const maxNameW = W - textX - 68;
+                    ctx.textAlign = 'left';
+                    ctx.fillStyle = '#e2e8f0';
+                    ctx.font = 'bold 12px system-ui, sans-serif';
+                    let dn = player.name || '';
+                    while (dn.length > 1 && ctx.measureText(dn).width > maxNameW) dn = dn.slice(0, -1);
+                    if (dn !== player.name) dn = dn.trimEnd() + '…';
+                    ctx.fillText(dn, textX, cy - 1);
+                    ctx.fillStyle = '#475569';
+                    ctx.font = '10px system-ui, sans-serif';
+                    ctx.fillText(player.team || '', textX, cy + 13);
+
+                    // Value
+                    ctx.textAlign = 'right';
+                    ctx.fillStyle = accent;
+                    ctx.font = 'bold 14px system-ui, sans-serif';
+                    ctx.fillText(String(formatLeaderMetric(player, entry.valueKey, mode)), W - 16, cy + 5);
+                }
+
+                // ── Footer ───────────────────────────────────────────────────
+                const footerY = listY + listCount * rowH;
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(0, footerY, W, 1);
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#2d3f55';
+                ctx.font = 'bold 9px system-ui, sans-serif';
+                ctx.fillText('WKND BASKETBALL LEAGUE', W / 2, footerY + 21);
+
+                // ── Share or download ────────────────────────────────────────
+                const filename = `wknd-leaders-${entry.id}-${mode}.png`;
+                if (typeof navigator.share === 'function') {
+                    canvas.toBlob(async (blob) => {
+                        try {
+                            const file = new File([blob], filename, { type: 'image/png' });
+                            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                await navigator.share({ files: [file], title: `WKND ${entry.title} Leaders` });
+                            } else {
+                                const link = document.createElement('a');
+                                link.download = filename;
+                                link.href = URL.createObjectURL(blob);
+                                link.click();
+                                showToast(`${entry.title} leaders image downloaded.`, 'success');
+                            }
+                        } catch (err) {
+                            if (err.name !== 'AbortError') showToast('Could not share image.', 'error');
+                        }
+                    }, 'image/png');
+                } else {
+                    const link = document.createElement('a');
+                    link.download = filename;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    showToast(`${entry.title} leaders image downloaded.`, 'success');
+                }
+            };
+
             const summarizeGameTeamStats = (team, game) => {
                 const totals = {
                     pts: 0,
@@ -11217,8 +11583,9 @@
             };
 
             const renderPlayerCompactRow = (playerId, isTeamA, slotLabel = '') => {
+                if (!playerId) return null;
                 const teamObj = isTeamA ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
-                const player = teams.flatMap(t => t.players).find(p => p.id === playerId);
+                const player = teams && teams.length > 0 ? teams.flatMap(t => t?.players || []).find(p => p?.id === playerId) : null;
                 if (!player) return null;
                 const onCourtLastName = (typeof player.name === 'string' ? player.name.split(',')[0] : '').trim() || player.name;
                 const stats = liveStats[playerId] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
@@ -12182,7 +12549,7 @@
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="space-y-1.5">{getOrderedLiveLineupEntries(teamAId, teamALineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, true, slot))}</div>
+                                                <div className="space-y-1.5">{getOrderedLiveLineupEntries(teamAId, teamALineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, true, slot)).filter(Boolean)}</div>
                                                 {canOperateLive && teamALineup.length < 5 && (
                                                     <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2">
                                                         <div className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1.5">Available from bench ({teamALineup.length}/5)</div>
@@ -12311,7 +12678,7 @@
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="space-y-1.5">{getOrderedLiveLineupEntries(teamBId, teamBLineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, false, slot))}</div>
+                                                <div className="space-y-1.5">{getOrderedLiveLineupEntries(teamBId, teamBLineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, false, slot)).filter(Boolean)}</div>
                                                 {canOperateLive && teamBLineup.length < 5 && (
                                                     <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2">
                                                         <div className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1.5">Available from bench ({teamBLineup.length}/5)</div>
@@ -15221,8 +15588,15 @@
                                                                 </span>
                                                                 <div className="text-xs font-bold text-slate-200 truncate">{entry.title}</div>
                                                             </div>
-                                                            <div className="text-[10px] text-slate-500 font-bold shrink-0">
-                                                                {leadersStatMode === 'perGame' ? 'Per Game' : 'Totals'}
+                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                <div className="text-[10px] text-slate-500 font-bold">{leadersStatMode === 'perGame' ? 'Per Game' : 'Totals'}</div>
+                                                                <button
+                                                                    onClick={() => shareLeaderBlock(entry, leadersStatMode)}
+                                                                    className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-0.5"
+                                                                    title={`Share ${entry.title} leaders`}
+                                                                >
+                                                                    <Icons.Share />
+                                                                </button>
                                                             </div>
                                                         </div>
 
