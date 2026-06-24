@@ -1860,10 +1860,11 @@ async function buildCustomSocialCoverPng(game, teams, customImageBuffer, baseOri
   const potgColor = escapeHtml(String(potg?.teamColor || '#f97316'));
   const potgNameSize = !potgName ? 38 : potgName.length <= 18 ? 40 : potgName.length <= 24 ? 34 : 28;
 
-  // Avatar in POTG zone
+  // Avatar in POTG zone — cy tracks the vertical center of the text block
+  // Text block: label y=452, name y=452+size+8, stats +32, meta +24 → center ≈ 484 + size/2
   const avatarR = 60;
   const avatarCx = 88;
-  const avatarCy = 522;
+  const avatarCy = Math.round(484 + potgNameSize / 2);
   const avatarSize = avatarR * 2;
 
   let logoOverlay = null;
@@ -3390,7 +3391,21 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
     const gameId = String(req.params.gameId || '').trim();
     const baseOrigin = `${req.protocol}://${req.get('host')}`;
     const state = readState();
-    const game = (state.games || []).find((item) => item.id === gameId) || null;
+    const baseGame = (state.games || []).find((item) => item.id === gameId) || null;
+    let game = baseGame;
+    if (baseGame) {
+      const statRows = selectGamePlayerStatsByIdStmt.all(gameId);
+      const playerStats = {};
+      statRows.forEach((row) => {
+        playerStats[row.player_id] = {
+          pts: row.pts, ast: row.ast, reb: row.reb, stl: row.stl, blk: row.blk,
+          to: row.turnover, pf: row.pf, fg2m: row.fg2m, fg3m: row.fg3m,
+          fg2m_miss: row.fg2m_miss, fg3m_miss: row.fg3m_miss, ftm: row.ftm, ft_miss: row.ft_miss,
+          minutes: row.minutes
+        };
+      });
+      game = { ...baseGame, playerStats };
+    }
     let png = null;
     const coverRow = selectGameCoverByIdStmt.get(gameId);
     const customDataUrl = String(coverRow?.social_cover_data_url || '').trim();
