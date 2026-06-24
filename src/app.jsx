@@ -135,7 +135,7 @@
             const [teams, setTeams] = useState([]);
             const [games, setGames] = useState([]);
             const [statActions, setStatActions] = useState([]);
-            const [activeTab, setActiveTab] = useState('standings');
+            const [activeTab, setActiveTab] = useState('home');
             const [toast, setToast] = useState(null);
 
             // Added State to toggle roster view mode between 'averages' and 'totals'
@@ -148,6 +148,8 @@
             const [gameMetaSeriesId, setGameMetaSeriesId] = useState('');
             const [standingsStatMode, setStandingsStatMode] = useState('totals');
             const [leadersStatMode, setLeadersStatMode] = useState('perGame');
+            const [homeLeaderStat, setHomeLeaderStat] = useState('pts');
+            const [heroCarouselIdx, setHeroCarouselIdx] = useState(0);
             const [awardsPagePublicEnabled, setAwardsPagePublicEnabled] = useState(false);
             const [standingsBarsVisible, setStandingsBarsVisible] = useState(false);
             const [standingsBarsCycle, setStandingsBarsCycle] = useState(0);
@@ -669,7 +671,7 @@
                     }
 
                     const tabFromPath = pathParts[0] || '';
-                    if (['live', 'teams', 'standings', 'history', 'awards', 'leaders'].includes(tabFromPath)) {
+                    if (['home', 'live', 'teams', 'standings', 'history', 'awards', 'leaders'].includes(tabFromPath)) {
                         return {
                             type: 'tab',
                             activeTab: normalizeTabId(tabFromPath)
@@ -689,13 +691,13 @@
                     if (view === 'player' && teamId && playerId) {
                         return { type: 'teams-player', teamId, playerId };
                     }
-                    if (['live', 'teams', 'standings', 'history', 'awards', 'leaders'].includes(view)) {
+                    if (['home', 'live', 'teams', 'standings', 'history', 'awards', 'leaders'].includes(view)) {
                         return { type: 'tab', activeTab: normalizeTabId(view) };
                     }
 
-                    return { type: 'tab', activeTab: 'live' };
+                    return { type: 'tab', activeTab: 'home' };
                 } catch (e) {
-                    return { type: 'tab', activeTab: 'live' };
+                    return { type: 'tab', activeTab: 'home' };
                 }
             };
 
@@ -713,7 +715,7 @@
                     url.pathname = `/teams/player/${encodeURIComponent(rosterPlayer.teamId)}/${encodeURIComponent(rosterPlayer.playerId)}`;
                     url.searchParams.delete('tab');
                 } else {
-                    url.pathname = `/${safeTab}`;
+                    url.pathname = safeTab === 'home' ? '/' : `/${safeTab}`;
                     url.searchParams.delete('tab');
                 }
 
@@ -770,7 +772,7 @@
                         setActiveTab('teams');
                         setPendingSharedRosterPlayer({ teamId: route.teamId, playerId: route.playerId });
                     } else if (route.type === 'tab') {
-                        setActiveTab(normalizeTabId(route.activeTab || 'standings'));
+                        setActiveTab(normalizeTabId(route.activeTab || 'home'));
                     }
                 } catch (e) {}
             }, []);
@@ -796,7 +798,7 @@
                     if (!state || !state.__wkndNav) return;
 
                     suppressNextNavHistoryPushRef.current = true;
-                    setActiveTab(normalizeTabId(state.activeTab || 'standings'));
+                    setActiveTab(normalizeTabId(state.activeTab || 'home'));
                     setSelectedHistoryGameId(state.selectedHistoryGameId || null);
                     setSelectedRosterPlayer(state.selectedRosterPlayer || null);
                     if (state.activeTab === 'history' && state.historyDetailTab) {
@@ -1764,11 +1766,12 @@
 
                 const normalizeTabId = (tab) => {
                     const rawTab = String(tab || '').trim().toLowerCase();
-                    if (['live', 'teams', 'standings', 'history', 'leaders', 'awards'].includes(rawTab)) return rawTab;
-                    return 'live';
+                    if (['home', 'live', 'teams', 'standings', 'history', 'leaders', 'awards'].includes(rawTab)) return rawTab;
+                    return 'home';
                 };
 
             const navTabs = [
+                { id: 'home', label: 'Home', icon: Icons.Activity },
                 { id: 'live', label: 'Live', icon: Icons.Activity },
                 { id: 'teams', label: 'Rosters', icon: Icons.Users },
                 { id: 'standings', label: 'Standings', icon: Icons.Trophy },
@@ -9766,6 +9769,8 @@
                     blk: ((stats.blk || 0) / gp).toFixed(1),
                     to: ((stats.to || 0) / gp).toFixed(1),
                     pf: ((stats.pf || 0) / gp).toFixed(1),
+                    fg3m: ((stats.fg3m || 0) / gp).toFixed(1),
+                    ftm: ((stats.ftm || 0) / gp).toFixed(1),
                     fgPct: pctSummary.fgPct,
                     fg3Pct: pctSummary.fg3Pct,
                     ftPct: pctSummary.ftPct,
@@ -11776,6 +11781,7 @@
 
                         {/* DESKTOP NAV CONTROL TABS */}
                         <nav className="hidden md:flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5">
+                            <button onClick={() => setActiveTab('home')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'home' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Activity /> Home</button>
                             <button onClick={() => setActiveTab('live')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'live' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Activity /> Live</button>
                             <button onClick={() => setActiveTab('teams')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'teams' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Users /> Rosters</button>
                             <button onClick={() => setActiveTab('standings')} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === 'standings' ? 'bg-orange-500 text-white shadow-lg' : 'text-slate-400'}`}><Icons.Trophy /> Standings</button>
@@ -13996,6 +14002,215 @@
                         )}
 
                         {/* TAB: TEAM STANDINGS */}
+                        {activeTab === 'home' && (() => {
+                            const recentGames = games.slice().sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a)).slice(0, 8);
+
+                            const homeLeaderDefs = [
+                                { id: 'pts',   label: 'PTS', full: 'Points',         color: '#f97316' },
+                                { id: 'reb',   label: 'REB', full: 'Rebounds',       color: '#3b82f6' },
+                                { id: 'ast',   label: 'AST', full: 'Assists',        color: '#10b981' },
+                                { id: 'stl',   label: 'STL', full: 'Steals',         color: '#a855f7' },
+                                { id: 'blk',   label: 'BLK', full: 'Blocks',         color: '#ef4444' },
+                                { id: 'fg3m',  label: '3PM', full: '3-Pointers Made',color: '#0ea5e9' },
+                                { id: 'ftm',   label: 'FTM', full: 'Free Throws Made',color:'#ec4899' },
+                                { id: 'fgPct', label: 'FG%', full: 'Field Goal %',   color: '#f59e0b', isPct: true },
+                                { id: 'fg3Pct',label: '3P%', full: 'Three-Point %',  color: '#06b6d4', isPct: true },
+                                { id: 'ftPct', label: 'FT%', full: 'Free Throw %',   color: '#d946ef', isPct: true },
+                                { id: 'to',    label: 'TO',  full: 'Turnovers',      color: '#64748b' },
+                                { id: 'pf',    label: 'PF',  full: 'Fouls',          color: '#f43f5e' }
+                            ];
+                            const eligiblePlayers = leaguePlayerPool.filter((p) => Number(p.gamesPlayed || 0) > 0);
+
+                            return (
+                                <div className="space-y-5">
+                                    {/* ── SCOREBOARD STRIP ── */}
+                                    <div className="overflow-x-auto pb-1 -mx-1">
+                                        <div className="flex gap-2.5 px-1" style={{ minWidth: 'max-content' }}>
+                                            {recentGames.map((g) => {
+                                                const winA = g.teamAScore > g.teamBScore;
+                                                const winB = g.teamBScore > g.teamAScore;
+                                                const tA = teams.find((t) => t.id === g.teamAId);
+                                                const tB = teams.find((t) => t.id === g.teamBId);
+                                                const dateStr = String(g.date || '').split('T')[0];
+                                                return (
+                                                    <button
+                                                        key={g.id}
+                                                        type="button"
+                                                        onClick={() => { setSelectedHistoryGameId(g.id); setActiveTab('history'); }}
+                                                        className="flex-shrink-0 w-40 bg-slate-900/80 border border-slate-800 rounded-xl p-3 text-left hover:border-slate-600 hover:bg-slate-800/80 transition-all cursor-pointer"
+                                                    >
+                                                        <p className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider mb-2">{dateStr}</p>
+                                                        <div className="space-y-1.5">
+                                                            {[{ team: tA, score: g.teamAScore, win: winA }, { team: tB, score: g.teamBScore, win: winB }].map((row, i) => (
+                                                                <div key={i} className={`flex items-center justify-between gap-2 ${row.win ? '' : 'opacity-50'}`}>
+                                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: row.team?.color || '#64748b' }}/>
+                                                                        <span className="text-[11px] font-bold text-white truncate">{row.team?.name || '—'}</span>
+                                                                    </div>
+                                                                    <span className={`text-[13px] font-black tabular-nums flex-shrink-0 ${row.win ? 'text-white' : 'text-slate-400'}`}>{row.score}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    {/* ── HERO CAROUSEL ── */}
+                                    {(() => {
+                                        const heroGames = recentGames.slice(0, 4);
+                                        if (!heroGames.length) return null;
+                                        const safeIdx = Math.min(heroCarouselIdx, heroGames.length - 1);
+                                        const hg = heroGames[safeIdx];
+                                        const hgTeamA = teams.find((t) => t.id === hg.teamAId);
+                                        const hgTeamB = teams.find((t) => t.id === hg.teamBId);
+                                        const hgWinA = hg.teamAScore > hg.teamBScore;
+                                        const hgWinB = hg.teamBScore > hg.teamAScore;
+                                        const hasCustomCover = Number(hg.socialCoverLen || 0) > 0;
+                                        const colorA = hgTeamA?.color || '#334155';
+                                        const colorB = hgTeamB?.color || '#334155';
+                                        const rawWriteup = String(hg.gameWriteup || '').trim();
+                                        const titleMatch = rawWriteup.match(/^\*\*(.+?)\*\*/);
+                                        const writeupTitle = titleMatch ? titleMatch[1].trim() : null;
+                                        const writeupBody = titleMatch ? rawWriteup.slice(titleMatch[0].length).trim() : rawWriteup;
+                                        return (
+                                            <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: '1200/630' }}>
+                                                {/* Background — always use same HTML score overlay */}
+                                                {hasCustomCover
+                                                    ? <img src={`/api/social-cover/${encodeURIComponent(hg.id)}/photo.jpg`} className="absolute inset-0 w-full h-full object-cover" alt="" />
+                                                    : <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${colorA}55 0%, #020817 40%, #020817 60%, ${colorB}55 100%)` }} />
+                                                }
+                                                {/* Diagonal team color glow from center */}
+                                                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at 28% 52%, ${colorA}70 0%, transparent 52%), radial-gradient(ellipse at 72% 52%, ${colorB}70 0%, transparent 52%)` }} />
+                                                {/* Dark center vignette to lift score text */}
+                                                <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 50% 48%, rgba(0,0,0,0.38) 0%, transparent 65%)' }} />
+                                                {/* Top scrim */}
+                                                <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none" />
+                                                {/* Bottom scrim */}
+                                                <div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/95 via-black/60 to-transparent pointer-events-none" />
+
+                                                {/* Score — always rendered as HTML */}
+                                                <div className="absolute inset-0 flex items-center justify-center">
+                                                    <div className="flex items-center gap-8">
+                                                        <div className={`text-right transition-opacity ${hgWinB ? 'opacity-35' : ''}`}>
+                                                            <p className="text-xs font-black text-white uppercase tracking-widest mb-2" style={{ textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorA}90` }}>{hg.teamAName}</p>
+                                                            <p className="text-7xl font-black text-white tabular-nums leading-none" style={{ textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorA}80` }}>{hg.teamAScore}</p>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <div className="w-px h-12 bg-white/20 mx-auto mb-1" style={{ boxShadow: `0 0 8px rgba(255,255,255,0.15)` }}/>
+                                                            <span className="text-[8px] font-black uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.35)', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>Final</span>
+                                                        </div>
+                                                        <div className={`text-left transition-opacity ${hgWinA ? 'opacity-35' : ''}`}>
+                                                            <p className="text-xs font-black text-white uppercase tracking-widest mb-2" style={{ textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorB}90` }}>{hg.teamBName}</p>
+                                                            <p className="text-7xl font-black text-white tabular-nums leading-none" style={{ textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorB}80` }}>{hg.teamBScore}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Top bar: date + carousel dots */}
+                                                <div className="absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none">
+                                                    <span className="text-[9px] font-bold uppercase tracking-widest text-white/50">{String(hg.date || '').split('T')[0]}</span>
+                                                    <div className="flex gap-1.5 pointer-events-auto">
+                                                        {heroGames.map((_, i) => (
+                                                            <button key={i} type="button" onClick={() => setHeroCarouselIdx(i)} className={`h-1 rounded-full transition-all cursor-pointer ${i === safeIdx ? 'w-5 bg-white' : 'w-1.5 bg-white/30 hover:bg-white/50'}`} />
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* Bottom overlay: title + excerpt + recap link */}
+                                                <div className="absolute bottom-0 left-0 right-0 px-5 pb-4">
+                                                    {writeupTitle && (
+                                                        <p className="text-sm font-black text-white mb-1 drop-shadow-lg">{writeupTitle}</p>
+                                                    )}
+                                                    {writeupBody && (
+                                                        <p className="hidden sm:line-clamp-2 text-[11px] text-slate-300 leading-relaxed mb-2.5">{writeupBody}</p>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setSelectedHistoryGameId(hg.id); setActiveTab('history'); }}
+                                                        className="text-[10px] font-black text-orange-400 hover:text-orange-300 transition-colors cursor-pointer uppercase tracking-wider"
+                                                    >
+                                                        Full Game Recap →
+                                                    </button>
+                                                </div>
+
+                                                {/* Arrow navigation */}
+                                                {heroGames.length > 1 && (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setHeroCarouselIdx((p) => Math.max(0, p - 1))}
+                                                            className={`absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === 0 ? 'opacity-20 pointer-events-none' : ''}`}
+                                                        >
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setHeroCarouselIdx((p) => Math.min(heroGames.length - 1, p + 1))}
+                                                            className={`absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === heroGames.length - 1 ? 'opacity-20 pointer-events-none' : ''}`}
+                                                        >
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* ── LEAGUE LEADERS AUTO-SCROLL ── */}
+                                    {(() => {
+                                        const leaderCards = homeLeaderDefs.map((def) => {
+                                            const leader = eligiblePlayers.slice().sort((a, b) => parseFloat(b.avg?.[def.id] || 0) - parseFloat(a.avg?.[def.id] || 0))[0];
+                                            const rawVal = leader ? leader.avg?.[def.id] : null;
+                                            const val = rawVal == null ? '—' : def.isPct ? String(rawVal) : parseFloat(rawVal).toFixed(1);
+                                            const team = leader ? teams.find((t) => t.id === leader.teamId) : null;
+                                            const hasPic = Boolean(leader && String(leader.pictureUrl || '').trim());
+                                            const catColor = def.color;
+                                            const teamColor = team?.color || '#475569';
+                                            return { def, leader, val, team, hasPic, catColor, teamColor };
+                                        });
+                                        const CARD_W = 160;
+                                        const GAP = 12;
+                                        const DURATION = homeLeaderDefs.length * 2.8;
+                                        const renderCard = ({ def, leader, val, team, hasPic, catColor, teamColor }, keyPrefix) => (
+                                            <div key={`${keyPrefix}-${def.id}`} className="relative flex flex-col items-center pt-4 pb-4 rounded-2xl overflow-hidden flex-shrink-0" style={{ background: '#080d18', width: `${CARD_W}px` }}>
+                                                <div className="absolute inset-x-0 top-0 h-40 pointer-events-none" style={{ background: `radial-gradient(ellipse at 50% 30%, ${catColor}30 0%, transparent 68%)` }}/>
+                                                <div className="relative flex items-center gap-1.5 mb-3">
+                                                    <div className="h-px w-3" style={{ background: catColor, opacity: 0.5 }}/>
+                                                    <span className="text-[7px] font-black uppercase tracking-widest text-slate-500">League Leader</span>
+                                                    <div className="h-px w-3" style={{ background: catColor, opacity: 0.5 }}/>
+                                                </div>
+                                                <div className="relative mb-1">
+                                                    <div className="w-[72px] h-[72px] rounded-full overflow-hidden" style={{ boxShadow: `0 0 0 2px ${catColor}, 0 0 16px ${catColor}70, 0 0 36px ${catColor}35` }}>
+                                                        {hasPic
+                                                            ? <img src={leader.pictureUrl} className="w-full h-full object-cover object-top" alt={leader?.name}/>
+                                                            : <div className="w-full h-full flex items-center justify-center text-xl font-black text-white" style={{ background: `linear-gradient(135deg, ${teamColor}80, #0d1424)` }}>{(leader?.name || '?')[0]}</div>
+                                                        }
+                                                    </div>
+                                                </div>
+                                                <p className="relative text-[11px] font-black text-white text-center mt-3 leading-tight px-2 w-full truncate">{leader?.name || '—'}</p>
+                                                <div className="relative mt-1 px-2 py-0.5 rounded-full" style={{ background: `${teamColor}30`, border: `1px solid ${teamColor}50` }}>
+                                                    <p className="text-[8px] font-bold uppercase tracking-widest" style={{ color: teamColor }}>{team?.name || ''}</p>
+                                                </div>
+                                                <p className="relative text-[38px] font-black tabular-nums leading-none mt-2" style={{ color: catColor, textShadow: `0 0 12px ${catColor}90, 0 0 32px ${catColor}60, 0 2px 8px rgba(0,0,0,0.8)` }}>{val}</p>
+                                                <p className="relative text-[8px] font-bold text-slate-600 uppercase tracking-widest mt-1">{def.label}</p>
+                                            </div>
+                                        );
+                                        return (
+                                            <div className="overflow-hidden -mx-4">
+                                                <style>{`@keyframes leaderScroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}.leader-track{animation:leaderScroll ${DURATION}s linear infinite}.leader-track:hover{animation-play-state:paused}`}</style>
+                                                <div className="flex leader-track" style={{ gap: `${GAP}px`, paddingLeft: `${GAP}px`, width: 'max-content' }}>
+                                                    {leaderCards.map((c) => renderCard(c, 'a'))}
+                                                    {leaderCards.map((c) => renderCard(c, 'b'))}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            );
+                        })()}
+
                         {activeTab === 'standings' && (
                             <div className="space-y-4">
                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

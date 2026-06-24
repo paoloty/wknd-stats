@@ -3264,6 +3264,7 @@ app.get('/index.html', (req, res) => {
 });
 
 app.get([
+  '/home',
   '/live',
   '/teams',
   '/standings',
@@ -3422,6 +3423,27 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
     res.send(png);
   } catch {
     res.status(500).json({ error: 'Failed to build social cover.' });
+  }
+});
+
+app.get('/api/social-cover/:gameId/photo.jpg', async (req, res) => {
+  try {
+    if (!sharp) { res.status(501).end(); return; }
+    const gameId = String(req.params.gameId || '').trim();
+    const coverRow = selectGameCoverByIdStmt.get(gameId);
+    const customDataUrl = String(coverRow?.social_cover_data_url || '').trim();
+    const parsed = parseImageDataUrl(customDataUrl);
+    if (!parsed) { res.status(404).end(); return; }
+    const buf = await sharp(parsed.buffer)
+      .rotate()
+      .resize(1200, 630, { fit: 'cover', position: 'centre' })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(buf);
+  } catch {
+    res.status(500).end();
   }
 });
 
