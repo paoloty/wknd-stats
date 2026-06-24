@@ -150,6 +150,8 @@
             const [leadersStatMode, setLeadersStatMode] = useState('perGame');
             const [homeLeaderStat, setHomeLeaderStat] = useState('pts');
             const [heroCarouselIdx, setHeroCarouselIdx] = useState(0);
+            const [heroPotgData, setHeroPotgData] = useState({});
+            const heroGamesCountRef = React.useRef(0);
             const [awardsPagePublicEnabled, setAwardsPagePublicEnabled] = useState(false);
             const [standingsBarsVisible, setStandingsBarsVisible] = useState(false);
             const [standingsBarsCycle, setStandingsBarsCycle] = useState(0);
@@ -811,6 +813,30 @@
                     window.removeEventListener('popstate', onPopState);
                 };
             }, []);
+
+            useEffect(() => {
+                if (activeTab !== 'home') return;
+                fetch('/api/games/recent-potg?limit=4')
+                    .then((r) => r.ok ? r.json() : null)
+                    .then((data) => {
+                        if (!Array.isArray(data)) return;
+                        const map = {};
+                        data.forEach((item) => { if (item?.gameId) map[item.gameId] = item; });
+                        setHeroPotgData(map);
+                    })
+                    .catch(() => {});
+            }, [activeTab]);
+
+            useEffect(() => {
+                if (activeTab !== 'home') return;
+                const timer = setInterval(() => {
+                    setHeroCarouselIdx((p) => {
+                        const count = heroGamesCountRef.current;
+                        return count > 1 ? (p + 1) % count : p;
+                    });
+                }, 5000);
+                return () => clearInterval(timer);
+            }, [activeTab]);
 
             const handleAuthLogin = async (e) => {
                 e.preventDefault();
@@ -3158,9 +3184,12 @@
                 { id: 'ast', label: 'AST', tabLabel: 'Assists' },
                 { id: 'stl', label: 'STL', tabLabel: 'Steals' },
                 { id: 'blk', label: 'BLK', tabLabel: 'Blocks' },
+                { id: 'fg3m', label: '3PM', tabLabel: '3-Pointers Made' },
+                { id: 'ftm', label: 'FTM', tabLabel: 'Free Throws Made' },
                 { id: 'to', label: 'TO', tabLabel: 'Turnovers' },
                 { id: 'fgPct', label: 'FG%', tabLabel: 'Field Goal %' },
                 { id: 'fg3Pct', label: '3P%', tabLabel: 'Three Point %' },
+                { id: 'ftPct', label: 'FT%', tabLabel: 'Free Throw %' },
                 { id: 'pf', label: 'PF', tabLabel: 'Fouls' }
             ];
             const getTeamTotalValue = (team, key) => {
@@ -3178,8 +3207,10 @@
                     acc.fg2m_miss += Number(s.fg2m_miss || 0);
                     acc.fg3m += Number(s.fg3m || 0);
                     acc.fg3m_miss += Number(s.fg3m_miss || 0);
+                    acc.ftm += Number(s.ftm || 0);
+                    acc.ft_miss += Number(s.ft_miss || 0);
                     return acc;
-                }, { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg2m_miss: 0, fg3m: 0, fg3m_miss: 0 });
+                }, { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg2m_miss: 0, fg3m: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 });
 
                 if (key === 'fgPct') {
                     const made = totals.fg2m + totals.fg3m;
@@ -3189,6 +3220,11 @@
                 if (key === 'fg3Pct') {
                     const made = totals.fg3m;
                     const att = made + totals.fg3m_miss;
+                    return att > 0 ? (made / att) * 100 : 0;
+                }
+                if (key === 'ftPct') {
+                    const made = totals.ftm;
+                    const att = made + totals.ft_miss;
                     return att > 0 ? (made / att) * 100 : 0;
                 }
                 return Number(totals[key] || 0);
@@ -3213,7 +3249,7 @@
                 const sorted = [...teamStatTotals].sort((a, b) => {
                     const bRaw = Number(b.totalsByCategory[def.id] || 0);
                     const aRaw = Number(a.totalsByCategory[def.id] || 0);
-                    const isPct = def.id === 'fgPct' || def.id === 'fg3Pct';
+                    const isPct = def.id === 'fgPct' || def.id === 'fg3Pct' || def.id === 'ftPct';
                     const bGp = Math.max(1, Number(b.gamesPlayed || 0));
                     const aGp = Math.max(1, Number(a.gamesPlayed || 0));
                     const bVal = standingsStatMode === 'perGame' && !isPct ? (bRaw / bGp) : bRaw;
@@ -10019,7 +10055,7 @@
             const getLeaderMetric = (player, metricKey, mode) => {
                 const stats = player?.totalStats || {};
                 const avg = getAverages(player);
-                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct';
+                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct' || metricKey === 'ftPct';
                 if (mode === 'perGame') {
                     return parseFloat(avg[metricKey] || 0);
                 }
@@ -10032,7 +10068,7 @@
             const formatLeaderMetric = (player, metricKey, mode) => {
                 const avg = getAverages(player);
                 const stats = player?.totalStats || {};
-                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct';
+                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct' || metricKey === 'ftPct';
                 if (mode === 'perGame') {
                     return isPctMetric ? (avg[metricKey] || '0%') : (avg[metricKey] || '0.0');
                 }
@@ -14057,9 +14093,10 @@
                                         </div>
                                     </div>
 
-                                    {/* ── HERO CAROUSEL ── */}
+                                    {/* ── HERO CAROUSEL + POTG COLUMN ── */}
                                     {(() => {
                                         const heroGames = recentGames.slice(0, 4);
+                                        heroGamesCountRef.current = heroGames.length;
                                         if (!heroGames.length) return null;
                                         const safeIdx = Math.min(heroCarouselIdx, heroGames.length - 1);
                                         const hg = heroGames[safeIdx];
@@ -14074,86 +14111,126 @@
                                         const titleMatch = rawWriteup.match(/^\*\*(.+?)\*\*/);
                                         const writeupTitle = titleMatch ? titleMatch[1].trim() : null;
                                         const writeupBody = titleMatch ? rawWriteup.slice(titleMatch[0].length).trim() : rawWriteup;
+
+                                        // Resolve POTG for each hero game — prefer server data, fall back to local
+                                        const heroPotg = heroGames.map((game) => {
+                                            const serverEntry = heroPotgData[game.id];
+                                            if (serverEntry) return { potg: serverEntry.potg, potgWriteup: serverEntry.potgWriteup };
+                                            const tA = teams.find((t) => t.id === game.teamAId);
+                                            const tB = teams.find((t) => t.id === game.teamBId);
+                                            if (game._detailLoaded) {
+                                                const p = getPlayerOfTheGame(game, tA, tB);
+                                                if (p) return { potg: p, potgWriteup: String(game.potgWriteup || '').trim() };
+                                            }
+                                            const manualId = String(game.manualPotgPlayerId || '').trim();
+                                            if (manualId) {
+                                                const player = teams.flatMap((t) => t.players || []).find((p) => p.id === manualId);
+                                                const playerTeam = teams.find((t) => (t.players || []).some((p) => p.id === manualId));
+                                                if (player) return { potg: { name: player.name, pictureUrl: player.pictureUrl || '', teamName: playerTeam?.name || '', teamColor: playerTeam?.color || '#f97316', stats: null }, potgWriteup: String(game.potgWriteup || '').trim() };
+                                            }
+                                            return { potg: null, potgWriteup: '' };
+                                        });
+
                                         return (
-                                            <div className="relative rounded-2xl overflow-hidden" style={{ aspectRatio: '1200/630' }}>
-                                                {/* Background — always use same HTML score overlay */}
-                                                {hasCustomCover
-                                                    ? <img src={`/api/social-cover/${encodeURIComponent(hg.id)}/photo.jpg`} className="absolute inset-0 w-full h-full object-cover" alt="" />
-                                                    : <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${colorA}55 0%, #020817 40%, #020817 60%, ${colorB}55 100%)` }} />
-                                                }
-                                                {/* Diagonal team color glow from center */}
-                                                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at 28% 52%, ${colorA}70 0%, transparent 52%), radial-gradient(ellipse at 72% 52%, ${colorB}70 0%, transparent 52%)` }} />
-                                                {/* Dark center vignette to lift score text */}
-                                                <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 50% 48%, rgba(0,0,0,0.38) 0%, transparent 65%)' }} />
-                                                {/* Top scrim */}
-                                                <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none" />
-                                                {/* Bottom scrim */}
-                                                <div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/95 via-black/60 to-transparent pointer-events-none" />
-
-                                                {/* Score — always rendered as HTML */}
-                                                <div className="absolute inset-0 flex items-center justify-center">
-                                                    <div className="flex items-center gap-8">
-                                                        <div className={`text-right transition-opacity ${hgWinB ? 'opacity-35' : ''}`}>
-                                                            <p className="text-xs font-black text-white uppercase tracking-widest mb-2" style={{ textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorA}90` }}>{hg.teamAName}</p>
-                                                            <p className="text-7xl font-black text-white tabular-nums leading-none" style={{ textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorA}80` }}>{hg.teamAScore}</p>
-                                                        </div>
-                                                        <div className="text-center">
-                                                            <div className="w-px h-12 bg-white/20 mx-auto mb-1" style={{ boxShadow: `0 0 8px rgba(255,255,255,0.15)` }}/>
-                                                            <span className="text-[8px] font-black uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.35)', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>Final</span>
-                                                        </div>
-                                                        <div className={`text-left transition-opacity ${hgWinA ? 'opacity-35' : ''}`}>
-                                                            <p className="text-xs font-black text-white uppercase tracking-widest mb-2" style={{ textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorB}90` }}>{hg.teamBName}</p>
-                                                            <p className="text-7xl font-black text-white tabular-nums leading-none" style={{ textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorB}80` }}>{hg.teamBScore}</p>
+                                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_260px] gap-2.5">
+                                                {/* Hero card */}
+                                                <div className="relative rounded-2xl overflow-hidden aspect-[16/9] sm:aspect-auto sm:h-full">
+                                                    <style>{`@keyframes heroZoom{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}.hero-zoom{animation:heroZoom 12s ease-in-out infinite;transform-origin:center center}`}</style>
+                                                    {hasCustomCover
+                                                        ? <img key={safeIdx} src={`/api/social-cover/${encodeURIComponent(hg.id)}/photo.jpg`} className="absolute inset-0 w-full h-full object-cover hero-zoom" alt="" />
+                                                        : <div className="absolute inset-0 hero-zoom" style={{ background: `linear-gradient(135deg, ${colorA}55 0%, #020817 40%, #020817 60%, ${colorB}55 100%)` }} />
+                                                    }
+                                                    <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(ellipse at 28% 52%, ${colorA}70 0%, transparent 52%), radial-gradient(ellipse at 72% 52%, ${colorB}70 0%, transparent 52%)` }} />
+                                                    <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at 50% 48%, rgba(0,0,0,0.38) 0%, transparent 65%)' }} />
+                                                    <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none" />
+                                                    <div className="absolute inset-x-0 bottom-0 h-64 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.97) 0%, rgba(0,0,0,0.82) 35%, rgba(0,0,0,0.45) 65%, transparent 100%)' }} />
+                                                    <div className="absolute inset-0 flex items-center justify-center">
+                                                        <div className="flex items-center gap-8">
+                                                            <div className={`text-right transition-opacity ${hgWinB ? 'opacity-35' : ''}`}>
+                                                                <p className="text-xs font-black text-white uppercase tracking-widest mb-2" style={{ textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorA}90` }}>{hg.teamAName}</p>
+                                                                <p className="text-7xl font-black text-white tabular-nums leading-none" style={{ textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorA}80` }}>{hg.teamAScore}</p>
+                                                            </div>
+                                                            <div className="text-center">
+                                                                <div className="w-px h-12 bg-white/20 mx-auto mb-1" style={{ boxShadow: `0 0 8px rgba(255,255,255,0.15)` }}/>
+                                                                <span className="text-[8px] font-black uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.35)', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>Final</span>
+                                                            </div>
+                                                            <div className={`text-left transition-opacity ${hgWinA ? 'opacity-35' : ''}`}>
+                                                                <p className="text-xs font-black text-white uppercase tracking-widest mb-2" style={{ textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorB}90` }}>{hg.teamBName}</p>
+                                                                <p className="text-7xl font-black text-white tabular-nums leading-none" style={{ textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorB}80` }}>{hg.teamBScore}</p>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-
-                                                {/* Top bar: date + carousel dots */}
-                                                <div className="absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none">
-                                                    <span className="text-[9px] font-bold uppercase tracking-widest text-white/50">{String(hg.date || '').split('T')[0]}</span>
-                                                    <div className="flex gap-1.5 pointer-events-auto">
-                                                        {heroGames.map((_, i) => (
-                                                            <button key={i} type="button" onClick={() => setHeroCarouselIdx(i)} className={`h-1 rounded-full transition-all cursor-pointer ${i === safeIdx ? 'w-5 bg-white' : 'w-1.5 bg-white/30 hover:bg-white/50'}`} />
-                                                        ))}
+                                                    <div className="absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none">
+                                                        <span className="text-[9px] font-bold uppercase tracking-widest text-white/50">{String(hg.date || '').split('T')[0]}</span>
+                                                        <div className="flex gap-1.5 pointer-events-auto">
+                                                            {heroGames.map((_, i) => (
+                                                                <button key={i} type="button" onClick={() => setHeroCarouselIdx(i)} className={`h-1 rounded-full transition-all cursor-pointer ${i === safeIdx ? 'w-5 bg-white' : 'w-1.5 bg-white/30 hover:bg-white/50'}`} />
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                </div>
-
-                                                {/* Bottom overlay: title + excerpt + recap link */}
-                                                <div className="absolute bottom-0 left-0 right-0 px-5 pb-4">
-                                                    {writeupTitle && (
-                                                        <p className="text-sm font-black text-white mb-1 drop-shadow-lg">{writeupTitle}</p>
-                                                    )}
-                                                    {writeupBody && (
-                                                        <p className="hidden sm:line-clamp-2 text-[11px] text-slate-300 leading-relaxed mb-2.5">{writeupBody}</p>
-                                                    )}
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => { setSelectedHistoryGameId(hg.id); setActiveTab('history'); }}
-                                                        className="text-[10px] font-black text-orange-400 hover:text-orange-300 transition-colors cursor-pointer uppercase tracking-wider"
-                                                    >
-                                                        Full Game Recap →
-                                                    </button>
-                                                </div>
-
-                                                {/* Arrow navigation */}
-                                                {heroGames.length > 1 && (
-                                                    <>
+                                                    <div className="absolute bottom-0 left-0 right-0 px-5 pb-4">
+                                                        {writeupTitle && (
+                                                            <p className="text-sm font-black text-white mb-1 drop-shadow-lg">{writeupTitle}</p>
+                                                        )}
+                                                        {writeupBody && (
+                                                            <p className="hidden sm:line-clamp-2 text-[11px] text-slate-300 leading-relaxed mb-2.5">{writeupBody}</p>
+                                                        )}
                                                         <button
                                                             type="button"
-                                                            onClick={() => setHeroCarouselIdx((p) => Math.max(0, p - 1))}
-                                                            className={`absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === 0 ? 'opacity-20 pointer-events-none' : ''}`}
+                                                            onClick={() => { setSelectedHistoryGameId(hg.id); setActiveTab('history'); }}
+                                                            className="text-[10px] font-black text-orange-400 hover:text-orange-300 transition-colors cursor-pointer uppercase tracking-wider"
                                                         >
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                                                            Full Game Recap →
                                                         </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setHeroCarouselIdx((p) => Math.min(heroGames.length - 1, p + 1))}
-                                                            className={`absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === heroGames.length - 1 ? 'opacity-20 pointer-events-none' : ''}`}
-                                                        >
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-                                                        </button>
-                                                    </>
-                                                )}
+                                                    </div>
+                                                    {heroGames.length > 1 && (
+                                                        <>
+                                                            <button type="button" onClick={() => setHeroCarouselIdx((p) => Math.max(0, p - 1))} className={`absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === 0 ? 'opacity-20 pointer-events-none' : ''}`}>
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                                                            </button>
+                                                            <button type="button" onClick={() => setHeroCarouselIdx((p) => Math.min(heroGames.length - 1, p + 1))} className={`absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === heroGames.length - 1 ? 'opacity-20 pointer-events-none' : ''}`}>
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+
+                                                {/* POTG column — hidden on mobile */}
+                                                <div className="hidden sm:flex flex-col gap-2">
+                                                    {heroGames.map((game, idx) => {
+                                                        const { potg, potgWriteup } = heroPotg[idx] || {};
+                                                        const tA = teams.find((t) => t.id === game.teamAId);
+                                                        const tB = teams.find((t) => t.id === game.teamBId);
+                                                        const isActive = idx === safeIdx;
+                                                        const accent = potg?.teamColor || '#475569';
+                                                        const statsLine = potg?.statsLine || (potg?.stats ? `${potg.stats.pts ?? '—'} PTS · ${potg.stats.reb ?? '—'} REB · ${potg.stats.ast ?? '—'} AST` : null);
+                                                        return (
+                                                            <button
+                                                                key={game.id}
+                                                                type="button"
+                                                                onClick={() => setHeroCarouselIdx(idx)}
+                                                                className="relative rounded-xl overflow-hidden text-left transition-all cursor-pointer w-full"
+                                                                style={{ background: isActive ? '#0d1424' : '#080d18', border: `1px solid ${isActive ? accent + '60' : 'rgba(51,65,85,0.4)'}` }}
+                                                            >
+                                                                <div className="absolute inset-y-0 left-0 w-[3px]" style={{ background: isActive ? accent : 'transparent' }} />
+
+                                                                <div className="flex flex-col h-full px-3 py-3 gap-2">
+                                                                    {potg ? (
+                                                                        <>
+                                                                            <div>
+                                                                                <p className="text-xs font-black text-white leading-tight">{potg.name}</p>
+                                                                                {statsLine && <p className="text-[9px] font-semibold mt-0.5" style={{ color: accent }}>{statsLine}</p>}
+                                                                            </div>
+                                                                            {potgWriteup && <p className="text-[10px] text-slate-300 leading-relaxed line-clamp-[6] flex-1">{potgWriteup}</p>}
+                                                                        </>
+                                                                    ) : (
+                                                                        <p className="text-[9px] text-slate-600 italic">No writeup recorded</p>
+                                                                    )}
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         );
                                     })()}
@@ -14170,16 +14247,16 @@
                                             const teamColor = team?.color || '#475569';
                                             return { def, leader, val, team, hasPic, catColor, teamColor };
                                         });
-                                        const CARD_W = 160;
-                                        const GAP = 12;
+                                        const CARD_W = 200;
+                                        const GAP = 14;
                                         const DURATION = homeLeaderDefs.length * 2.8;
                                         const renderCard = ({ def, leader, val, team, hasPic, catColor, teamColor }, keyPrefix) => (
                                             <div key={`${keyPrefix}-${def.id}`} className="relative flex flex-col items-center pt-4 pb-4 rounded-2xl overflow-hidden flex-shrink-0" style={{ background: '#080d18', width: `${CARD_W}px` }}>
                                                 <div className="absolute inset-x-0 top-0 h-40 pointer-events-none" style={{ background: `radial-gradient(ellipse at 50% 30%, ${catColor}30 0%, transparent 68%)` }}/>
                                                 <div className="relative flex items-center gap-1.5 mb-3">
-                                                    <div className="h-px w-3" style={{ background: catColor, opacity: 0.5 }}/>
-                                                    <span className="text-[7px] font-black uppercase tracking-widest text-slate-500">League Leader</span>
-                                                    <div className="h-px w-3" style={{ background: catColor, opacity: 0.5 }}/>
+                                                    <div className="h-px w-4" style={{ background: catColor, opacity: 0.6 }}/>
+                                                    <span className="text-[8px] font-black uppercase tracking-widest" style={{ color: catColor, opacity: 0.7 }}>League Leader</span>
+                                                    <div className="h-px w-4" style={{ background: catColor, opacity: 0.6 }}/>
                                                 </div>
                                                 <div className="relative mb-1">
                                                     <div className="w-[72px] h-[72px] rounded-full overflow-hidden" style={{ boxShadow: `0 0 0 2px ${catColor}, 0 0 16px ${catColor}70, 0 0 36px ${catColor}35` }}>
@@ -14194,13 +14271,13 @@
                                                     <p className="text-[8px] font-bold uppercase tracking-widest" style={{ color: teamColor }}>{team?.name || ''}</p>
                                                 </div>
                                                 <p className="relative text-[38px] font-black tabular-nums leading-none mt-2" style={{ color: catColor, textShadow: `0 0 12px ${catColor}90, 0 0 32px ${catColor}60, 0 2px 8px rgba(0,0,0,0.8)` }}>{val}</p>
-                                                <p className="relative text-[8px] font-bold text-slate-600 uppercase tracking-widest mt-1">{def.label}</p>
+                                                <p className="relative text-[10px] font-black uppercase tracking-wider mt-1" style={{ color: catColor, opacity: 0.85 }}>{def.full}</p>
                                             </div>
                                         );
                                         return (
-                                            <div className="overflow-hidden -mx-4">
+                                            <div className="overflow-hidden">
                                                 <style>{`@keyframes leaderScroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}.leader-track{animation:leaderScroll ${DURATION}s linear infinite}.leader-track:hover{animation-play-state:paused}`}</style>
-                                                <div className="flex leader-track" style={{ gap: `${GAP}px`, paddingLeft: `${GAP}px`, width: 'max-content' }}>
+                                                <div className="flex leader-track" style={{ gap: `${GAP}px`, width: 'max-content' }}>
                                                     {leaderCards.map((c) => renderCard(c, 'a'))}
                                                     {leaderCards.map((c) => renderCard(c, 'b'))}
                                                 </div>
@@ -15908,9 +15985,12 @@
                                             { id: 'ast', title: 'Assists', statLabel: 'AST', valueKey: 'ast', colorClass: 'text-blue-400' },
                                             { id: 'stl', title: 'Steals', statLabel: 'STL', valueKey: 'stl', colorClass: 'text-teal-400' },
                                             { id: 'blk', title: 'Blocks', statLabel: 'BLK', valueKey: 'blk', colorClass: 'text-violet-400' },
+                                            { id: 'fg3m', title: '3-Pointers Made', statLabel: '3PM', valueKey: 'fg3m', colorClass: 'text-sky-400' },
+                                            { id: 'ftm', title: 'Free Throws Made', statLabel: 'FTM', valueKey: 'ftm', colorClass: 'text-pink-400' },
                                             { id: 'to', title: 'Turnovers', statLabel: 'TO', valueKey: 'to', colorClass: 'text-red-400' },
                                             { id: 'fgPct', title: 'FG Accuracy', statLabel: 'FG%', valueKey: 'fgPct', colorClass: 'text-cyan-400' },
-                                            { id: 'fg3Pct', title: '3PT Accuracy', statLabel: '3P%', valueKey: 'fg3Pct', colorClass: 'text-sky-400' },
+                                            { id: 'fg3Pct', title: '3PT Accuracy', statLabel: '3P%', valueKey: 'fg3Pct', colorClass: 'text-sky-300' },
+                                            { id: 'ftPct', title: 'FT Accuracy', statLabel: 'FT%', valueKey: 'ftPct', colorClass: 'text-fuchsia-400' },
                                             { id: 'pf', title: 'Fouls', statLabel: 'PF', valueKey: 'pf', colorClass: 'text-rose-400' }
                                         ];
 

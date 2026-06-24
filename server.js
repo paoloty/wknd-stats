@@ -4442,6 +4442,48 @@ app.delete('/api/games/:gameId', (req, res) => {
   }
 });
 
+app.get('/api/games/recent-potg', (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 4, 1), 10);
+  const state = readState();
+  const getRecency = (game) => {
+    const n = Number(String(game?.id || '').replace(/\D+/g, '')) || 0;
+    return n > 0 ? n : (Date.parse(game?.date || '') || 0);
+  };
+  const recentGames = state.games
+    .slice()
+    .sort((a, b) => getRecency(b) - getRecency(a))
+    .slice(0, limit);
+
+  const results = recentGames.map((game) => {
+    const statRows = selectGamePlayerStatsByIdStmt.all(game.id);
+    const playerStats = {};
+    statRows.forEach((row) => {
+      playerStats[row.player_id] = {
+        pts: row.pts, ast: row.ast, reb: row.reb, stl: row.stl, blk: row.blk,
+        to: row.turnover, pf: row.pf, fg2m: row.fg2m, fg3m: row.fg3m,
+        fg2m_miss: row.fg2m_miss, fg3m_miss: row.fg3m_miss, ftm: row.ftm, ft_miss: row.ft_miss
+      };
+    });
+    const gameWithStats = { ...game, playerStats };
+    const potg = derivePlayerOfTheGameFromState(gameWithStats, state.teams);
+    return {
+      gameId: game.id,
+      potg: potg ? {
+        name: potg.name,
+        pictureUrl: potg.pictureUrl,
+        teamName: potg.teamName,
+        teamColor: potg.teamColor,
+        stats: potg.stats || null,
+        statsLine: potg.statsLine || null,
+        selectionMode: potg.selectionMode || 'auto'
+      } : null,
+      potgWriteup: String(game.potgWriteup || '').trim()
+    };
+  });
+
+  res.json(results);
+});
+
 app.get('/api/games/:gameId/detail', (req, res) => {
   const gameId = String(req.params.gameId || '').trim();
   if (!gameId) {
