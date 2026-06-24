@@ -3127,11 +3127,7 @@ function getCanonicalRequestHostname(req) {
 
 function isGaEnabledForRequest(req) {
   const isAllowedGaDomain = getCanonicalRequestHostname(req) === 'wkndbasketball.com';
-  return Boolean(
-    GA_MEASUREMENT_ID
-    && isAllowedGaDomain
-    && (process.env.NODE_ENV === 'production' || GA_ENABLE_IN_DEV)
-  );
+  return Boolean(GA_MEASUREMENT_ID && isAllowedGaDomain);
 }
 
 function buildGaHeadSnippet(req) {

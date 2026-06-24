@@ -125,6 +125,7 @@
             Save: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>,
             ChevronDown: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>,
             Share: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
+            Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
             Image: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         };
 
@@ -10078,7 +10079,7 @@
                 return String(Number(stats[metricKey] || 0));
             };
 
-            const shareLeaderBlock = async (entry, mode) => {
+            const shareLeaderBlock = async (entry, mode, action = 'share') => {
                 const top10 = entry.ranked.slice(0, 10);
                 if (top10.length === 0) { showToast('No players to share yet.', 'error'); return; }
 
@@ -10359,7 +10360,15 @@
 
                 // ── Share or download ────────────────────────────────────────
                 const filename = `wknd-leaders-${entry.id}-${mode}.png`;
-                if (typeof navigator.share === 'function') {
+                if (action === 'download') {
+                    canvas.toBlob((blob) => {
+                        const link = document.createElement('a');
+                        link.download = filename;
+                        link.href = URL.createObjectURL(blob);
+                        link.click();
+                        showToast(`${entry.title} leaders image downloaded.`, 'success');
+                    }, 'image/png');
+                } else if (typeof navigator.share === 'function') {
                     canvas.toBlob(async (blob) => {
                         try {
                             const file = new File([blob], filename, { type: 'image/png' });
@@ -16017,6 +16026,13 @@
                                                             </div>
                                                             <div className="flex items-center gap-2 shrink-0">
                                                                 <div className="text-[10px] text-slate-500 font-bold">{leadersStatMode === 'perGame' ? 'Per Game' : 'Totals'}</div>
+                                                                <button
+                                                                    onClick={() => shareLeaderBlock(entry, leadersStatMode, 'download')}
+                                                                    className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-0.5"
+                                                                    title={`Download ${entry.title} leaders image`}
+                                                                >
+                                                                    <Icons.Download />
+                                                                </button>
                                                                 <button
                                                                     onClick={() => shareLeaderBlock(entry, leadersStatMode)}
                                                                     className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-0.5"
