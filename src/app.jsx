@@ -14143,7 +14143,7 @@
                                         return (
                                             <div className="grid grid-cols-1 sm:grid-cols-[1fr_260px] gap-2.5">
                                                 {/* Hero card */}
-                                                <div className="relative rounded-2xl overflow-hidden aspect-[16/9] sm:aspect-auto sm:h-full">
+                                                <div className="relative rounded-2xl overflow-hidden h-[50vh] sm:h-full">
                                                     <style>{`@keyframes heroZoom{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}.hero-zoom{animation:heroZoom 12s ease-in-out infinite;transform-origin:center center}`}</style>
                                                     {hasCustomCover
                                                         ? <img key={safeIdx} src={`/api/social-cover/${encodeURIComponent(hg.id)}/photo.jpg`} className="absolute inset-0 w-full h-full object-cover hero-zoom" alt="" />
@@ -14256,31 +14256,33 @@
                                             const teamColor = team?.color || '#475569';
                                             return { def, leader, val, team, hasPic, catColor, teamColor };
                                         });
-                                        const CARD_W = 200;
-                                        const GAP = 14;
+                                        const isMobileCarousel = window.innerWidth < 640;
+                                        const CARD_W = isMobileCarousel ? 140 : 200;
+                                        const GAP = isMobileCarousel ? 10 : 14;
                                         const DURATION = homeLeaderDefs.length * 2.8;
+                                        const avatarSz = isMobileCarousel ? 52 : 72;
                                         const renderCard = ({ def, leader, val, team, hasPic, catColor, teamColor }, keyPrefix) => (
-                                            <div key={`${keyPrefix}-${def.id}`} className="relative flex flex-col items-center pt-4 pb-4 rounded-2xl overflow-hidden flex-shrink-0" style={{ background: '#080d18', width: `${CARD_W}px` }}>
+                                            <div key={`${keyPrefix}-${def.id}`} className={`relative flex flex-col items-center ${isMobileCarousel ? 'pt-3 pb-3' : 'pt-4 pb-4'} rounded-2xl overflow-hidden flex-shrink-0`} style={{ background: '#080d18', width: `${CARD_W}px` }}>
                                                 <div className="absolute inset-x-0 top-0 h-40 pointer-events-none" style={{ background: `radial-gradient(ellipse at 50% 30%, ${catColor}30 0%, transparent 68%)` }}/>
-                                                <div className="relative flex items-center gap-1.5 mb-3">
-                                                    <div className="h-px w-4" style={{ background: catColor, opacity: 0.6 }}/>
-                                                    <span className="text-[8px] font-black uppercase tracking-widest" style={{ color: catColor, opacity: 0.7 }}>League Leader</span>
-                                                    <div className="h-px w-4" style={{ background: catColor, opacity: 0.6 }}/>
+                                                <div className="relative flex items-center gap-1.5 mb-2">
+                                                    <div className="h-px w-3" style={{ background: catColor, opacity: 0.6 }}/>
+                                                    <span className={`${isMobileCarousel ? 'text-[7px]' : 'text-[8px]'} font-black uppercase tracking-widest`} style={{ color: catColor, opacity: 0.7 }}>Leader</span>
+                                                    <div className="h-px w-3" style={{ background: catColor, opacity: 0.6 }}/>
                                                 </div>
                                                 <div className="relative mb-1">
-                                                    <div className="w-[72px] h-[72px] rounded-full overflow-hidden" style={{ boxShadow: `0 0 0 2px ${catColor}, 0 0 16px ${catColor}70, 0 0 36px ${catColor}35` }}>
+                                                    <div className="rounded-full overflow-hidden" style={{ width: avatarSz, height: avatarSz, boxShadow: `0 0 0 2px ${catColor}, 0 0 16px ${catColor}70, 0 0 36px ${catColor}35` }}>
                                                         {hasPic
                                                             ? <img src={leader.pictureUrl} className="w-full h-full object-cover object-top" alt={leader?.name}/>
-                                                            : <div className="w-full h-full flex items-center justify-center text-xl font-black text-white" style={{ background: `linear-gradient(135deg, ${teamColor}80, #0d1424)` }}>{(leader?.name || '?')[0]}</div>
+                                                            : <div className="w-full h-full flex items-center justify-center font-black text-white" style={{ fontSize: isMobileCarousel ? 14 : 18, background: `linear-gradient(135deg, ${teamColor}80, #0d1424)` }}>{(leader?.name || '?')[0]}</div>
                                                         }
                                                     </div>
                                                 </div>
-                                                <p className="relative text-[11px] font-black text-white text-center mt-3 leading-tight px-2 w-full truncate">{leader?.name || '—'}</p>
-                                                <div className="relative mt-1 px-2 py-0.5 rounded-full" style={{ background: `${teamColor}30`, border: `1px solid ${teamColor}50` }}>
-                                                    <p className="text-[8px] font-bold uppercase tracking-widest" style={{ color: teamColor }}>{team?.name || ''}</p>
+                                                <p className={`relative ${isMobileCarousel ? 'text-[10px]' : 'text-[11px]'} font-black text-white text-center mt-2 leading-tight px-2 w-full truncate`}>{leader?.name || '—'}</p>
+                                                <div className="relative mt-1 px-1.5 py-0.5 rounded-full" style={{ background: `${teamColor}30`, border: `1px solid ${teamColor}50` }}>
+                                                    <p className="text-[7px] font-bold uppercase tracking-widest" style={{ color: teamColor }}>{team?.name || ''}</p>
                                                 </div>
-                                                <p className="relative text-[38px] font-black tabular-nums leading-none mt-2" style={{ color: catColor, textShadow: `0 0 12px ${catColor}90, 0 0 32px ${catColor}60, 0 2px 8px rgba(0,0,0,0.8)` }}>{val}</p>
-                                                <p className="relative text-[10px] font-black uppercase tracking-wider mt-1" style={{ color: catColor, opacity: 0.85 }}>{def.full}</p>
+                                                <p className="relative font-black tabular-nums leading-none mt-2" style={{ fontSize: isMobileCarousel ? 28 : 38, color: catColor, textShadow: `0 0 12px ${catColor}90, 0 0 32px ${catColor}60, 0 2px 8px rgba(0,0,0,0.8)` }}>{val}</p>
+                                                <p className={`relative ${isMobileCarousel ? 'text-[8px]' : 'text-[10px]'} font-black uppercase tracking-wider mt-1`} style={{ color: catColor, opacity: 0.85 }}>{def.full}</p>
                                             </div>
                                         );
                                         return (
