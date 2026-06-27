@@ -1,0 +1,12155 @@
+(() => {
+  // src/app.jsx
+  var { useState, useEffect, useRef } = React;
+  async function apiRequest(path, options = {}) {
+    const response = await fetch(path, {
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers || {}
+      },
+      ...options
+    });
+    const text = await response.text();
+    let payload = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = null;
+      }
+    }
+    if (!response.ok) {
+      const detail = payload?.error || (text ? text.slice(0, 240) : "Unknown server error");
+      throw new Error(`Request failed (${response.status}): ${detail}`);
+    }
+    return payload;
+  }
+  var gaInitialized = false;
+  var gaMeasurementId = "";
+  function loadGaScript(measurementId) {
+    return new Promise((resolve, reject) => {
+      if (!measurementId) {
+        reject(new Error("Missing GA measurement ID."));
+        return;
+      }
+      const existing = document.querySelector('script[data-ga-script="1"]');
+      if (existing) {
+        resolve();
+        return;
+      }
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
+      script.setAttribute("data-ga-script", "1");
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Failed to load GA script."));
+      document.head.appendChild(script);
+    });
+  }
+  async function initGoogleAnalytics() {
+    if (gaInitialized) return true;
+    const prebootMeasurementId = String(window.__WKND_GA_MEASUREMENT_ID || "").trim();
+    if (prebootMeasurementId && typeof window.gtag === "function") {
+      gaMeasurementId = prebootMeasurementId;
+      gaInitialized = true;
+      return true;
+    }
+    try {
+      const config = await apiRequest("/api/client-config");
+      const enabled = Boolean(config?.gaEnabled);
+      const measurementId = String(config?.gaMeasurementId || "").trim();
+      if (!enabled || !measurementId) return false;
+      await loadGaScript(measurementId);
+      window.dataLayer = window.dataLayer || [];
+      window.gtag = window.gtag || function gtag() {
+        window.dataLayer.push(arguments);
+      };
+      window.gtag("js", /* @__PURE__ */ new Date());
+      window.gtag("config", measurementId, { send_page_view: false });
+      gaMeasurementId = measurementId;
+      gaInitialized = true;
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+  function trackAnalyticsEvent(eventName, params = {}) {
+    if (!gaInitialized || !window.gtag || !eventName) return;
+    window.gtag("event", eventName, params);
+  }
+  function trackAnalyticsPageView(pagePath, pageTitle) {
+    if (!gaInitialized || !window.gtag || !gaMeasurementId) return;
+    window.gtag("event", "page_view", {
+      page_path: pagePath,
+      page_title: pageTitle || document.title,
+      send_to: gaMeasurementId
+    });
+  }
+  var Icons = {
+    Plus: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M5 12h14" }), /* @__PURE__ */ React.createElement("path", { d: "M12 5v14" })),
+    Minus: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M5 12h14" })),
+    Users: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }), /* @__PURE__ */ React.createElement("circle", { cx: "9", cy: "7", r: "4" })),
+    Trophy: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M6 9H4.5a2.5 2.5 0 0 1 0-5H6" }), /* @__PURE__ */ React.createElement("path", { d: "M18 9h1.5a2.5 2.5 0 0 0 0-5H18" }), /* @__PURE__ */ React.createElement("path", { d: "M4 22h16" }), /* @__PURE__ */ React.createElement("path", { d: "M10 14.66V17c0 .55-.45 1-1 1H4v2h16v-2h-5c-.55 0-1-.45-1-1v-2.34" })),
+    History: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }), /* @__PURE__ */ React.createElement("path", { d: "M3 3v5h5" })),
+    ShieldAlert: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "8", x2: "12", y2: "12" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "16", x2: "12.01", y2: "16" })),
+    Activity: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "22 12 18 12 15 21 9 3 6 12 2 12" })),
+    ChevronRight: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "9 18 15 12 9 6" })),
+    X: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M18 6 6 18" }), /* @__PURE__ */ React.createElement("path", { d: "m6 6 12 12" })),
+    Trash: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "3 6 5 6 21 6" }), /* @__PURE__ */ React.createElement("path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" })),
+    UserPlus: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" }), /* @__PURE__ */ React.createElement("circle", { cx: "9", cy: "7", r: "4" }), /* @__PURE__ */ React.createElement("line", { x1: "19", y1: "8", x2: "19", y2: "14" }), /* @__PURE__ */ React.createElement("line", { x1: "22", y1: "11", x2: "16", y2: "11" })),
+    FolderPlus: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "18", height: "18", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }), /* @__PURE__ */ React.createElement("polyline", { points: "14 2 14 8 20 8" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "18", x2: "12", y2: "12" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "15", x2: "15", y2: "15" })),
+    ArrowRightLeft: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "m16 3 4 4-4 4M20 7H4M8 21l-4-4 4-4M4 17h16" })),
+    Play: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "currentColor", stroke: "none" }, /* @__PURE__ */ React.createElement("polygon", { points: "8 5 19 12 8 19 8 5" })),
+    Pause: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "currentColor", stroke: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "6", y: "5", width: "4", height: "14", rx: "1" }), /* @__PURE__ */ React.createElement("rect", { x: "14", y: "5", width: "4", height: "14", rx: "1" })),
+    Stop: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "currentColor", stroke: "none" }, /* @__PURE__ */ React.createElement("rect", { x: "6", y: "6", width: "12", height: "12", rx: "1.5" })),
+    Timer: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M10 2h4" }), /* @__PURE__ */ React.createElement("path", { d: "M12 14v-4" }), /* @__PURE__ */ React.createElement("path", { d: "M12 12l3-2" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "14", r: "8" })),
+    Zap: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })),
+    Undo: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M3 7v6h6" }), /* @__PURE__ */ React.createElement("path", { d: "M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" })),
+    Edit: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M12 20h9" }), /* @__PURE__ */ React.createElement("path", { d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" })),
+    Save: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" }), /* @__PURE__ */ React.createElement("path", { d: "M17 21v-8H7v8" }), /* @__PURE__ */ React.createElement("path", { d: "M7 3v5h8" })),
+    ChevronDown: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("polyline", { points: "6 9 12 15 18 9" })),
+    Share: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" }), /* @__PURE__ */ React.createElement("polyline", { points: "16 6 12 2 8 6" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "2", x2: "12", y2: "15" })),
+    Download: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }), /* @__PURE__ */ React.createElement("polyline", { points: "7 10 12 15 17 10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "15", x2: "12", y2: "3" })),
+    Image: () => /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }), /* @__PURE__ */ React.createElement("circle", { cx: "8.5", cy: "8.5", r: "1.5" }), /* @__PURE__ */ React.createElement("polyline", { points: "21 15 16 10 5 21" }))
+  };
+  function App() {
+    const SHOW_LIVE_SYNC_DEBUG = false;
+    const [teams, setTeams] = useState([]);
+    const [games, setGames] = useState([]);
+    const [statActions, setStatActions] = useState([]);
+    const [activeTab, setActiveTab] = useState("home");
+    const [toast, setToast] = useState(null);
+    const [rosterViewMode, setRosterViewMode] = useState("averages");
+    const [selectedRosterPlayer, setSelectedRosterPlayer] = useState(null);
+    const [selectedPlayerGameStats, setSelectedPlayerGameStats] = useState(null);
+    const CURRENT_SEASON = 3;
+    const parseDateForInput = (dateStr) => {
+      if (!dateStr) return "";
+      const iso = String(dateStr).match(/^(\d{4}-\d{2}-\d{2})/);
+      if (iso) return iso[1];
+      const d = new Date(dateStr);
+      if (isNaN(d)) return "";
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    };
+    const [selectedSeason, setSelectedSeason] = useState(CURRENT_SEASON);
+    const [gameMetaSeason, setGameMetaSeason] = useState(CURRENT_SEASON);
+    const [gameMetaSeriesId, setGameMetaSeriesId] = useState("");
+    const [standingsStatMode, setStandingsStatMode] = useState("totals");
+    const [leadersStatMode, setLeadersStatMode] = useState("perGame");
+    const [homeLeaderStat, setHomeLeaderStat] = useState("pts");
+    const [heroCarouselIdx, setHeroCarouselIdx] = useState(0);
+    const [heroPotgData, setHeroPotgData] = useState({});
+    const heroGamesCountRef = React.useRef(0);
+    const [awardsPagePublicEnabled, setAwardsPagePublicEnabled] = useState(false);
+    const [standingsBarsVisible, setStandingsBarsVisible] = useState(false);
+    const [standingsBarsCycle, setStandingsBarsCycle] = useState(0);
+    const [selectedStandingsLeaderStat, setSelectedStandingsLeaderStat] = useState("pts");
+    const [isGameLive, setIsGameLive] = useState(false);
+    const [teamAId, setTeamAId] = useState("");
+    const [teamBId, setTeamBId] = useState("");
+    const [liveSessionInstanceId, setLiveSessionInstanceId] = useState("");
+    const [liveSessionCreatedAt, setLiveSessionCreatedAt] = useState(0);
+    const [teamAScore, setTeamAScore] = useState(0);
+    const [teamBScore, setTeamBScore] = useState(0);
+    const [currentQuarter, setCurrentQuarter] = useState(1);
+    const [periodClockSeconds, setPeriodClockSeconds] = useState(12 * 60);
+    const [isPeriodClockRunning, setIsPeriodClockRunning] = useState(false);
+    const [livePlayerSeconds, setLivePlayerSeconds] = useState({});
+    const [manualClockInput, setManualClockInput] = useState("12:00");
+    const [isEditingClockInput, setIsEditingClockInput] = useState(false);
+    const [showExtraGameControls, setShowExtraGameControls] = useState(false);
+    const [showSyncClockEditor, setShowSyncClockEditor] = useState(false);
+    const [teamALineup, setTeamALineup] = useState([]);
+    const [teamABench, setTeamABench] = useState([]);
+    const [teamBLineup, setTeamBLineup] = useState([]);
+    const [teamBBench, setTeamBBench] = useState([]);
+    const [liveStats, setLiveStats] = useState({});
+    const [gameLog, setGameLog] = useState([]);
+    const [liveGameSnapshot, setLiveGameSnapshot] = useState(null);
+    const [playedPlayers, setPlayedPlayers] = useState([]);
+    const [dnpPlayers, setDnpPlayers] = useState([]);
+    const [loggedHistory, setLoggedHistory] = useState([]);
+    const [periodSnapshots, setPeriodSnapshots] = useState([]);
+    const [activeAction, setActiveAction] = useState(null);
+    const [activeActionLabelOverride, setActiveActionLabelOverride] = useState("");
+    const [correctionMode, setCorrectionMode] = useState(false);
+    const [showLoggingModal, setShowLoggingModal] = useState(false);
+    const [recentActionIds, setRecentActionIds] = useState([]);
+    const showRecentActionsUi = false;
+    const showStickyMobileActionsUi = false;
+    const [activeMobileConsoleTab, setActiveMobileConsoleTab] = useState("home");
+    const [showHomeBenchAdder, setShowHomeBenchAdder] = useState(false);
+    const [showAwayBenchAdder, setShowAwayBenchAdder] = useState(false);
+    const [showLiveRunningBoxscore, setShowLiveRunningBoxscore] = useState(true);
+    const [liveBoxscoreTab, setLiveBoxscoreTab] = useState("home");
+    const [pendingPeriodActionMode, setPendingPeriodActionMode] = useState(null);
+    const [isPlayPaused, setIsPlayPaused] = useState(false);
+    const [isEndingGame, setIsEndingGame] = useState(false);
+    const [selectedHistoryGameId, setSelectedHistoryGameId] = useState(null);
+    const [pendingSharedGameId, setPendingSharedGameId] = useState(null);
+    const [pendingSharedHistoryDetailTab, setPendingSharedHistoryDetailTab] = useState("");
+    const [pendingSharedRosterPlayer, setPendingSharedRosterPlayer] = useState(null);
+    const [historyDetailTab, setHistoryDetailTab] = useState("potg");
+    const [historyVideoInput, setHistoryVideoInput] = useState("");
+    const [historyWriteupInput, setHistoryWriteupInput] = useState("");
+    const [showShareTools, setShowShareTools] = useState(false);
+    const [showGameRecapTools, setShowGameRecapTools] = useState(false);
+    const [generatingWriteupGameId, setGeneratingWriteupGameId] = useState(null);
+    const [generatingPotgWriteupGameId, setGeneratingPotgWriteupGameId] = useState(null);
+    const playerArtStylePrompt = "A premium sports app background template, widescreen 16:9 aspect ratio. On the right side, a high-quality cell-shaded anime cartoon style illustration of a young Asian basketball player wearing a black and white pinstripe jersey with the number 3. The left and center areas are kept completely empty and clear for UI text placement. The entire background features a dark navy blue and slate grey gradient with subtle diagonal tech stripes. Low contrast, clean aesthetic, no random text, no floating numbers, designed specifically as a graphic design template for text overlay.";
+    const [playerArtSourceDataUrl, setPlayerArtSourceDataUrl] = useState("");
+    const [playerArtOutputDataUrl, setPlayerArtOutputDataUrl] = useState("");
+    const [playerArtDirection, setPlayerArtDirection] = useState("");
+    const [isGeneratingPlayerArt, setIsGeneratingPlayerArt] = useState(false);
+    const [awaitingOvertimeDecision, setAwaitingOvertimeDecision] = useState(false);
+    const [awaitingPeriodStart, setAwaitingPeriodStart] = useState(false);
+    const [editingGame, setEditingGame] = useState(null);
+    const [editingGameDate, setEditingGameDate] = useState("");
+    const [editingInlineDateId, setEditingInlineDateId] = useState(null);
+    const [editingInlineDateVal, setEditingInlineDateVal] = useState("");
+    const [editStatsTemp, setEditStatsTemp] = useState({});
+    const [expandedEditPlayerId, setExpandedEditPlayerId] = useState(null);
+    const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+    const [scheduleForm, setScheduleForm] = useState({ date: "", teamAId: "", teamBId: "", gameType: "regular", season: CURRENT_SEASON });
+    const [importResultsState, setImportResultsState] = useState(null);
+    const [showNewTeamModal, setShowNewTeamModal] = useState(false);
+    const [newTeamName, setNewTeamName] = useState("");
+    const [newTeamColor, setNewTeamColor] = useState("#10b981");
+    const [showNewPlayerModal, setShowNewPlayerModal] = useState(false);
+    const [selectedTeamIdForPlayer, setSelectedTeamIdForPlayer] = useState("");
+    const [newPlayerName, setNewPlayerName] = useState("");
+    const [newPlayerNumber, setNewPlayerNumber] = useState("");
+    const [newPlayerHeight, setNewPlayerHeight] = useState("");
+    const [editingPlayer, setEditingPlayer] = useState(null);
+    const [advancedEditingPlayer, setAdvancedEditingPlayer] = useState(null);
+    const syncSocketRef = useRef(null);
+    const syncClientIdRef = useRef(`client_${Math.random().toString(36).slice(2, 10)}`);
+    const suppressLiveSessionSyncRef = useRef(false);
+    const pendingLiveEventsRef = useRef([]);
+    const flushLiveEventsInFlightRef = useRef(false);
+    const pendingActiveSessionSyncRef = useRef(null);
+    const sessionSyncRetryTimerRef = useRef(null);
+    const socketReconnectTimerRef = useRef(null);
+    const socketReconnectAttemptsRef = useRef(0);
+    const socketManualCloseRef = useRef(false);
+    const flushActiveSessionSyncInFlightRef = useRef(false);
+    const processedGameLogIdsRef = useRef(/* @__PURE__ */ new Set());
+    const remoteEventIdsRef = useRef(/* @__PURE__ */ new Set());
+    const liveEventQueueReadyRef = useRef(false);
+    const lastLiveSeqRef = useRef(0);
+    const [flashPlayers, setFlashPlayers] = useState({});
+    const [subFlashPlayers, setSubFlashPlayers] = useState({});
+    const [subFlashLogId, setSubFlashLogId] = useState(null);
+    const [scoreFlashTeams, setScoreFlashTeams] = useState({});
+    const flashTimersRef = useRef({});
+    const lastObservedLogIdRef = useRef(null);
+    const prevLiveStatsRef = useRef({});
+    const prevLiveScoresRef = useRef({ teamA: null, teamB: null });
+    const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    const [showAccountMenu, setShowAccountMenu] = useState(false);
+    const [editingLiveLogId, setEditingLiveLogId] = useState(null);
+    const [editingLiveLogActionId, setEditingLiveLogActionId] = useState("");
+    const [selectedPlayerId, setSelectedPlayerId] = useState("");
+    const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
+    const [subTargetPlayer, setSubTargetPlayer] = useState(null);
+    const [showAddFromBenchModal, setShowAddFromBenchModal] = useState(false);
+    const [addFromBenchTeam, setAddFromBenchTeam] = useState(null);
+    const [addFromBenchSelection, setAddFromBenchSelection] = useState([]);
+    const [lineupRevision, setLineupRevision] = useState(0);
+    const [syncDebug, setSyncDebug] = useState({
+      lastIncomingEventId: "",
+      lastIncomingSeq: 0,
+      lastRemoteLineupRevision: 0,
+      lastLocalLineupRevisionAtSync: 0,
+      keepLocalRotation: false,
+      pendingQueue: 0,
+      hasLocalOnly: false,
+      lastPersist: "never",
+      persistError: ""
+    });
+    const teamsRef = useRef(teams);
+    const isGameLiveRef = useRef(isGameLive);
+    const suppressPeriodAutoStopRef = useRef(false);
+    const suppressTimeoutAutoStopRef = useRef(false);
+    const teamALineupRef = useRef(teamALineup);
+    const teamABenchRef = useRef(teamABench);
+    const teamBLineupRef = useRef(teamBLineup);
+    const teamBBenchRef = useRef(teamBBench);
+    const bodyScrollLockYRef = useRef(0);
+    const bodyScrollLockedRef = useRef(false);
+    const gameLogRef = useRef(gameLog);
+    const liveGameSnapshotRef = useRef(liveGameSnapshot);
+    const loggedHistoryRef = useRef(loggedHistory);
+    const dnpPlayersRef = useRef(dnpPlayers);
+    const lineupRevisionRef = useRef(lineupRevision);
+    const liveSessionInstanceIdRef = useRef(liveSessionInstanceId);
+    const liveSessionCreatedAtRef = useRef(liveSessionCreatedAt);
+    const currentQuarterRef = useRef(currentQuarter);
+    const periodClockSecondsRef = useRef(periodClockSeconds);
+    const isPeriodClockRunningRef = useRef(isPeriodClockRunning);
+    const awaitingPeriodStartRef = useRef(awaitingPeriodStart);
+    const latestEndedGameTimestampRef = useRef(0);
+    const sessionRevisionRef = useRef(0);
+    const clockControlRevisionRef = useRef(0);
+    const discardedLiveSessionTombstoneRef = useRef({ sessionInstanceId: "", discardedAt: 0 });
+    const lastRemoteGameLogIdsRef = useRef(/* @__PURE__ */ new Set());
+    const locallyDeletedLiveLogIdsRef = useRef(/* @__PURE__ */ new Set());
+    const locallyDeletedGameIdsRef = useRef(/* @__PURE__ */ new Set());
+    const gameLogImportInputRef = useRef(null);
+    const importResultsJsonInputRef = useRef(null);
+    const lastLocalSessionUpdatedAtRef = useRef(0);
+    const lastLocalDnpUpdatedAtRef = useRef(0);
+    const localResumeLockUntilRef = useRef(0);
+    const liveGameplayControlSnapshotRef = useRef(null);
+    const lastClockControlReconcileEventIdRef = useRef("");
+    const lastPersistedQuarterEndIdRef = useRef("");
+    const localFoulPauseTriggerIdRef = useRef("");
+    const nonPrimaryResumeConfirmRef = useRef(false);
+    const pendingTechnicalFoulReasonRef = useRef("");
+    const adminFocusRevisionRef = useRef(0);
+    const lastRolePresenceEmitAtRef = useRef(0);
+    const adminMissingToastAtRef = useRef(0);
+    const attemptedAutoPotgWriteupRef = useRef(/* @__PURE__ */ new Set());
+    const pendingYoutubeSaveRef = useRef({});
+    const suppressNextNavHistoryPushRef = useRef(false);
+    const lastNavUrlRef = useRef("");
+    const [foulAlert, setFoulAlert] = useState(null);
+    const [reasonInput, setReasonInput] = useState(null);
+    const [confirmDialog, setConfirmDialog] = useState(null);
+    const [isAdminSupervisorPresent, setIsAdminSupervisorPresent] = useState(false);
+    const [sharedAdminFocus, setSharedAdminFocus] = useState(null);
+    const [isRoleCapacityExceeded, setIsRoleCapacityExceeded] = useState(false);
+    const hadLiveSessionRef = useRef(false);
+    const gamesBootstrappedRef = useRef(false);
+    const [authRole, setAuthRole] = useState("viewer");
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [authFormRole, setAuthFormRole] = useState("operator");
+    const [authPassword, setAuthPassword] = useState("");
+    const [operatorFocus, setOperatorFocus] = useState("both");
+    const canOperateLive = authRole === "operator" || authRole === "admin";
+    const isOperatorScreenLockedByAdminBoth = authRole === "operator" && isGameLive && sharedAdminFocus === "both";
+    const canUseLiveControls = canOperateLive && (authRole === "admin" || !isOperatorScreenLockedByAdminBoth);
+    const effectiveOperatorFocus = authRole === "operator" && isGameLive ? sharedAdminFocus === "home" ? "away" : sharedAdminFocus === "away" ? "home" : operatorFocus : operatorFocus;
+    const canAdminControlClock = authRole === "admin";
+    const canEditPlayers = authRole === "operator" || authRole === "admin";
+    const isLoggedIn = authRole !== "viewer";
+    const canViewAwardsPage = awardsPagePublicEnabled || isLoggedIn;
+    const awardsPageLocked = activeTab === "awards" && !canViewAwardsPage;
+    const showOperatorFocusControls = canAdminControlClock && activeTab === "live" && isGameLive;
+    const editableLiveStatActions = (statActions || []).filter((action) => {
+      if (!action || !action.id || !action.label || !action.stat) return false;
+      return Number(action.val || 0) !== 0;
+    });
+    const liveLogEditTarget = editingLiveLogId ? (gameLog || []).find((entry) => entry?.id === editingLiveLogId) || null : null;
+    const isLiveLogEditModalOpen = Boolean(liveLogEditTarget);
+    const isAdvancedPlayerModalOpen = Boolean(advancedEditingPlayer);
+    const isConfirmDialogOpen = Boolean(confirmDialog);
+    const isFoulAlertOpen = Boolean(foulAlert);
+    const isLiveGameplayModalActive = Boolean(
+      showSubstitutionModal || showAddFromBenchModal || liveLogEditTarget
+    );
+    const PLAYER_POSITIONS = ["PG", "SG", "SF", "PF", "C"];
+    const LIVE_LINEUP_DISPLAY_POSITIONS = ["C", "PF", "SF", "SG", "PG"];
+    const LOCAL_APP_STATE_CACHE_KEY = "wknd_app_state_cache";
+    const normalizePlayerPositions = (playerLike) => {
+      const rawPositions = [];
+      const pushFromValue = (value) => {
+        if (Array.isArray(value)) {
+          value.forEach((item) => {
+            if (typeof item === "string") rawPositions.push(item);
+          });
+          return;
+        }
+        if (typeof value === "string") {
+          value.split(/[\s,\/|]+/).forEach((item) => {
+            if (item) rawPositions.push(item);
+          });
+        }
+      };
+      pushFromValue(playerLike?.positions);
+      pushFromValue(playerLike?.position);
+      return Array.from(new Set(
+        rawPositions.map((pos) => String(pos || "").trim().toUpperCase()).filter((pos) => PLAYER_POSITIONS.includes(pos))
+      ));
+    };
+    const parsePlayerHeightInches = (playerLike) => {
+      const raw = String(playerLike?.height || "").trim();
+      if (!raw) return 0;
+      const compact = raw.toLowerCase().replace(/\s+/g, " ").trim();
+      const feetInchesMatch = compact.match(/^(\d+)\s*(?:'|ft)\s*(\d{1,2})?\s*(?:"|in)?$/i) || compact.match(/^(\d+)\s*[- ]\s*(\d{1,2})$/);
+      if (feetInchesMatch) {
+        const feet = Number.parseInt(feetInchesMatch[1], 10) || 0;
+        const inches = Number.parseInt(feetInchesMatch[2] || "0", 10) || 0;
+        return feet * 12 + inches;
+      }
+      const cmMatch = compact.match(/^(\d{3})\s*cm$/i);
+      if (cmMatch) {
+        const cm = Number.parseInt(cmMatch[1], 10) || 0;
+        return Math.round(cm / 2.54);
+      }
+      const inchesMatch = compact.match(/^(\d{2,3})\s*(?:in|inches)?$/i);
+      if (inchesMatch) {
+        return Number.parseInt(inchesMatch[1], 10) || 0;
+      }
+      return 0;
+    };
+    const getLiveLineupSlotFitScore = (playerLike, slotLabel) => {
+      const positions = normalizePlayerPositions(playerLike);
+      if (!positions.length) return { maxScore: 0, excellenceCount: 0 };
+      const scoreByPositionForSlot = slotLabel === "C" ? { C: 500, PF: 320, SF: 220, SG: 80, PG: 60 } : slotLabel === "PF" ? { PF: 500, SF: 420, C: 260, SG: 140, PG: 120 } : slotLabel === "SF" ? { SF: 500, PF: 420, SG: 220, C: 180, PG: 120 } : slotLabel === "SG" ? { SG: 500, PG: 460, SF: 220, PF: 120, C: 60 } : { PG: 500, SG: 460, SF: 220, PF: 120, C: 60 };
+      let maxScore = 0;
+      let excellenceCount = 0;
+      positions.forEach((position) => {
+        const score = Number(scoreByPositionForSlot[position] || 0);
+        if (score > maxScore) maxScore = score;
+        if (score >= 300) excellenceCount++;
+      });
+      return { maxScore, excellenceCount };
+    };
+    const getOrderedLiveLineupEntries = (teamId, lineupIds = []) => {
+      const teamPool = teamsRef.current && teamsRef.current.length > 0 ? teamsRef.current : teams;
+      const teamObj = teamPool.find((team) => team.id === teamId);
+      const playersById = new Map((teamObj?.players || []).map((player) => [player.id, player]));
+      const positionOrder = new Map(LIVE_LINEUP_DISPLAY_POSITIONS.map((position, index) => [position, index]));
+      const uniqueLineupIds = Array.from(new Set((lineupIds || []).filter(Boolean)));
+      const primaryIds = uniqueLineupIds.slice(0, LIVE_LINEUP_DISPLAY_POSITIONS.length);
+      const extraIds = uniqueLineupIds.slice(primaryIds.length);
+      const targetSlots = LIVE_LINEUP_DISPLAY_POSITIONS.slice(0, primaryIds.length);
+      if (!primaryIds.length) {
+        return extraIds.map((playerId) => ({ playerId, slot: "" }));
+      }
+      const candidates = primaryIds.map((playerId) => {
+        const player = playersById.get(playerId);
+        const positions = normalizePlayerPositions(player);
+        const positionSpecificity = positions.length === 1 ? 2 : 1;
+        return {
+          playerId,
+          player,
+          positions,
+          height: parsePlayerHeightInches(player),
+          fouls: Number(liveStats[playerId]?.pf || 0),
+          jerseyNumber: Number(player?.number || 0) || Number.MAX_SAFE_INTEGER,
+          positionSpecificity
+        };
+      });
+      let bestScore = Number.NEGATIVE_INFINITY;
+      let bestSpecificity = Number.NEGATIVE_INFINITY;
+      let bestHeightTieBreak = Number.NEGATIVE_INFINITY;
+      let bestFoulPreference = Number.NEGATIVE_INFINITY;
+      let bestJerseyPreference = Number.NEGATIVE_INFINITY;
+      let bestAssignment = null;
+      const assignedEntries = new Array(targetSlots.length);
+      const used = new Array(candidates.length).fill(false);
+      const backtrack = (slotIndex, scoreTotal, specificityTotal, heightTieBreakTotal, foulPreferenceTotal, jerseyPreferenceTotal) => {
+        if (slotIndex >= targetSlots.length) {
+          if (scoreTotal > bestScore || scoreTotal === bestScore && (specificityTotal > bestSpecificity || specificityTotal === bestSpecificity && (heightTieBreakTotal > bestHeightTieBreak || heightTieBreakTotal === bestHeightTieBreak && (foulPreferenceTotal > bestFoulPreference || foulPreferenceTotal === bestFoulPreference && jerseyPreferenceTotal > bestJerseyPreference)))) {
+            bestScore = scoreTotal;
+            bestSpecificity = specificityTotal;
+            bestHeightTieBreak = heightTieBreakTotal;
+            bestFoulPreference = foulPreferenceTotal;
+            bestJerseyPreference = jerseyPreferenceTotal;
+            bestAssignment = assignedEntries.slice();
+          }
+          return;
+        }
+        const slot = targetSlots[slotIndex];
+        for (let i = 0; i < candidates.length; i++) {
+          if (used[i]) continue;
+          const candidate = candidates[i];
+          const slotScore = getLiveLineupSlotFitScore(candidate.player, slot).maxScore;
+          const slotSpecificity = candidate.positions.includes(slot) ? candidate.positionSpecificity : 0;
+          const hasHeight = candidate.height > 0;
+          const slotHeightTieBreak = hasHeight ? slot === "PG" || slot === "SG" ? -candidate.height : candidate.height : -1e3;
+          const slotFoulPreference = -candidate.fouls;
+          const slotJerseyPreference = -candidate.jerseyNumber;
+          used[i] = true;
+          assignedEntries[slotIndex] = { playerId: candidate.playerId, slot };
+          backtrack(
+            slotIndex + 1,
+            scoreTotal + slotScore,
+            specificityTotal + slotSpecificity,
+            heightTieBreakTotal + slotHeightTieBreak,
+            foulPreferenceTotal + slotFoulPreference,
+            jerseyPreferenceTotal + slotJerseyPreference
+          );
+          used[i] = false;
+        }
+      };
+      backtrack(0, 0, 0, 0, 0, 0);
+      const orderedEntries = Array.isArray(bestAssignment) ? bestAssignment : targetSlots.map((slot, index) => ({ playerId: primaryIds[index], slot }));
+      orderedEntries.sort((left, right) => {
+        const leftRank = positionOrder.has(left.slot) ? positionOrder.get(left.slot) : LIVE_LINEUP_DISPLAY_POSITIONS.length;
+        const rightRank = positionOrder.has(right.slot) ? positionOrder.get(right.slot) : LIVE_LINEUP_DISPLAY_POSITIONS.length;
+        return leftRank - rightRank;
+      });
+      extraIds.forEach((playerId) => {
+        orderedEntries.push({ playerId, slot: "" });
+      });
+      return orderedEntries;
+    };
+    const REGULATION_PERIOD_SECONDS = 12 * 60;
+    const OVERTIME_PERIOD_SECONDS = 5 * 60;
+    const LIVE_SESSION_STALE_AFTER_MS = 36 * 60 * 60 * 1e3;
+    const LIVE_SESSION_MAX_AGE_MS = 36 * 60 * 60 * 1e3;
+    const MAX_LIVE_LOG_ENTRIES = 5e3;
+    const MAX_LIVE_HISTORY_ENTRIES = 5e3;
+    const OPERATOR_FOCUS_KEY = "wknd_live_operator_focus";
+    const operatorFocusOptions = [
+      { id: "home" },
+      { id: "both", label: "BOTH" },
+      { id: "away" }
+    ];
+    useEffect(() => {
+      const savedRole = localStorage.getItem("wknd_access_role");
+      if (savedRole === "operator" || savedRole === "admin") {
+        setAuthRole(savedRole);
+      }
+      const savedFocus = localStorage.getItem(OPERATOR_FOCUS_KEY);
+      if (savedFocus === "home" || savedFocus === "away" || savedFocus === "both") {
+        setOperatorFocus(savedFocus);
+      }
+    }, []);
+    useEffect(() => {
+      initGoogleAnalytics();
+    }, []);
+    useEffect(() => {
+      const selectedGame = selectedHistoryGameId ? games.find((game) => game.id === selectedHistoryGameId) || null : null;
+      const selectedProfile = (() => {
+        if (!selectedRosterPlayer?.teamId || !selectedRosterPlayer?.playerId) return null;
+        const team = teams.find((item) => item.id === selectedRosterPlayer.teamId) || null;
+        const player = team ? (team.players || []).find((item) => item.id === selectedRosterPlayer.playerId) || null : null;
+        return team && player ? { team, player } : null;
+      })();
+      const pageTitle = activeTab === "live" ? "WKND League Stats - Live Console" : activeTab === "history" ? selectedGame ? `WKND League Stats - ${selectedGame.teamAName || "Home"} vs ${selectedGame.teamBName || "Away"}` : "WKND League Stats - Game Log" : activeTab === "teams" ? selectedProfile ? `WKND League Stats - #${selectedProfile.player.number} ${selectedProfile.player.name}` : "WKND League Stats - Rosters" : activeTab === "standings" ? "WKND League Stats - Standings" : activeTab === "leaders" ? "WKND League Stats - League Statistics" : activeTab === "awards" ? "WKND League Stats - All WKND Awards" : "WKND League Stats";
+      document.title = pageTitle;
+      const pagePath = `${window.location.pathname || "/"}${window.location.search || ""}`;
+      trackAnalyticsPageView(pagePath, pageTitle);
+    }, [activeTab, selectedHistoryGameId, selectedRosterPlayer, games, teams]);
+    const parseRouteFromLocation = () => {
+      try {
+        const url = new URL(window.location.href);
+        const rawPath = String(url.pathname || "/").replace(/\/+$/, "") || "/";
+        const pathParts = rawPath.split("/").filter(Boolean);
+        if (pathParts[0] === "history" && pathParts[1] === "game" && pathParts[2]) {
+          return {
+            type: "history-game",
+            gameId: decodeURIComponent(pathParts[2]),
+            historyTab: String(url.searchParams.get("tab") || "").trim()
+          };
+        }
+        if (pathParts[0] === "teams" && pathParts[1] === "player" && pathParts[2] && pathParts[3]) {
+          return {
+            type: "teams-player",
+            teamId: decodeURIComponent(pathParts[2]),
+            playerId: decodeURIComponent(pathParts[3])
+          };
+        }
+        const tabFromPath = pathParts[0] || "";
+        if (["home", "live", "teams", "standings", "history", "awards", "leaders"].includes(tabFromPath)) {
+          return {
+            type: "tab",
+            activeTab: normalizeTabId(tabFromPath)
+          };
+        }
+        const view = String(url.searchParams.get("view") || "").trim().toLowerCase();
+        const gameId = String(url.searchParams.get("gameId") || "").trim();
+        const historyTab = String(url.searchParams.get("tab") || "").trim();
+        const teamId = String(url.searchParams.get("teamId") || "").trim();
+        const playerId = String(url.searchParams.get("playerId") || "").trim();
+        if (view === "game" && gameId) {
+          return { type: "history-game", gameId, historyTab };
+        }
+        if (view === "player" && teamId && playerId) {
+          return { type: "teams-player", teamId, playerId };
+        }
+        if (["home", "live", "teams", "standings", "history", "awards", "leaders"].includes(view)) {
+          return { type: "tab", activeTab: normalizeTabId(view) };
+        }
+        return { type: "tab", activeTab: "home" };
+      } catch (e) {
+        return { type: "tab", activeTab: "home" };
+      }
+    };
+    const buildAppUrl = ({ tab, historyGameId, historyTabValue, rosterPlayer }) => {
+      const url = new URL(window.location.href);
+      const safeTab = normalizeTabId(tab);
+      if (safeTab === "history" && historyGameId) {
+        url.pathname = `/history/game/${encodeURIComponent(historyGameId)}`;
+        if (historyTabValue) {
+          url.searchParams.set("tab", historyTabValue);
+        } else {
+          url.searchParams.delete("tab");
+        }
+      } else if (safeTab === "teams" && rosterPlayer?.teamId && rosterPlayer?.playerId) {
+        url.pathname = `/teams/player/${encodeURIComponent(rosterPlayer.teamId)}/${encodeURIComponent(rosterPlayer.playerId)}`;
+        url.searchParams.delete("tab");
+      } else {
+        url.pathname = safeTab === "home" ? "/" : `/${safeTab}`;
+        url.searchParams.delete("tab");
+      }
+      url.searchParams.delete("view");
+      url.searchParams.delete("gameId");
+      url.searchParams.delete("teamId");
+      url.searchParams.delete("playerId");
+      return url.toString();
+    };
+    useEffect(() => {
+      try {
+        localStorage.setItem(OPERATOR_FOCUS_KEY, operatorFocus);
+      } catch (e) {
+      }
+    }, [operatorFocus]);
+    useEffect(() => {
+      if (!isLoggedIn) {
+        setShowSyncClockEditor(false);
+        setIsEditingClockInput(false);
+      }
+    }, [isLoggedIn]);
+    useEffect(() => {
+      let isMounted = true;
+      (async () => {
+        try {
+          const config = await apiRequest("/api/client-config");
+          if (!isMounted) return;
+          setAwardsPagePublicEnabled(Boolean(config?.publicAwardsPageEnabled));
+        } catch (error) {
+          if (!isMounted) return;
+          setAwardsPagePublicEnabled(false);
+        }
+      })();
+      return () => {
+        isMounted = false;
+      };
+    }, []);
+    useEffect(() => {
+      try {
+        const route = parseRouteFromLocation();
+        if (route.type === "history-game" && route.gameId) {
+          setActiveTab("history");
+          setPendingSharedGameId(route.gameId);
+          if (route.historyTab) {
+            setPendingSharedHistoryDetailTab(route.historyTab);
+          }
+        } else if (route.type === "teams-player" && route.teamId && route.playerId) {
+          setActiveTab("teams");
+          setPendingSharedRosterPlayer({ teamId: route.teamId, playerId: route.playerId });
+        } else if (route.type === "tab") {
+          setActiveTab(normalizeTabId(route.activeTab || "home"));
+        }
+      } catch (e) {
+      }
+    }, []);
+    useEffect(() => {
+      try {
+        const url = new URL(window.location.href);
+        const initialState = {
+          __wkndNav: true,
+          activeTab,
+          selectedHistoryGameId: selectedHistoryGameId || null,
+          historyDetailTab: activeTab === "history" ? historyDetailTab : null,
+          selectedRosterPlayer: activeTab === "teams" ? selectedRosterPlayer : null
+        };
+        window.history.replaceState(initialState, "", url.toString());
+        lastNavUrlRef.current = url.toString();
+      } catch (e) {
+      }
+    }, []);
+    useEffect(() => {
+      const onPopState = (event) => {
+        const state = event?.state;
+        if (!state || !state.__wkndNav) return;
+        suppressNextNavHistoryPushRef.current = true;
+        setActiveTab(normalizeTabId(state.activeTab || "home"));
+        setSelectedHistoryGameId(state.selectedHistoryGameId || null);
+        setSelectedRosterPlayer(state.selectedRosterPlayer || null);
+        if (state.activeTab === "history" && state.historyDetailTab) {
+          setHistoryDetailTab(String(state.historyDetailTab));
+        }
+      };
+      window.addEventListener("popstate", onPopState);
+      return () => {
+        window.removeEventListener("popstate", onPopState);
+      };
+    }, []);
+    useEffect(() => {
+      if (activeTab !== "home") return;
+      fetch("/api/games/recent-potg?limit=4").then((r) => r.ok ? r.json() : null).then((data) => {
+        if (!Array.isArray(data)) return;
+        const map = {};
+        data.forEach((item) => {
+          if (item?.gameId) map[item.gameId] = item;
+        });
+        setHeroPotgData(map);
+      }).catch(() => {
+      });
+    }, [activeTab]);
+    useEffect(() => {
+      if (activeTab !== "home") return;
+      const timer = setInterval(() => {
+        setHeroCarouselIdx((p) => {
+          const count = heroGamesCountRef.current;
+          return count > 1 ? (p + 1) % count : p;
+        });
+      }, 5e3);
+      return () => clearInterval(timer);
+    }, [activeTab]);
+    const handleAuthLogin = async (e) => {
+      e.preventDefault();
+      try {
+        await apiRequest("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ role: authFormRole, password: authPassword })
+        });
+        setAuthRole(authFormRole);
+        localStorage.setItem("wknd_access_role", authFormRole);
+        setAuthPassword("");
+        setShowAuthModal(false);
+        showToast(`Logged in as ${authFormRole}.`, "success");
+      } catch (error) {
+        showToast("Invalid login credentials.", "error");
+      }
+    };
+    const handleAuthLogout = () => {
+      setAuthRole("viewer");
+      setShowAccountMenu(false);
+      localStorage.removeItem("wknd_access_role");
+      setAuthPassword("");
+      setShowAuthModal(false);
+      setShowLoggingModal(false);
+      setActiveAction(null);
+      setEditingLiveLogId(null);
+      setEditingLiveLogActionId("");
+      showToast("Logged out. Viewer access only.", "info");
+    };
+    const handleToggleAwardsPagePublic = async () => {
+      if (authRole !== "admin") {
+        showToast("Only admin can change awards page visibility.", "info");
+        return;
+      }
+      const nextValue = !awardsPagePublicEnabled;
+      setAwardsPagePublicEnabled(nextValue);
+      try {
+        await apiRequest("/api/client-config", {
+          method: "PUT",
+          body: JSON.stringify({
+            role: authRole,
+            publicAwardsPageEnabled: nextValue
+          })
+        });
+        showToast(nextValue ? "Awards page is now public." : "Awards page is now private.", "success");
+      } catch (error) {
+        setAwardsPagePublicEnabled(!nextValue);
+        showToast("Failed to update awards page visibility.", "error");
+      }
+    };
+    const handleOperatorFocusChange = (nextFocus) => {
+      if (authRole !== "admin") {
+        showToast("Only admin can change focus assignment.", "info");
+        return;
+      }
+      const resolvedFocus = nextFocus === "home" || nextFocus === "away" || nextFocus === "both" ? nextFocus : "both";
+      setOperatorFocus(resolvedFocus);
+      setSharedAdminFocus(resolvedFocus);
+      if (!isGameLive) return;
+      const focusEventTs = Date.now();
+      const nextFocusRevision = Math.max(Number(adminFocusRevisionRef.current || 0) + 1, focusEventTs * 1e3);
+      adminFocusRevisionRef.current = nextFocusRevision;
+      const focusEvent = {
+        id: `${focusEventTs}_${Math.random().toString(36).slice(2, 8)}`,
+        time: getWallClockTime(),
+        text: `Admin focus: ${resolvedFocus.toUpperCase()}`,
+        kind: "meta",
+        metaType: "adminFocusSet",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        role: "admin",
+        focus: resolvedFocus,
+        focusRevision: nextFocusRevision,
+        clientId: syncClientIdRef.current
+      };
+      markLocalSessionUpdated();
+      setGameLog((prev) => [focusEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+    };
+    const canOperateTeam = (isTeamA) => {
+      if (!canUseLiveControls) return false;
+      if (effectiveOperatorFocus === "both") return true;
+      return effectiveOperatorFocus === (isTeamA ? "home" : "away");
+    };
+    const ensureTeamOperationAccess = (isTeamA, actionLabel = "operate on this team") => {
+      if (!canUseLiveControls) {
+        if (authRole === "operator" && isOperatorScreenLockedByAdminBoth) {
+          showToast("Operator controls are locked while admin focus is BOTH.", "info");
+          return false;
+        }
+        if (authRole === "operator" && !isAdminSupervisorPresent) {
+          showToast("Admin must be active before operator can use live controls.", "info");
+          return false;
+        }
+        if (isRoleCapacityExceeded) {
+          showToast("Live game allows max 2 users: 1 admin and 1 operator.", "info");
+          return false;
+        }
+      }
+      if (canOperateTeam(isTeamA)) return true;
+      const teamLabel = isTeamA ? "HOME" : "AWAY";
+      showToast(`Focus is set to ${effectiveOperatorFocus.toUpperCase()}. Switch to ${teamLabel} or BOTH to ${actionLabel}.`, "info");
+      return false;
+    };
+    const isFoulLikeAction = (action) => {
+      if (!action) return false;
+      if (action.stat === "pf") return true;
+      if (action.category === "foul") return true;
+      if (typeof action.id === "string" && /pf|foul/i.test(action.id)) return true;
+      if (typeof action.label === "string" && /foul/i.test(action.label)) return true;
+      return false;
+    };
+    const openActionForTeam = (action, isTeamA) => {
+      if (!canUseLiveControls) {
+        showToast("Live controls are locked right now.", "info");
+        return;
+      }
+      if (!canOperateTeam(isTeamA)) {
+        ensureTeamOperationAccess(isTeamA, "log stats for this team");
+        return;
+      }
+      if (stoppedClockActionIds.has(action?.id) && isPeriodClockRunning) {
+        showToast("Free Throw and Free Throw Missed are only available when the clock is stopped or paused.", "info");
+        return;
+      }
+      if (isGameLive) {
+        const shouldAutoTriggerStartAction = periodActionMode === "startMatch" || periodActionMode === "startPeriod" || periodActionMode === "startOvertime";
+        if (shouldAutoTriggerStartAction && !canBackfillEndedPeriodStats) {
+          handlePeriodAction();
+        }
+      }
+      nonPrimaryResumeConfirmRef.current = false;
+      setActiveAction(action);
+      setActiveActionLabelOverride("");
+      if (action?.id) {
+        setRecentActionIds((prev) => [action.id, ...prev.filter((id) => id !== action.id)].slice(0, 6));
+      }
+      setShowLoggingModal(true);
+    };
+    const openActionForTeamWithLabel = (action, isTeamA, labelOverride) => {
+      if (!action) return;
+      setActiveActionLabelOverride(String(labelOverride || ""));
+      openActionForTeam(action, isTeamA);
+    };
+    const handleCancelActionModal = () => {
+      setShowLoggingModal(false);
+      setActiveAction(null);
+      setActiveActionLabelOverride("");
+      setCorrectionMode(false);
+      nonPrimaryResumeConfirmRef.current = false;
+    };
+    const showHomeLivePanel = isOperatorScreenLockedByAdminBoth || !canOperateLive || effectiveOperatorFocus !== "away";
+    const showAwayLivePanel = isOperatorScreenLockedByAdminBoth || !canOperateLive || effectiveOperatorFocus !== "home";
+    const isCompactRecordActionModal = canOperateLive && effectiveOperatorFocus === "both" && showHomeLivePanel && showAwayLivePanel;
+    const resolveActionToneClasses = (action) => {
+      const source = String(action?.colorClass || "");
+      const actionId = String(action?.id || "");
+      const shouldForceRed = (/* @__PURE__ */ new Set(["fg2m_miss", "fg3m_miss", "pf", "to", "pf_offensive"])).has(actionId);
+      if (shouldForceRed || /\bred-|\brose-/.test(source)) {
+        return {
+          textClass: "text-red-200",
+          surfaceStyle: { backgroundColor: "rgba(239, 68, 68, 0.22)", borderColor: "rgba(248, 113, 113, 0.55)" },
+          badgeStyle: { backgroundColor: "rgba(239, 68, 68, 0.22)", borderColor: "rgba(248, 113, 113, 0.55)" }
+        };
+      }
+      if (/\bamber-|\borange-|\byellow-/.test(source)) {
+        return {
+          textClass: "text-amber-200",
+          surfaceStyle: { backgroundColor: "rgba(245, 158, 11, 0.2)", borderColor: "rgba(251, 191, 36, 0.5)" },
+          badgeStyle: { backgroundColor: "rgba(245, 158, 11, 0.2)", borderColor: "rgba(251, 191, 36, 0.5)" }
+        };
+      }
+      if (/\bsky-|\bblue-|\bcyan-|\bteal-/.test(source)) {
+        return {
+          textClass: "text-cyan-200",
+          surfaceStyle: { backgroundColor: "rgba(6, 182, 212, 0.2)", borderColor: "rgba(34, 211, 238, 0.5)" },
+          badgeStyle: { backgroundColor: "rgba(6, 182, 212, 0.2)", borderColor: "rgba(34, 211, 238, 0.5)" }
+        };
+      }
+      return {
+        textClass: "text-emerald-200",
+        surfaceStyle: { backgroundColor: "rgba(16, 185, 129, 0.2)", borderColor: "rgba(52, 211, 153, 0.5)" },
+        badgeStyle: { backgroundColor: "rgba(16, 185, 129, 0.2)", borderColor: "rgba(52, 211, 153, 0.5)" }
+      };
+    };
+    const activeActionTone = resolveActionToneClasses(activeAction);
+    const cloneStatsMap = (source = {}) => {
+      const cloned = {};
+      Object.entries(source || {}).forEach(([playerId, stats]) => {
+        cloned[playerId] = { ...stats };
+      });
+      return cloned;
+    };
+    const LIVE_EVENTS_QUEUE_KEY = "wknd_pending_live_events";
+    const LIVE_EVENTS_LAST_SEQ_KEY = "wknd_last_live_seq";
+    const ACTIVE_SESSION_SYNC_KEY = "wknd_pending_active_session_sync";
+    const DISCARDED_LIVE_SESSION_TOMBSTONE_KEY = "wknd_discarded_live_session_tombstone";
+    const PENDING_COMPLETED_GAME_KEY = "wknd_pending_completed_game";
+    const persistPendingLiveEvents = () => {
+      try {
+        localStorage.setItem(LIVE_EVENTS_QUEUE_KEY, JSON.stringify(pendingLiveEventsRef.current || []));
+      } catch (e) {
+      }
+    };
+    const persistPendingActiveSessionSync = () => {
+      try {
+        if (pendingActiveSessionSyncRef.current) {
+          localStorage.setItem(ACTIVE_SESSION_SYNC_KEY, JSON.stringify(pendingActiveSessionSyncRef.current));
+        } else {
+          localStorage.removeItem(ACTIVE_SESSION_SYNC_KEY);
+        }
+      } catch (e) {
+      }
+    };
+    const persistDiscardedSessionTombstone = () => {
+      try {
+        const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: "", discardedAt: 0 };
+        if (tombstone.sessionInstanceId && Number(tombstone.discardedAt || 0) > 0) {
+          localStorage.setItem(DISCARDED_LIVE_SESSION_TOMBSTONE_KEY, JSON.stringify(tombstone));
+        } else {
+          localStorage.removeItem(DISCARDED_LIVE_SESSION_TOMBSTONE_KEY);
+        }
+      } catch (e) {
+      }
+    };
+    const markDiscardedSessionTombstone = (sessionInstanceId, discardedAt = Date.now()) => {
+      const safeSessionId = String(sessionInstanceId || "").trim();
+      if (!safeSessionId) return;
+      discardedLiveSessionTombstoneRef.current = {
+        sessionInstanceId: safeSessionId,
+        discardedAt: Number(discardedAt || Date.now())
+      };
+      persistDiscardedSessionTombstone();
+    };
+    const setLastLiveSeq = (nextSeq) => {
+      const seq = Number.parseInt(nextSeq, 10) || 0;
+      if (seq <= 0) return;
+      if (seq > lastLiveSeqRef.current) {
+        lastLiveSeqRef.current = seq;
+        try {
+          localStorage.setItem(LIVE_EVENTS_LAST_SEQ_KEY, String(seq));
+        } catch (e) {
+        }
+      }
+    };
+    const applyIncomingLiveEvent = (record) => {
+      const seq = Number.parseInt(record?.seq, 10) || 0;
+      if (seq > 0 && seq <= lastLiveSeqRef.current) return;
+      const event = record?.event;
+      if (!event || typeof event !== "object" || !event.id) return;
+      const eventSessionId = String(event.sessionInstanceId || "").trim();
+      if (!isGameLiveRef.current && !hadLiveSessionRef.current) {
+        pullActiveSessionSnapshot();
+        if (!eventSessionId) return;
+      }
+      const localSessionId = String(liveSessionInstanceIdRef.current || "").trim();
+      const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: "", discardedAt: 0 };
+      if (localSessionId && eventSessionId && eventSessionId !== localSessionId) {
+        pullActiveSessionSnapshot();
+        return;
+      }
+      if (eventSessionId && eventSessionId === String(tombstone.sessionInstanceId || "").trim()) {
+        const eventTimestamp = getEventTimestampFromId(event.id);
+        if (eventTimestamp <= Number(tombstone.discardedAt || 0)) {
+          return;
+        }
+      }
+      if (seq > 0) {
+        setLastLiveSeq(seq);
+      }
+      if (locallyDeletedLiveLogIdsRef.current.has(String(event.id))) {
+        return;
+      }
+      setSyncDebug((prev) => ({
+        ...prev,
+        lastIncomingEventId: event.id,
+        lastIncomingSeq: seq,
+        pendingQueue: (pendingLiveEventsRef.current || []).length
+      }));
+      remoteEventIdsRef.current.add(event.id);
+      if (isRotationLogEvent(event)) {
+        const rotationRevision = getLineupRevisionFromEventId(event.id);
+        if (rotationRevision > 0) {
+          setLineupRevision((prev) => {
+            const next = Math.max(prev, rotationRevision);
+            lineupRevisionRef.current = next;
+            return next;
+          });
+        }
+      }
+      if (event.kind === "stat" && !event.isUndoCompensation) {
+        setLoggedHistory((prev) => {
+          if (prev.some((entry) => entry.id === event.id)) return prev;
+          return [{
+            id: event.id,
+            playerId: event.playerId,
+            statField: event.statField,
+            changeAmount: event.changeAmount,
+            attachedTrackingStat: event.attachedTrackingStat,
+            trackingDelta: event.trackingDelta,
+            previousTeamAScore: null,
+            previousTeamBScore: null,
+            logText: event.text,
+            kind: "stat",
+            actionId: event.actionId,
+            countsTeamFoul: event.countsTeamFoul
+          }, ...prev].slice(0, MAX_LIVE_HISTORY_ENTRIES);
+        });
+      }
+      if (event.kind === "meta") {
+        const isPauseEvent = ["manualPause", "foulPause", "timeout", "officialsTimeout"].includes(event.metaType);
+        const isResumeEvent = ["playResume", "timeoutResume"].includes(event.metaType);
+        const eventRevision = getEventTimestampFromId(event.id);
+        clockControlRevisionRef.current = Math.max(
+          Number(clockControlRevisionRef.current || 0),
+          Number.isFinite(eventRevision) ? eventRevision : 0
+        );
+        if (isPauseEvent) {
+          setIsPlayPaused(true);
+          setIsPeriodClockRunning(false);
+        } else if (isResumeEvent) {
+          setIsPlayPaused(false);
+          const resumeClockSecs = parseClockInputToSeconds(event.clockRemaining);
+          if (resumeClockSecs !== null && resumeClockSecs > 0) {
+            setIsPeriodClockRunning(true);
+          }
+        }
+      }
+      setGameLog((prev) => {
+        if (prev.some((log) => log.id === event.id)) return prev;
+        const nextLog = [event, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES);
+        const replayed = buildLiveStateFromEvents(liveGameSnapshotRef.current, nextLog);
+        if (replayed) {
+          setLiveStats(replayed.liveStats);
+          setTeamAScore(replayed.teamAScore);
+          setTeamBScore(replayed.teamBScore);
+          setCurrentQuarter(replayed.currentQuarter || 1);
+          setTeamALineup(replayed.teamALineup);
+          setTeamABench(replayed.teamABench);
+          setTeamBLineup(replayed.teamBLineup);
+          setTeamBBench(replayed.teamBBench);
+          setPlayedPlayers(replayed.playedPlayers);
+        }
+        hadLiveSessionRef.current = true;
+        setIsGameLive(true);
+        return nextLog;
+      });
+    };
+    const fetchMissingLiveEvents = async () => {
+      try {
+        const payload = await apiRequest(`/api/live-events?sinceSeq=${lastLiveSeqRef.current}`);
+        const events = Array.isArray(payload?.events) ? payload.events : [];
+        events.slice().sort((a, b) => (Number.parseInt(a.seq, 10) || 0) - (Number.parseInt(b.seq, 10) || 0)).forEach((record) => applyIncomingLiveEvent(record));
+      } catch (e) {
+      }
+    };
+    const pullActiveSessionSnapshot = async ({ apply = true } = {}) => {
+      try {
+        const payload = await apiRequest("/api/active-session");
+        if (payload?.session) {
+          if (apply) {
+            applyRemoteLiveSession(payload.session);
+          }
+          return payload.session;
+        }
+        return null;
+      } catch (e) {
+        return void 0;
+      }
+    };
+    const queueActiveSessionSync = (mode, session = null, options = {}) => {
+      const nextRequest = {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        mode,
+        sourceClientId: syncClientIdRef.current,
+        ...mode === "put" ? { session } : {},
+        ...mode === "delete" && options?.clearLiveEvents ? { clearLiveEvents: true } : {},
+        ...mode === "delete" && options?.discardedSessionInstanceId ? { discardedSessionInstanceId: options.discardedSessionInstanceId } : {},
+        ...mode === "delete" && Number(options?.discardedSessionCreatedAt || 0) > 0 ? { discardedSessionCreatedAt: Number(options.discardedSessionCreatedAt) } : {},
+        ...mode === "delete" && options?.terminationStatus ? { terminationStatus: String(options.terminationStatus) } : {}
+      };
+      pendingActiveSessionSyncRef.current = nextRequest;
+      persistPendingActiveSessionSync();
+      setSyncDebug((prev) => ({
+        ...prev,
+        lastPersist: `${mode.toUpperCase()} QUEUED ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`,
+        persistError: ""
+      }));
+    };
+    const markLocalSessionUpdated = () => {
+      const nextUpdatedAt = Date.now();
+      lastLocalSessionUpdatedAtRef.current = Math.max(
+        Number(lastLocalSessionUpdatedAtRef.current || 0),
+        nextUpdatedAt
+      );
+      return lastLocalSessionUpdatedAtRef.current;
+    };
+    const flushPendingActiveSessionSync = async () => {
+      if (flushActiveSessionSyncInFlightRef.current) return;
+      if (!navigator.onLine) return;
+      if (!pendingActiveSessionSyncRef.current) return;
+      const MAX_PENDING_SESSION_PUT_AGE_MS = 2 * 60 * 1e3;
+      const isPendingPutFresh = (request) => {
+        if (!request || request.mode !== "put") return true;
+        const session = request.session || {};
+        const touchedAt = Number.parseInt(session.sessionUpdatedAt, 10) || Number.parseInt(session.sessionCreatedAt, 10) || 0;
+        if (touchedAt <= 0) return false;
+        return Date.now() - touchedAt <= MAX_PENDING_SESSION_PUT_AGE_MS;
+      };
+      flushActiveSessionSyncInFlightRef.current = true;
+      try {
+        while (pendingActiveSessionSyncRef.current) {
+          const nextRequest = pendingActiveSessionSyncRef.current;
+          if (nextRequest.mode === "put") {
+            const queuedSessionId = getLiveSessionIdentity(nextRequest.session);
+            const liveSessionId = String(liveSessionInstanceIdRef.current || "").trim();
+            if (!queuedSessionId || !liveSessionId || queuedSessionId !== liveSessionId) {
+              pendingActiveSessionSyncRef.current = null;
+              persistPendingActiveSessionSync();
+              continue;
+            }
+            if (!isPendingPutFresh(nextRequest)) {
+              pendingActiveSessionSyncRef.current = null;
+              persistPendingActiveSessionSync();
+              continue;
+            }
+          } else if (nextRequest.mode === "delete") {
+            const currentLiveSessionId = String(liveSessionInstanceIdRef.current || "").trim();
+            const queuedDeleteSessionId = String(nextRequest?.discardedSessionInstanceId || "").trim();
+            if (!queuedDeleteSessionId) {
+              pendingActiveSessionSyncRef.current = null;
+              persistPendingActiveSessionSync();
+              continue;
+            }
+            if (currentLiveSessionId && queuedDeleteSessionId !== currentLiveSessionId) {
+              pendingActiveSessionSyncRef.current = null;
+              persistPendingActiveSessionSync();
+              continue;
+            }
+          }
+          if (nextRequest.mode === "put") {
+            const putResult = await apiRequest("/api/active-session", {
+              method: "PUT",
+              body: JSON.stringify({ session: nextRequest.session, sourceClientId: nextRequest.sourceClientId })
+            });
+            if (putResult?.applied === false) {
+              pendingActiveSessionSyncRef.current = null;
+              persistPendingActiveSessionSync();
+              setSyncDebug((prev) => ({
+                ...prev,
+                lastPersist: `REJECTED ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`,
+                persistError: "Server rejected stale live session update."
+              }));
+              continue;
+            }
+          } else {
+            await apiRequest("/api/active-session", {
+              method: "DELETE",
+              body: JSON.stringify({
+                sourceClientId: nextRequest.sourceClientId,
+                clearLiveEvents: Boolean(nextRequest.clearLiveEvents),
+                discardedSessionInstanceId: String(nextRequest.discardedSessionInstanceId || ""),
+                discardedSessionCreatedAt: Number(nextRequest.discardedSessionCreatedAt || 0),
+                terminationStatus: String(nextRequest.terminationStatus || "discarded")
+              })
+            });
+          }
+          if (pendingActiveSessionSyncRef.current?.id === nextRequest.id) {
+            pendingActiveSessionSyncRef.current = null;
+            persistPendingActiveSessionSync();
+          }
+          setSyncDebug((prev) => ({
+            ...prev,
+            lastPersist: `${nextRequest.mode.toUpperCase()} ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`,
+            persistError: ""
+          }));
+        }
+      } catch (error) {
+        setSyncDebug((prev) => ({
+          ...prev,
+          lastPersist: `PENDING ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`,
+          persistError: error?.message || "Active session sync failed"
+        }));
+        if (!sessionSyncRetryTimerRef.current) {
+          sessionSyncRetryTimerRef.current = window.setTimeout(() => {
+            sessionSyncRetryTimerRef.current = null;
+            flushPendingActiveSessionSync();
+          }, 1e4);
+        }
+      } finally {
+        flushActiveSessionSyncInFlightRef.current = false;
+      }
+    };
+    const flushPendingLiveEvents = async () => {
+      if (flushLiveEventsInFlightRef.current) return;
+      if (!navigator.onLine) return;
+      if (!Array.isArray(pendingLiveEventsRef.current) || pendingLiveEventsRef.current.length === 0) return;
+      flushLiveEventsInFlightRef.current = true;
+      try {
+        while (pendingLiveEventsRef.current.length > 0) {
+          const nextEvent = pendingLiveEventsRef.current[0];
+          const response = await apiRequest("/api/live-events", {
+            method: "POST",
+            body: JSON.stringify({ event: nextEvent, sourceClientId: syncClientIdRef.current })
+          });
+          if (response?.ignored) {
+            break;
+          }
+          setLastLiveSeq(response?.seq);
+          pendingLiveEventsRef.current.shift();
+          persistPendingLiveEvents();
+        }
+      } catch (e) {
+      } finally {
+        flushLiveEventsInFlightRef.current = false;
+      }
+    };
+    const enqueueLiveEvent = (event) => {
+      if (!event || typeof event !== "object" || !event.id) return;
+      if (pendingLiveEventsRef.current.some((queued) => queued.id === event.id)) return;
+      const localSessionId = String(
+        liveSessionInstanceIdRef.current || liveSessionInstanceId || event.sessionInstanceId || ""
+      ).trim();
+      const eventWithSession = localSessionId ? { ...event, sessionInstanceId: localSessionId } : event;
+      pendingLiveEventsRef.current.push(eventWithSession);
+      pendingLiveEventsRef.current = pendingLiveEventsRef.current.slice(-500);
+      persistPendingLiveEvents();
+      flushPendingLiveEvents();
+    };
+    const triggerPlayerFlash = (playerId) => {
+      if (!playerId) return;
+      setFlashPlayers((prev) => ({
+        ...prev,
+        [playerId]: (prev[playerId] || 0) + 1
+      }));
+      if (flashTimersRef.current[playerId]) {
+        clearTimeout(flashTimersRef.current[playerId]);
+      }
+      flashTimersRef.current[playerId] = window.setTimeout(() => {
+        setFlashPlayers((prev) => {
+          if (!prev[playerId]) return prev;
+          const next = { ...prev };
+          delete next[playerId];
+          return next;
+        });
+        delete flashTimersRef.current[playerId];
+      }, 900);
+    };
+    const flashPlayerElements = (playerId) => {
+      if (!playerId) return;
+      const flashClassNames = [
+        "animate-pulse",
+        "ring-2",
+        "ring-emerald-400/70",
+        "shadow-[0_0_24px_rgba(16,185,129,0.32)]",
+        "bg-emerald-500/10"
+      ];
+      const elements = Array.from(document.querySelectorAll(`[data-player-id="${playerId}"]`));
+      if (elements.length === 0) return;
+      elements.forEach((element) => {
+        flashClassNames.forEach((className) => element.classList.add(className));
+      });
+      if (flashTimersRef.current[`dom_${playerId}`]) {
+        clearTimeout(flashTimersRef.current[`dom_${playerId}`]);
+      }
+      flashTimersRef.current[`dom_${playerId}`] = window.setTimeout(() => {
+        elements.forEach((element) => {
+          flashClassNames.forEach((className) => element.classList.remove(className));
+        });
+        delete flashTimersRef.current[`dom_${playerId}`];
+      }, 900);
+    };
+    const triggerSubGlow = (playerId) => {
+      if (!playerId) return;
+      setSubFlashPlayers((prev) => ({
+        ...prev,
+        [playerId]: (prev[playerId] || 0) + 1
+      }));
+      const timerKey = `sub_${playerId}`;
+      if (flashTimersRef.current[timerKey]) {
+        clearTimeout(flashTimersRef.current[timerKey]);
+      }
+      flashTimersRef.current[timerKey] = window.setTimeout(() => {
+        setSubFlashPlayers((prev) => {
+          if (!prev[playerId]) return prev;
+          const next = { ...prev };
+          delete next[playerId];
+          return next;
+        });
+        delete flashTimersRef.current[timerKey];
+      }, 1900);
+    };
+    const triggerSubLogGlow = (logId) => {
+      if (!logId) return;
+      setSubFlashLogId(logId);
+      const timerKey = "sub_log_glow";
+      if (flashTimersRef.current[timerKey]) {
+        clearTimeout(flashTimersRef.current[timerKey]);
+      }
+      flashTimersRef.current[timerKey] = window.setTimeout(() => {
+        setSubFlashLogId((current) => current === logId ? null : current);
+        delete flashTimersRef.current[timerKey];
+      }, 2200);
+    };
+    const triggerScoreFlash = (teamKey) => {
+      if (!teamKey) return;
+      setScoreFlashTeams((prev) => ({
+        ...prev,
+        [teamKey]: (prev[teamKey] || 0) + 1
+      }));
+      const timerKey = `score_${teamKey}`;
+      if (flashTimersRef.current[timerKey]) {
+        clearTimeout(flashTimersRef.current[timerKey]);
+      }
+      flashTimersRef.current[timerKey] = window.setTimeout(() => {
+        setScoreFlashTeams((prev) => {
+          if (!prev[teamKey]) return prev;
+          const next = { ...prev };
+          delete next[teamKey];
+          return next;
+        });
+        delete flashTimersRef.current[timerKey];
+      }, 800);
+    };
+    const getQuarterFromEvent = (event) => {
+      const q = Number.parseInt(event?.quarter, 10);
+      return Number.isFinite(q) && q >= 1 ? q : 1;
+    };
+    const getEffectiveQuarterFromLogEntry = (entry, logs = gameLog) => {
+      const explicitQuarter = Number.parseInt(entry?.quarter, 10);
+      if (Number.isFinite(explicitQuarter) && explicitQuarter >= 1) return explicitQuarter;
+      const targetId = entry?.id;
+      if (!targetId || !Array.isArray(logs) || logs.length === 0) return 1;
+      let inferredQuarter = 1;
+      for (let idx = logs.length - 1; idx >= 0; idx -= 1) {
+        const candidate = logs[idx];
+        const candidateExplicitQuarter = Number.parseInt(candidate?.quarter, 10);
+        const candidateQuarter = Number.isFinite(candidateExplicitQuarter) && candidateExplicitQuarter >= 1 ? candidateExplicitQuarter : inferredQuarter;
+        if (candidate?.id === targetId) {
+          return candidateQuarter;
+        }
+        if (candidate?.kind === "meta" && candidate?.metaType === "quarterEnd") {
+          inferredQuarter = Math.max(inferredQuarter, candidateQuarter) + 1;
+        } else {
+          inferredQuarter = Math.max(inferredQuarter, candidateQuarter);
+        }
+      }
+      return 1;
+    };
+    const getPeriodLabel = (quarter) => {
+      const q = Number.parseInt(quarter, 10) || 1;
+      return q <= 4 ? `Q${q}` : `OT${q - 4}`;
+    };
+    const getPeriodDurationSeconds = (quarter) => {
+      const q = Number.parseInt(quarter, 10) || 1;
+      return q > 4 ? OVERTIME_PERIOD_SECONDS : REGULATION_PERIOD_SECONDS;
+    };
+    const toPercent = (made, attempts) => {
+      const safeAttempts = Number(attempts) || 0;
+      if (safeAttempts <= 0) return 0;
+      return (Number(made) || 0) / safeAttempts * 100;
+    };
+    const formatPercent = (made, attempts) => `${toPercent(made, attempts).toFixed(1)}%`;
+    const formatPercentOrNA = (made, attempts) => {
+      const safeAttempts = Number(attempts) || 0;
+      return safeAttempts <= 0 ? "\u2014" : formatPercent(made, attempts);
+    };
+    const formatMadeAttempts = (made, attempts) => {
+      const safeAttempts = Number(attempts) || 0;
+      if (safeAttempts <= 0) return "\u2014";
+      return `${Number(made) || 0}/${safeAttempts}`;
+    };
+    const getLiveSessionLastTouchedAt = (session) => {
+      if (!session || typeof session !== "object") return 0;
+      const updatedAt = Number.parseInt(session.sessionUpdatedAt, 10) || 0;
+      const createdAt = Number.parseInt(session.sessionCreatedAt, 10) || 0;
+      return Math.max(updatedAt, createdAt);
+    };
+    const getLiveSessionIdentity = (session) => {
+      if (!session || typeof session !== "object") return "";
+      return String(session.sessionInstanceId || session.liveSessionInstanceId || "").trim();
+    };
+    const isLiveSessionStale = (session, now = Date.now()) => {
+      const createdAt = Number.parseInt(session?.sessionCreatedAt, 10) || 0;
+      if (createdAt > 0 && now - createdAt > LIVE_SESSION_MAX_AGE_MS) {
+        return true;
+      }
+      const lastTouchedAt = getLiveSessionLastTouchedAt(session);
+      if (lastTouchedAt <= 0) return false;
+      return now - lastTouchedAt > LIVE_SESSION_STALE_AFTER_MS;
+    };
+    const getGameTimestamp = (game) => {
+      if (!game || typeof game !== "object") return 0;
+      const now = Date.now();
+      const MIN_REASONABLE_EPOCH_MS = 9466848e5;
+      const MAX_REASONABLE_EPOCH_MS = now + 24 * 60 * 60 * 1e3;
+      const toReasonableEpoch = (value) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return 0;
+        if (num < MIN_REASONABLE_EPOCH_MS || num > MAX_REASONABLE_EPOCH_MS) return 0;
+        return num;
+      };
+      const parsedDate = Date.parse(String(game.date || ""));
+      const dateTimestamp = toReasonableEpoch(parsedDate);
+      const idMatches = String(game.id || "").match(/\d{13}/g) || [];
+      const idTimestamp = idMatches.map((candidate) => toReasonableEpoch(Number.parseInt(candidate, 10))).find((candidate) => candidate > 0) || 0;
+      return Math.max(dateTimestamp, idTimestamp);
+    };
+    const getLatestEndedGameTimestamp = (gamesList = []) => {
+      return (Array.isArray(gamesList) ? gamesList : []).reduce((latest, game) => {
+        return Math.max(latest, getGameTimestamp(game));
+      }, 0);
+    };
+    const isLiveSessionOlderThanLatestEndedGame = (session, latestEndedGameTimestamp = 0) => {
+      const safeLatestEnded = Number(latestEndedGameTimestamp) || 0;
+      if (safeLatestEnded <= 0) return false;
+      const sessionTimestamp = getLiveSessionLastTouchedAt(session);
+      if (sessionTimestamp <= 0) return false;
+      return sessionTimestamp < safeLatestEnded;
+    };
+    const getLogLockReason = (entry, ordinal) => {
+      const isPeriodEnd = entry?.kind === "meta" && entry?.metaType === "quarterEnd";
+      const isCheckpoint = Number(ordinal) > 0 && Number(ordinal) % 10 === 0;
+      if (isPeriodEnd && isCheckpoint) return "periodEnd+checkpoint10";
+      if (isPeriodEnd) return "periodEnd";
+      if (isCheckpoint) return "checkpoint10";
+      return "";
+    };
+    const isProtectedLogEntry = (entry, finalizedPeriods2 = null, logs = gameLog) => {
+      if (!entry || typeof entry !== "object") return false;
+      if (entry.lockProtected === true) {
+        const reason = String(entry.lockReason || "");
+        if (reason && !reason.includes("checkpoint10")) {
+          return true;
+        }
+      }
+      if (entry.kind === "meta" && entry.metaType === "quarterEnd") return true;
+      if (finalizedPeriods2 instanceof Set && finalizedPeriods2.size > 0) {
+        return finalizedPeriods2.has(getEffectiveQuarterFromLogEntry(entry, logs));
+      }
+      return false;
+    };
+    const isEditableStatLogEntry = (entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      if (!entry.playerId) return false;
+      if (entry.kind === "stat") return true;
+      return Boolean(entry.actionId || entry.statField);
+    };
+    const buildTeamAcronym = (teamName) => {
+      const safe = String(teamName || "").trim();
+      if (!safe) return "TEAM";
+      const words = safe.replace(/[^A-Za-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+      if (words.length === 0) return safe.slice(0, 3).toUpperCase();
+      if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+      return words.slice(0, 3).map((part) => part[0]).join("").toUpperCase();
+    };
+    const formatScoreTag = (scoreA, scoreB) => {
+      const teamAName = teams.find((t) => t.id === teamAId)?.name || "HOME";
+      const teamBName = teams.find((t) => t.id === teamBId)?.name || "AWAY";
+      const acronymA = buildTeamAcronym(teamAName);
+      const acronymB = buildTeamAcronym(teamBName);
+      return `[${acronymA} ${Number(scoreA || 0)} - ${acronymB} ${Number(scoreB || 0)}]`;
+    };
+    const parseScoreTagFromLogText = (textValue) => {
+      const text = String(textValue || "");
+      const acronymMatch = text.match(/\[([A-Za-z0-9]{2,6})\s+(\d+)\s*-\s*([A-Za-z0-9]{2,6})\s+(\d+)\]/);
+      if (acronymMatch) {
+        return {
+          teamAcronym: String(acronymMatch[1] || "").toUpperCase(),
+          teamAScore: Number(acronymMatch[2] || 0),
+          teamBAcronym: String(acronymMatch[3] || "").toUpperCase(),
+          teamBScore: Number(acronymMatch[4] || 0)
+        };
+      }
+      const legacyMatch = text.match(/\[(\d+)\s*-\s*(\d+)\]/);
+      if (legacyMatch) {
+        const teamAName = teams.find((t) => t.id === teamAId)?.name || "HOME";
+        const teamBName = teams.find((t) => t.id === teamBId)?.name || "AWAY";
+        return {
+          teamAcronym: buildTeamAcronym(teamAName),
+          teamAScore: Number(legacyMatch[1] || 0),
+          teamBAcronym: buildTeamAcronym(teamBName),
+          teamBScore: Number(legacyMatch[2] || 0)
+        };
+      }
+      return null;
+    };
+    const formatSecondsAsClock = (secondsValue) => {
+      const total = Math.max(0, Number.parseInt(secondsValue, 10) || 0);
+      const minutes = Math.floor(total / 60);
+      const seconds = total % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    };
+    const formatSecondsAsMinutes = (secondsValue) => {
+      const total = Math.max(0, Number.parseInt(secondsValue, 10) || 0);
+      const minutes = Math.floor(total / 60);
+      const seconds = total % 60;
+      return `${minutes}:${String(seconds).padStart(2, "0")}`;
+    };
+    const parseClockInputToSeconds = (rawValue) => {
+      const value = String(rawValue || "").trim();
+      if (!value) return null;
+      if (value.includes(":")) {
+        const [minRaw, secRaw] = value.split(":");
+        const minutes = Number.parseInt(minRaw, 10);
+        const seconds = Number.parseInt(secRaw, 10);
+        if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || minutes < 0 || seconds < 0 || seconds > 59) {
+          return null;
+        }
+        return minutes * 60 + seconds;
+      }
+      const absoluteSeconds = Number.parseInt(value, 10);
+      if (!Number.isFinite(absoluteSeconds) || absoluteSeconds < 0) return null;
+      return absoluteSeconds;
+    };
+    const normalizeTabId = (tab) => {
+      const rawTab = String(tab || "").trim().toLowerCase();
+      if (["home", "live", "teams", "standings", "history", "leaders", "awards"].includes(rawTab)) return rawTab;
+      return "home";
+    };
+    const navTabs = [
+      { id: "home", label: "Home", icon: Icons.Activity },
+      { id: "live", label: "Live", icon: Icons.Activity },
+      { id: "teams", label: "Rosters", icon: Icons.Users },
+      { id: "standings", label: "Standings", icon: Icons.Trophy },
+      { id: "history", label: "Game Log", icon: Icons.History },
+      { id: "leaders", label: "Leaders", icon: Icons.Trophy },
+      { id: "awards", label: "Awards", icon: Icons.Trophy }
+    ];
+    const visibleNavTabs = navTabs.filter((tab) => tab.id !== "awards" || canViewAwardsPage);
+    const activeNavTab = visibleNavTabs.find((tab) => tab.id === activeTab) || navTabs.find((tab) => tab.id === activeTab) || visibleNavTabs[0] || navTabs[0];
+    useEffect(() => {
+      setMobileNavOpen(false);
+    }, [activeTab]);
+    const createEmptyQuarterStats = () => ({ pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0 });
+    const cloneQuarterStats = (stats = {}) => ({
+      pts: Number(stats?.pts || 0),
+      reb: Number(stats?.reb || 0),
+      ast: Number(stats?.ast || 0),
+      stl: Number(stats?.stl || 0),
+      blk: Number(stats?.blk || 0),
+      to: Number(stats?.to || 0),
+      pf: Number(stats?.pf || 0)
+    });
+    const computeQuarterTeamStatsFromLog = (logs = []) => {
+      const entries = Array.isArray(logs) ? logs : [];
+      const reversed = [...entries].reverse();
+      const inferredQuarterByIndex = /* @__PURE__ */ new Map();
+      let currentInferredQuarter = 1;
+      reversed.forEach((event, idx) => {
+        const explicitQuarter = Number.parseInt(event?.quarter, 10);
+        const hasExplicitQuarter = Number.isFinite(explicitQuarter) && explicitQuarter >= 1;
+        if (event?.kind === "meta" && event?.metaType === "quarterStart" && hasExplicitQuarter) {
+          currentInferredQuarter = explicitQuarter;
+          inferredQuarterByIndex.set(idx, currentInferredQuarter);
+          return;
+        }
+        inferredQuarterByIndex.set(idx, currentInferredQuarter);
+        if (event?.kind === "meta" && event?.metaType === "quarterEnd") {
+          if (hasExplicitQuarter) {
+            currentInferredQuarter = Math.max(currentInferredQuarter, explicitQuarter + 1);
+          } else {
+            currentInferredQuarter += 1;
+          }
+        }
+      });
+      const getEffectiveQuarter = (event, reversedIdx) => {
+        const explicit = Number.parseInt(event?.quarter, 10);
+        const inferred = inferredQuarterByIndex.get(reversedIdx) || 1;
+        if (event?.kind === "stat") {
+          return inferred;
+        }
+        if (Number.isFinite(explicit) && explicit >= 1) return explicit;
+        return inferred;
+      };
+      const reversedIdxById = /* @__PURE__ */ new Map();
+      reversed.forEach((event, idx) => {
+        if (event?.id) reversedIdxById.set(event.id, idx);
+      });
+      const maxQuarter = Math.max(
+        4,
+        ...reversed.map((event, idx) => getEffectiveQuarter(event, idx))
+      );
+      const quarters = Array.from({ length: maxQuarter }, (_, idx) => idx + 1).map((quarter) => ({
+        quarter,
+        teamA: createEmptyQuarterStats(),
+        teamB: createEmptyQuarterStats()
+      }));
+      const eventQuarterById = /* @__PURE__ */ new Map();
+      reversed.forEach((event, idx) => {
+        if (event?.id && !event.isUndoCompensation) {
+          eventQuarterById.set(event.id, getEffectiveQuarter(event, idx));
+        }
+      });
+      reversed.forEach((event, idx) => {
+        if (!event || event.kind !== "stat") return;
+        if (!["pts", "reb", "ast", "stl", "blk", "to", "pf"].includes(event.statField)) return;
+        if (event.statField === "pf" && (event.countsTeamFoul === false && !["pf_offensive", "pf_technical"].includes(event.actionId))) {
+          return;
+        }
+        const delta = Number(event.changeAmount) || 0;
+        if (delta === 0) return;
+        const effectiveQuarter = event.isUndoCompensation && event.undoOfId && eventQuarterById.has(event.undoOfId) ? eventQuarterById.get(event.undoOfId) : getEffectiveQuarter(event, idx);
+        const quarterIdx = effectiveQuarter - 1;
+        if (quarterIdx < 0 || quarterIdx >= quarters.length) return;
+        const teamBucket = event.isTeamA === true ? quarters[quarterIdx].teamA : event.isTeamA === false ? quarters[quarterIdx].teamB : null;
+        if (!teamBucket) return;
+        teamBucket[event.statField] = Math.max(0, (teamBucket[event.statField] || 0) + delta);
+      });
+      return quarters;
+    };
+    const computeTimeoutsFromLog = (logs = []) => {
+      return (logs || []).reduce((acc, event) => {
+        if (!event || event.kind !== "meta" || event.metaType !== "timeout") return acc;
+        if (event.isTeamA === true) acc.teamA += 1;
+        if (event.isTeamA === false) acc.teamB += 1;
+        return acc;
+      }, { teamA: 0, teamB: 0 });
+    };
+    const computeTimeoutUsage = (logs = [], currentQuarterValue = 1) => {
+      const activeQuarter = Number.parseInt(currentQuarterValue, 10) || 1;
+      const usage = {
+        teamA: { firstHalf: 0, secondHalf: 0, currentOvertime: 0 },
+        teamB: { firstHalf: 0, secondHalf: 0, currentOvertime: 0 }
+      };
+      (logs || []).forEach((event) => {
+        if (!event || event.kind !== "meta" || event.metaType !== "timeout") return;
+        const eventQuarter = getQuarterFromEvent(event);
+        const buckets = event.isTeamA === true ? usage.teamA : event.isTeamA === false ? usage.teamB : null;
+        if (!buckets) return;
+        if (eventQuarter <= 2) buckets.firstHalf += 1;
+        else if (eventQuarter <= 4) buckets.secondHalf += 1;
+        else if (eventQuarter === activeQuarter) buckets.currentOvertime += 1;
+      });
+      return usage;
+    };
+    const isTimeoutCurrentlyActive = (logs = []) => {
+      for (const event of logs || []) {
+        if (!event || event.kind !== "meta") continue;
+        if (["timeout", "officialsTimeout", "manualPause", "foulPause"].includes(event.metaType)) return true;
+        if (["timeoutResume", "playResume", "quarterStart", "matchStart", "hardReset"].includes(event.metaType)) return false;
+      }
+      return false;
+    };
+    const getLatestActivePauseMetaType = (logs = []) => {
+      for (const event of logs || []) {
+        if (!event || event.kind !== "meta") continue;
+        if (["timeoutResume", "playResume", "quarterStart", "matchStart", "hardReset"].includes(event.metaType)) return null;
+        if (["timeout", "officialsTimeout", "manualPause", "foulPause"].includes(event.metaType)) return event.metaType;
+      }
+      return null;
+    };
+    const getCurrentGameLogSegment = (logs = []) => {
+      const entries = Array.isArray(logs) ? logs : [];
+      const resetIndex = entries.findIndex((event) => event?.kind === "meta" && event?.metaType === "hardReset");
+      return resetIndex >= 0 ? entries.slice(0, resetIndex + 1) : entries;
+    };
+    const armLocalResumeStabilityWindow = () => {
+      localResumeLockUntilRef.current = Date.now() + 2500;
+    };
+    const appendPlayResumeMetaIfNeeded = (labelOverride) => {
+      const currentSegment = getCurrentGameLogSegment(gameLog);
+      const hasActivePause = isTimeoutCurrentlyActive(currentSegment) || Boolean(isPlayPaused);
+      if (!hasActivePause) return false;
+      armLocalResumeStabilityWindow();
+      const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const resumeLabel = labelOverride || `Play resumed (${getPeriodLabel(currentQuarter)})`;
+      setGameLog((prev) => [{
+        id: resumeLogId,
+        time: getWallClockTime(),
+        text: resumeLabel,
+        kind: "meta",
+        metaType: "playResume",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds)
+      }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      return true;
+    };
+    const extractYouTubeVideoId = (rawUrl = "") => {
+      const value = String(rawUrl || "").trim();
+      if (!value) return "";
+      try {
+        const parsed = new URL(value);
+        const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+        if (host === "youtu.be") {
+          const idFromPath = parsed.pathname.replace(/^\//, "").split("/")[0];
+          return /^[A-Za-z0-9_-]{11}$/.test(idFromPath) ? idFromPath : "";
+        }
+        if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+          const fromQuery = parsed.searchParams.get("v");
+          if (fromQuery && /^[A-Za-z0-9_-]{11}$/.test(fromQuery)) return fromQuery;
+          const pathParts = parsed.pathname.split("/").filter(Boolean);
+          if ((pathParts[0] === "shorts" || pathParts[0] === "embed" || pathParts[0] === "live") && pathParts[1]) {
+            return /^[A-Za-z0-9_-]{11}$/.test(pathParts[1]) ? pathParts[1] : "";
+          }
+        }
+      } catch (error) {
+        const fallbackMatch = value.match(/(?:v=|youtu\.be\/|embed\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
+        return fallbackMatch ? fallbackMatch[1] : "";
+      }
+      return "";
+    };
+    const normalizeYouTubeUrl = (rawUrl = "") => {
+      const videoId = extractYouTubeVideoId(rawUrl);
+      return videoId ? `https://www.youtube.com/watch?v=${videoId}` : "";
+    };
+    const getYouTubeEmbedUrl = (rawUrl = "") => {
+      const videoId = extractYouTubeVideoId(rawUrl);
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : "";
+    };
+    function hasAvailableBenchPlayer(isTeamA) {
+      const targetTeamId = isTeamA ? teamAId : teamBId;
+      const targetLineup = isTeamA ? teamALineup : teamBLineup;
+      const targetBench = isTeamA ? teamABench : teamBBench;
+      const teamObj = teams.find((t) => t.id === targetTeamId);
+      if (!teamObj) return false;
+      const rosterIds = (teamObj.players || []).map((p) => p.id);
+      const fallbackCandidates = rosterIds.filter((id) => !targetLineup.includes(id) && !dnpPlayers.includes(id));
+      const addCandidates = (targetBench.length > 0 ? targetBench : fallbackCandidates).filter((id) => !dnpPlayers.includes(id));
+      return addCandidates.length > 0;
+    }
+    const sanitizeTeamRotation = (teamId, lineupIds = [], benchIds = [], options = {}) => {
+      const { fillToFive = true } = options;
+      const teamPool = teamsRef.current && teamsRef.current.length > 0 ? teamsRef.current : teams;
+      const teamObj = teamPool.find((t) => t.id === teamId);
+      const roster = (teamObj?.players || []).map((p) => p.id);
+      const rosterSet = new Set(roster);
+      const toUniqueLoose = (ids = []) => {
+        const seen = /* @__PURE__ */ new Set();
+        return (ids || []).filter((id) => {
+          const normalized = String(id || "");
+          if (!normalized || seen.has(normalized)) return false;
+          seen.add(normalized);
+          return true;
+        });
+      };
+      if (roster.length === 0) {
+        let lineup2 = toUniqueLoose(lineupIds).slice(0, 5);
+        let bench2 = toUniqueLoose(benchIds).filter((id) => !lineup2.includes(id));
+        if (fillToFive && lineup2.length < 5) {
+          const fillers = bench2.slice(0, 5 - lineup2.length);
+          lineup2 = [...lineup2, ...fillers];
+          const lineupSet2 = new Set(lineup2);
+          bench2 = bench2.filter((id) => !lineupSet2.has(id));
+        }
+        return { lineup: lineup2, bench: bench2 };
+      }
+      const toUniqueValid = (ids = []) => {
+        const seen = /* @__PURE__ */ new Set();
+        return (ids || []).filter((id) => {
+          if (!rosterSet.has(id) || seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        });
+      };
+      let lineup = toUniqueValid(lineupIds).slice(0, 5);
+      const seedBench = toUniqueValid([...benchIds, ...roster]).filter((id) => !lineup.includes(id));
+      if (fillToFive && lineup.length < 5) {
+        const fillers = seedBench.slice(0, 5 - lineup.length);
+        lineup = [...lineup, ...fillers];
+      }
+      const lineupSet = new Set(lineup);
+      const bench = toUniqueValid([...seedBench, ...roster]).filter((id) => !lineupSet.has(id));
+      return { lineup, bench };
+    };
+    const buildLiveStateFromEvents = (snapshot, events) => {
+      if (!snapshot) return null;
+      const cloneReplaySnapshot = (sourceSnapshot) => {
+        if (!sourceSnapshot) return null;
+        return {
+          teamAId: sourceSnapshot.teamAId || snapshot.teamAId || "",
+          teamBId: sourceSnapshot.teamBId || snapshot.teamBId || "",
+          teamAScore: sourceSnapshot.teamAScore || 0,
+          teamBScore: sourceSnapshot.teamBScore || 0,
+          currentQuarter: sourceSnapshot.currentQuarter || 1,
+          teamALineup: [...sourceSnapshot.teamALineup || []],
+          teamABench: [...sourceSnapshot.teamABench || []],
+          teamBLineup: [...sourceSnapshot.teamBLineup || []],
+          teamBBench: [...sourceSnapshot.teamBBench || []],
+          liveStats: cloneStatsMap(sourceSnapshot.liveStats || {}),
+          playedPlayers: [...sourceSnapshot.playedPlayers || []]
+        };
+      };
+      const getRotationEventSortInfo = (event) => {
+        const id = String(event?.id || "");
+        const isClear = event?.kind === "meta" && event?.metaType === "onCourtClear";
+        const isRemove = event?.kind === "meta" && event?.metaType === "onCourtRemove";
+        const isAdd = event?.kind === "meta" && event?.metaType === "onCourtAdd";
+        const addMatch = id.match(/_add_(\d+)$/);
+        const addIndex = addMatch ? Number.parseInt(addMatch[1], 10) : Number.MAX_SAFE_INTEGER;
+        return {
+          isRotationMeta: isClear || isRemove || isAdd,
+          phase: isClear ? 0 : isRemove ? 1 : isAdd ? 2 : 3,
+          addIndex: Number.isFinite(addIndex) ? addIndex : Number.MAX_SAFE_INTEGER
+        };
+      };
+      const orderedEvents = [...events || []].sort((a, b) => {
+        const aKey = Number.parseInt(String(a?.id || "").split("_")[0], 10);
+        const bKey = Number.parseInt(String(b?.id || "").split("_")[0], 10);
+        const safeA = Number.isFinite(aKey) ? aKey : 0;
+        const safeB = Number.isFinite(bKey) ? bKey : 0;
+        if (safeA !== safeB) return safeA - safeB;
+        const aRotationInfo = getRotationEventSortInfo(a);
+        const bRotationInfo = getRotationEventSortInfo(b);
+        if (aRotationInfo.isRotationMeta && bRotationInfo.isRotationMeta) {
+          if (aRotationInfo.phase !== bRotationInfo.phase) {
+            return aRotationInfo.phase - bRotationInfo.phase;
+          }
+          if (aRotationInfo.phase === 1 && bRotationInfo.phase === 1 && aRotationInfo.addIndex !== bRotationInfo.addIndex) {
+            return aRotationInfo.addIndex - bRotationInfo.addIndex;
+          }
+        }
+        return String(a?.id || "").localeCompare(String(b?.id || ""));
+      });
+      let replaySnapshot = cloneReplaySnapshot(snapshot);
+      let replayStartIndex = 0;
+      orderedEvents.forEach((event, index) => {
+        if (event?.kind === "meta" && event?.metaType === "periodCheckpoint" && event?.checkpointSnapshot) {
+          const checkpointSnapshot = cloneReplaySnapshot(event.checkpointSnapshot);
+          if (checkpointSnapshot) {
+            replaySnapshot = checkpointSnapshot;
+            replayStartIndex = index + 1;
+          }
+        }
+      });
+      if (!replaySnapshot) return null;
+      const buildBaseStateFromSnapshot = () => ({
+        teamAScore: replaySnapshot.teamAScore || 0,
+        teamBScore: replaySnapshot.teamBScore || 0,
+        currentQuarter: replaySnapshot.currentQuarter || 1,
+        teamALineup: [...replaySnapshot.teamALineup || []],
+        teamABench: [...replaySnapshot.teamABench || []],
+        teamBLineup: [...replaySnapshot.teamBLineup || []],
+        teamBBench: [...replaySnapshot.teamBBench || []],
+        liveStats: cloneStatsMap(replaySnapshot.liveStats || {}),
+        playedPlayers: [...replaySnapshot.playedPlayers || []]
+      });
+      const nextState = {
+        ...buildBaseStateFromSnapshot()
+      };
+      const initialA = sanitizeTeamRotation(replaySnapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: false });
+      nextState.teamALineup = initialA.lineup;
+      nextState.teamABench = initialA.bench;
+      const initialB = sanitizeTeamRotation(replaySnapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: false });
+      nextState.teamBLineup = initialB.lineup;
+      nextState.teamBBench = initialB.bench;
+      const teamPool = teamsRef.current && teamsRef.current.length > 0 ? teamsRef.current : teams;
+      const teamAObj = teamPool.find((t) => t.id === replaySnapshot.teamAId);
+      const teamBObj = teamPool.find((t) => t.id === replaySnapshot.teamBId);
+      const recomputeScores = () => {
+        let totalA = 0;
+        let totalB = 0;
+        if (teamAObj) teamAObj.players.forEach((p) => {
+          totalA += nextState.liveStats[p.id]?.pts || 0;
+        });
+        if (teamBObj) teamBObj.players.forEach((p) => {
+          totalB += nextState.liveStats[p.id]?.pts || 0;
+        });
+        nextState.teamAScore = totalA;
+        nextState.teamBScore = totalB;
+      };
+      orderedEvents.slice(replayStartIndex).forEach((event) => {
+        if (event.kind === "meta" && event.metaType === "hardReset") {
+          const base = buildBaseStateFromSnapshot();
+          nextState.teamAScore = base.teamAScore;
+          nextState.teamBScore = base.teamBScore;
+          nextState.currentQuarter = base.currentQuarter;
+          nextState.teamALineup = base.teamALineup;
+          nextState.teamABench = base.teamABench;
+          nextState.teamBLineup = base.teamBLineup;
+          nextState.teamBBench = base.teamBBench;
+          nextState.liveStats = base.liveStats;
+          nextState.playedPlayers = base.playedPlayers;
+          const sanitizedA = sanitizeTeamRotation(replaySnapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: false });
+          nextState.teamALineup = sanitizedA.lineup;
+          nextState.teamABench = sanitizedA.bench;
+          const sanitizedB = sanitizeTeamRotation(replaySnapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: false });
+          nextState.teamBLineup = sanitizedB.lineup;
+          nextState.teamBBench = sanitizedB.bench;
+          return;
+        }
+        if (event.kind === "meta" && event.metaType === "periodCheckpoint") {
+          return;
+        }
+        if (event.kind === "stat") {
+          nextState.currentQuarter = Math.max(nextState.currentQuarter, getQuarterFromEvent(event));
+          const currentVal = nextState.liveStats[event.playerId]?.[event.statField] || 0;
+          const newVal = Math.max(0, currentVal + event.changeAmount);
+          const currentPlayer = { ...nextState.liveStats[event.playerId] || {} };
+          currentPlayer[event.statField] = newVal;
+          if (event.attachedTrackingStat) {
+            const currentTrackVal = currentPlayer[event.attachedTrackingStat] || 0;
+            currentPlayer[event.attachedTrackingStat] = Math.max(0, currentTrackVal + event.trackingDelta);
+          }
+          nextState.liveStats[event.playerId] = currentPlayer;
+          if (!nextState.playedPlayers.includes(event.playerId)) {
+            nextState.playedPlayers.push(event.playerId);
+          }
+          recomputeScores();
+        }
+        if (event.kind === "sub") {
+          nextState.currentQuarter = Math.max(nextState.currentQuarter, getQuarterFromEvent(event));
+          if (event.isTeamA) {
+            nextState.teamALineup = nextState.teamALineup.map((id) => id === event.outId ? event.inId : id);
+            nextState.teamABench = nextState.teamABench.map((id) => id === event.inId ? event.outId : id);
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, nextState.teamALineup, nextState.teamABench, { fillToFive: true });
+            nextState.teamALineup = sanitized.lineup;
+            nextState.teamABench = sanitized.bench;
+          } else {
+            nextState.teamBLineup = nextState.teamBLineup.map((id) => id === event.outId ? event.inId : id);
+            nextState.teamBBench = nextState.teamBBench.map((id) => id === event.inId ? event.outId : id);
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, nextState.teamBLineup, nextState.teamBBench, { fillToFive: true });
+            nextState.teamBLineup = sanitized.lineup;
+            nextState.teamBBench = sanitized.bench;
+          }
+          if (!nextState.playedPlayers.includes(event.inId)) {
+            nextState.playedPlayers.push(event.inId);
+          }
+        }
+        if (event.kind === "meta" && event.metaType === "quarterStart") {
+          nextState.currentQuarter = getQuarterFromEvent(event);
+        }
+        if (event.kind === "meta" && event.metaType === "onCourtClear") {
+          if (event.isTeamA) {
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, [], [...nextState.teamABench, ...nextState.teamALineup], { fillToFive: false });
+            nextState.teamALineup = sanitized.lineup;
+            nextState.teamABench = sanitized.bench;
+          } else if (event.isTeamA === false) {
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, [], [...nextState.teamBBench, ...nextState.teamBLineup], { fillToFive: false });
+            nextState.teamBLineup = sanitized.lineup;
+            nextState.teamBBench = sanitized.bench;
+          }
+        }
+        if (event.kind === "meta" && event.metaType === "onCourtAdd" && event.playerId) {
+          if (event.isTeamA) {
+            const nextLineup = [...nextState.teamALineup, event.playerId];
+            const nextBench = nextState.teamABench.filter((id) => id !== event.playerId);
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, nextLineup, nextBench, { fillToFive: false });
+            nextState.teamALineup = sanitized.lineup;
+            nextState.teamABench = sanitized.bench;
+          } else if (event.isTeamA === false) {
+            const nextLineup = [...nextState.teamBLineup, event.playerId];
+            const nextBench = nextState.teamBBench.filter((id) => id !== event.playerId);
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, nextLineup, nextBench, { fillToFive: false });
+            nextState.teamBLineup = sanitized.lineup;
+            nextState.teamBBench = sanitized.bench;
+          }
+          if (!nextState.playedPlayers.includes(event.playerId)) {
+            nextState.playedPlayers.push(event.playerId);
+          }
+        }
+        if (event.kind === "meta" && event.metaType === "onCourtRemove" && event.playerId) {
+          if (event.isTeamA) {
+            const nextLineup = nextState.teamALineup.filter((id) => id !== event.playerId);
+            const nextBench = nextState.teamABench.includes(event.playerId) ? nextState.teamABench : [...nextState.teamABench, event.playerId];
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamAId, nextLineup, nextBench, { fillToFive: false });
+            nextState.teamALineup = sanitized.lineup;
+            nextState.teamABench = sanitized.bench;
+          } else if (event.isTeamA === false) {
+            const nextLineup = nextState.teamBLineup.filter((id) => id !== event.playerId);
+            const nextBench = nextState.teamBBench.includes(event.playerId) ? nextState.teamBBench : [...nextState.teamBBench, event.playerId];
+            const sanitized = sanitizeTeamRotation(replaySnapshot.teamBId, nextLineup, nextBench, { fillToFive: false });
+            nextState.teamBLineup = sanitized.lineup;
+            nextState.teamBBench = sanitized.bench;
+          }
+        }
+      });
+      recomputeScores();
+      return nextState;
+    };
+    const normalizeLiveSessionEvents = (sessionGameLog = [], sessionHistory = []) => {
+      const normalizedHistory = (sessionHistory || []).map((entry, idx) => ({
+        ...entry,
+        id: entry.id || `hist_${idx}_${Math.random().toString(36).slice(2, 7)}`,
+        kind: entry.kind || "stat"
+      }));
+      const historyQueueByText = /* @__PURE__ */ new Map();
+      normalizedHistory.forEach((entry) => {
+        const key = entry.logText || "";
+        const bucket = historyQueueByText.get(key) || [];
+        bucket.push(entry);
+        historyQueueByText.set(key, bucket);
+      });
+      const normalizedLog = (sessionGameLog || []).map((log, idx) => {
+        const existing = { ...log };
+        if (existing.id) {
+          return existing;
+        }
+        const key = existing.text || "";
+        const matchedHistory = (historyQueueByText.get(key) || []).shift();
+        if (matchedHistory) {
+          return {
+            ...existing,
+            id: matchedHistory.id,
+            kind: "stat",
+            quarter: existing.quarter || matchedHistory.quarter || 1,
+            playerId: matchedHistory.playerId,
+            statField: matchedHistory.statField,
+            changeAmount: matchedHistory.changeAmount,
+            attachedTrackingStat: matchedHistory.attachedTrackingStat,
+            trackingDelta: matchedHistory.trackingDelta
+          };
+        }
+        return {
+          ...existing,
+          id: `legacy_${idx}_${Math.random().toString(36).slice(2, 7)}`,
+          kind: existing.kind || "meta"
+        };
+      });
+      return {
+        gameLog: normalizedLog,
+        loggedHistory: normalizedHistory
+      };
+    };
+    const getLineupRevisionFromLog = (logs = []) => {
+      const lineupMetaTypes = /* @__PURE__ */ new Set(["onCourtAdd", "onCourtClear", "onCourtRemove"]);
+      return (logs || []).reduce((maxRevision, event) => {
+        const isRotationEvent = event?.kind === "sub" || event?.kind === "meta" && lineupMetaTypes.has(event?.metaType);
+        if (!isRotationEvent) return maxRevision;
+        const eventRevision = getLineupRevisionFromEventId(event?.id);
+        return eventRevision > maxRevision ? eventRevision : maxRevision;
+      }, 0);
+    };
+    const getLineupRevisionFromEventId = (eventId) => {
+      const rawId = String(eventId || "");
+      const timestamp = Number.parseInt(rawId.split("_")[0], 10);
+      if (!Number.isFinite(timestamp) || timestamp <= 0) return 0;
+      const suffix = rawId.split("_").slice(1).join("_");
+      let hash = 0;
+      for (let i = 0; i < suffix.length; i += 1) {
+        hash = (hash * 31 + suffix.charCodeAt(i)) % 997;
+      }
+      return timestamp * 1e3 + hash;
+    };
+    const isRotationLogEvent = (event) => {
+      if (!event || typeof event !== "object") return false;
+      if (event.kind === "sub") return true;
+      return event.kind === "meta" && (event.metaType === "onCourtAdd" || event.metaType === "onCourtClear" || event.metaType === "onCourtRemove");
+    };
+    const getRecentRotationEventIds = (logs = [], maxItems = 30) => {
+      return (logs || []).filter((event) => isRotationLogEvent(event) && event?.id).slice(0, maxItems).map((event) => String(event.id));
+    };
+    const hasPendingRotationEvents = () => {
+      return (pendingLiveEventsRef.current || []).some((event) => isRotationLogEvent(event));
+    };
+    const getEventTimestampFromId = (id) => {
+      const parsed = Number.parseInt(String(id || "").split("_")[0], 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const generateLiveSessionInstanceId = () => `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const mergeUniqueEventsById = (primary = [], secondary = [], maxItems = MAX_LIVE_LOG_ENTRIES) => {
+      const mergedById = /* @__PURE__ */ new Map();
+      [...primary || [], ...secondary || []].forEach((event) => {
+        if (!event || typeof event !== "object") return;
+        const eventId = event.id;
+        if (!eventId) return;
+        if (!mergedById.has(eventId)) {
+          mergedById.set(eventId, event);
+        }
+      });
+      return Array.from(mergedById.values()).sort((a, b) => {
+        const tsDiff = getEventTimestampFromId(b.id) - getEventTimestampFromId(a.id);
+        if (tsDiff !== 0) return tsDiff;
+        return String(b.id).localeCompare(String(a.id));
+      }).slice(0, maxItems);
+    };
+    const getLatestLogEvent = (events = [], matcher = () => false) => {
+      let latest = null;
+      let latestTimestamp = -1;
+      let latestIndex = -1;
+      (events || []).forEach((event, index) => {
+        if (!matcher(event)) return;
+        const eventTimestamp = getEventTimestampFromId(event?.id);
+        if (!latest || eventTimestamp > latestTimestamp || eventTimestamp === latestTimestamp && (latestIndex < 0 || index < latestIndex)) {
+          latest = event;
+          latestTimestamp = eventTimestamp;
+          latestIndex = index;
+        }
+      });
+      return latest;
+    };
+    const getClockControlRevisionFromLogs = (events = [], fallbackRevision = 0) => {
+      const fallback = Number.parseInt(fallbackRevision, 10) || 0;
+      const latestClockControlEvent = getLatestLogEvent(
+        events,
+        (event) => event?.kind === "meta" && [
+          "timeout",
+          "officialsTimeout",
+          "manualPause",
+          "foulPause",
+          "timeoutResume",
+          "playResume",
+          "quarterStart",
+          "quarterEnd",
+          "matchStart"
+        ].includes(event.metaType)
+      );
+      const fromLog = getEventTimestampFromId(latestClockControlEvent?.id);
+      return Math.max(fallback, Number.isFinite(fromLog) ? fromLog : 0);
+    };
+    const inferLiveTeamIdsFromSession = (session = {}, normalizedGameLog = []) => {
+      const explicitTeamAId = session.teamAId || session.liveGameSnapshot?.teamAId || "";
+      const explicitTeamBId = session.teamBId || session.liveGameSnapshot?.teamBId || "";
+      if (explicitTeamAId && explicitTeamBId) {
+        return { teamAId: explicitTeamAId, teamBId: explicitTeamBId };
+      }
+      const teamPool = teamsRef.current && teamsRef.current.length > 0 ? teamsRef.current : teams;
+      const playerTeamIds = [];
+      const seenPlayerIds = /* @__PURE__ */ new Set();
+      const candidatePlayerIds = [
+        ...session.playedPlayers || [],
+        ...session.teamALineup || [],
+        ...session.teamABench || [],
+        ...session.teamBLineup || [],
+        ...session.teamBBench || [],
+        ...Object.keys(session.liveStats || {})
+      ];
+      (normalizedGameLog || []).forEach((event) => {
+        [event?.playerId, event?.outId, event?.inId].forEach((playerId) => {
+          if (playerId) candidatePlayerIds.push(playerId);
+        });
+      });
+      candidatePlayerIds.forEach((playerId) => {
+        if (!playerId || seenPlayerIds.has(playerId)) return;
+        seenPlayerIds.add(playerId);
+        const owningTeam = teamPool.find((team) => (team.players || []).some((player) => player.id === playerId));
+        if (owningTeam?.id && !playerTeamIds.includes(owningTeam.id)) {
+          playerTeamIds.push(owningTeam.id);
+        }
+      });
+      const latestMatchLabelEvent = (normalizedGameLog || []).find((event) => {
+        return typeof event?.text === "string" && /^(Match initialized|Match restarted):\s+/i.test(event.text);
+      });
+      let nameDerivedTeamIds = [];
+      if (latestMatchLabelEvent?.text) {
+        const labelText = latestMatchLabelEvent.text.replace(/^(Match initialized|Match restarted):\s+/i, "");
+        const nameParts = labelText.split(/\s+vs\s+/i).map((part) => part.trim()).filter(Boolean);
+        nameDerivedTeamIds = nameParts.map((name) => teamPool.find((team) => String(team.name || "").trim().toLowerCase() === name.toLowerCase())?.id).filter(Boolean);
+      }
+      const resolvedTeamAId = explicitTeamAId || nameDerivedTeamIds[0] || playerTeamIds[0] || "";
+      const resolvedTeamBId = explicitTeamBId || nameDerivedTeamIds[1] || playerTeamIds.find((teamId) => teamId !== resolvedTeamAId) || "";
+      return {
+        teamAId: resolvedTeamAId,
+        teamBId: resolvedTeamBId
+      };
+    };
+    const buildFallbackLiveSnapshot = (session = {}, resolvedTeamIds = { teamAId: "", teamBId: "" }) => {
+      const teamAId2 = resolvedTeamIds.teamAId || "";
+      const teamBId2 = resolvedTeamIds.teamBId || "";
+      if (!teamAId2 || !teamBId2) return null;
+      const teamPool = teamsRef.current && teamsRef.current.length > 0 ? teamsRef.current : teams;
+      const teamAObj = teamPool.find((team) => team.id === teamAId2);
+      const teamBObj = teamPool.find((team) => team.id === teamBId2);
+      if (!teamAObj || !teamBObj) return null;
+      const initializedStats = cloneStatsMap(session.liveStats || {});
+      [...teamAObj.players || [], ...teamBObj.players || []].forEach((player) => {
+        if (!initializedStats[player.id]) {
+          initializedStats[player.id] = {
+            pts: 0,
+            ast: 0,
+            reb: 0,
+            stl: 0,
+            blk: 0,
+            to: 0,
+            pf: 0,
+            fg2m: 0,
+            fg3m: 0,
+            fg2m_miss: 0,
+            fg3m_miss: 0,
+            ftm: 0,
+            ft_miss: 0
+          };
+        }
+      });
+      return {
+        teamAId: teamAId2,
+        teamBId: teamBId2,
+        teamAScore: session.teamAScore || 0,
+        teamBScore: session.teamBScore || 0,
+        currentQuarter: session.currentQuarter || 1,
+        teamALineup: Array.isArray(session.teamALineup) ? session.teamALineup : [],
+        teamABench: Array.isArray(session.teamABench) ? session.teamABench : [],
+        teamBLineup: Array.isArray(session.teamBLineup) ? session.teamBLineup : [],
+        teamBBench: Array.isArray(session.teamBBench) ? session.teamBBench : [],
+        liveStats: initializedStats,
+        playedPlayers: Array.isArray(session.playedPlayers) ? session.playedPlayers : []
+      };
+    };
+    const applyRemoteLiveSession = (session) => {
+      if (!session) return;
+      const hasRemoteSessionIdentity = Boolean(getLiveSessionIdentity(session));
+      if (isLiveSessionStale(session) && !hasRemoteSessionIdentity) return;
+      const remoteSessionInstanceId = getLiveSessionIdentity(session);
+      if (!remoteSessionInstanceId) return;
+      const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: "", discardedAt: 0 };
+      const tombstoneSessionId = String(tombstone.sessionInstanceId || "").trim();
+      const tombstoneDiscardedAt = Number(tombstone.discardedAt || 0);
+      if (tombstoneDiscardedAt > 0 && tombstoneSessionId && remoteSessionInstanceId === tombstoneSessionId) {
+        return;
+      }
+      const localSessionInstanceId = String(liveSessionInstanceIdRef.current || "").trim();
+      const remoteSessionCreatedAt = Number.parseInt(session.sessionCreatedAt, 10) || 0;
+      const localSessionCreatedAt = Number(liveSessionCreatedAtRef.current || 0);
+      const isDifferentLiveSession = Boolean(
+        isGameLiveRef.current && localSessionInstanceId && remoteSessionInstanceId && remoteSessionInstanceId !== localSessionInstanceId
+      );
+      const normalized = normalizeLiveSessionEvents(session.gameLog || [], session.loggedHistory || []);
+      const remoteSessionUpdatedAt = Number.parseInt(session.sessionUpdatedAt, 10) || 0;
+      const remoteDnpUpdatedAt = Number.parseInt(session.dnpUpdatedAt, 10) || 0;
+      const localSessionUpdatedAt = Number(lastLocalSessionUpdatedAtRef.current || 0);
+      const localDnpUpdatedAt = Number(lastLocalDnpUpdatedAtRef.current || 0);
+      const remoteClockControlRevision = Math.max(
+        Number.parseInt(session.clockControlRevision, 10) || 0,
+        getClockControlRevisionFromLogs(normalized.gameLog || [], 0)
+      );
+      const localClockControlRevision = Number(clockControlRevisionRef.current || 0);
+      const hasActiveLocalResumeLockNow = Date.now() < Number(localResumeLockUntilRef.current || 0);
+      const isStaleRemoteForSameSession = Boolean(
+        !isDifferentLiveSession && remoteSessionUpdatedAt > 0 && localSessionUpdatedAt > 0 && remoteSessionUpdatedAt < localSessionUpdatedAt
+      );
+      if (isStaleRemoteForSameSession) {
+        return;
+      }
+      const isStaleClockControlDuringResumeLock = Boolean(
+        !isDifferentLiveSession && hasActiveLocalResumeLockNow && remoteClockControlRevision > 0 && localClockControlRevision > remoteClockControlRevision
+      );
+      if (isStaleClockControlDuringResumeLock) {
+        return;
+      }
+      if (isDifferentLiveSession) {
+        pendingLiveEventsRef.current = [];
+        persistPendingLiveEvents();
+        pendingActiveSessionSyncRef.current = null;
+        persistPendingActiveSessionSync();
+        locallyDeletedLiveLogIdsRef.current = /* @__PURE__ */ new Set();
+      }
+      suppressLiveSessionSyncRef.current = true;
+      const resolvedTeamIds = inferLiveTeamIdsFromSession(session, normalized.gameLog || []);
+      const remoteTeamAId = resolvedTeamIds.teamAId || "";
+      const remoteTeamBId = resolvedTeamIds.teamBId || "";
+      const replaySnapshot = session.liveGameSnapshot || buildFallbackLiveSnapshot(session, resolvedTeamIds);
+      const remoteLineupRevision = Number.parseInt(session.lineupRevision, 10) || getLineupRevisionFromLog(normalized.gameLog || []);
+      const localLineupRevision = Number(lineupRevisionRef.current || 0);
+      const localRecentRotationIds = getRecentRotationEventIds(gameLogRef.current || []);
+      const remoteRecentRotationSet = new Set(getRecentRotationEventIds(normalized.gameLog || []));
+      const remoteMissingLocalRotationEvent = localRecentRotationIds.some((eventId) => !remoteRecentRotationSet.has(eventId));
+      const pendingLocalRotationEvents = hasPendingRotationEvents();
+      const keepLocalRotation = isGameLiveRef.current && (localLineupRevision > remoteLineupRevision || pendingLocalRotationEvents || localLineupRevision === remoteLineupRevision && remoteMissingLocalRotationEvent);
+      if (keepLocalRotation && isGameLiveRef.current && (remoteMissingLocalRotationEvent || pendingLocalRotationEvents)) {
+        console.warn("Keeping local lineup to avoid stale remote rollback.", {
+          localLineupRevision,
+          remoteLineupRevision,
+          pendingLocalRotationEvents,
+          remoteMissingLocalRotationEvent,
+          localRecentRotationIds,
+          remoteRecentRotationIds: Array.from(remoteRecentRotationSet)
+        });
+      }
+      const locallyDeletedIds = locallyDeletedLiveLogIdsRef.current || /* @__PURE__ */ new Set();
+      const normalizedGameLog = normalized.gameLog || [];
+      const normalizedLoggedHistory = normalized.loggedHistory || [];
+      if (locallyDeletedIds.size > 0) {
+        const remoteIds = new Set(normalizedGameLog.map((event) => String(event?.id || "")).filter(Boolean));
+        locallyDeletedIds.forEach((eventId) => {
+          if (!remoteIds.has(eventId)) {
+            locallyDeletedIds.delete(eventId);
+          }
+        });
+      }
+      const filteredRemoteGameLog = normalizedGameLog.filter((event) => {
+        const eventId = String(event?.id || "").trim();
+        return !eventId || !locallyDeletedIds.has(eventId);
+      });
+      const filteredRemoteLoggedHistory = normalizedLoggedHistory.filter((event) => {
+        const eventId = String(event?.id || "").trim();
+        return !eventId || !locallyDeletedIds.has(eventId);
+      });
+      const effectiveGameLog = keepLocalRotation ? mergeUniqueEventsById(gameLogRef.current || [], filteredRemoteGameLog, MAX_LIVE_LOG_ENTRIES) : filteredRemoteGameLog;
+      const effectiveLoggedHistory = keepLocalRotation ? mergeUniqueEventsById(loggedHistoryRef.current || [], filteredRemoteLoggedHistory, MAX_LIVE_HISTORY_ENTRIES) : filteredRemoteLoggedHistory;
+      lastRemoteGameLogIdsRef.current = new Set(filteredRemoteGameLog.map((event) => event?.id).filter(Boolean));
+      const replayed = buildLiveStateFromEvents(replaySnapshot || liveGameSnapshotRef.current || null, effectiveGameLog) || null;
+      const hasAdminFocusEvent = (effectiveGameLog || []).some((event) => event?.kind === "meta" && event?.metaType === "adminFocusSet");
+      const pauseActiveFromLog = isTimeoutCurrentlyActive(effectiveGameLog);
+      const hasActiveLocalResumeLock = Date.now() < Number(localResumeLockUntilRef.current || 0);
+      const effectiveQuarter = Number.parseInt(replayed?.currentQuarter, 10) || Number.parseInt(session.currentQuarter, 10) || 1;
+      const latestPeriodBoundaryEvent = getLatestLogEvent(
+        effectiveGameLog,
+        (event) => event?.kind === "meta" && [
+          "quarterStart",
+          "quarterEnd",
+          "quarterClockExpired"
+        ].includes(event?.metaType)
+      );
+      const latestBoundaryQuarter = Number.parseInt(latestPeriodBoundaryEvent?.quarter, 10) || 0;
+      const shouldPinQuarterToBoundary = ["quarterEnd", "quarterClockExpired"].includes(latestPeriodBoundaryEvent?.metaType);
+      const resolvedRemoteQuarter = shouldPinQuarterToBoundary && latestBoundaryQuarter > 0 ? latestBoundaryQuarter : effectiveQuarter;
+      const latestQuarterClockControlEvent = getLatestLogEvent(
+        effectiveGameLog,
+        (event) => event?.kind === "meta" && getQuarterFromEvent(event) === resolvedRemoteQuarter && [
+          "matchStart",
+          "quarterStart",
+          "timeout",
+          "officialsTimeout",
+          "manualPause",
+          "foulPause",
+          "timeoutResume",
+          "playResume",
+          "quarterClockExpired",
+          "quarterEnd",
+          "clockAdjust"
+        ].includes(event?.metaType)
+      );
+      const parsedRemoteClockSeconds = Number.parseInt(session.periodClockSeconds, 10);
+      const parsedClockFromLatestQuarterControl = parseClockInputToSeconds(latestQuarterClockControlEvent?.clockRemaining);
+      const fallbackClockSeconds = getPeriodDurationSeconds(resolvedRemoteQuarter);
+      const shouldForceExpiredQuarterClock = ["quarterClockExpired", "quarterEnd"].includes(latestQuarterClockControlEvent?.metaType);
+      const remoteClockSeconds = shouldForceExpiredQuarterClock ? 0 : Math.max(
+        0,
+        Number.isFinite(parsedRemoteClockSeconds) ? parsedRemoteClockSeconds : parsedClockFromLatestQuarterControl !== null ? parsedClockFromLatestQuarterControl : fallbackClockSeconds
+      );
+      const remoteAwaitingPeriodStart = Boolean(session.awaitingPeriodStart);
+      const remoteAwaitingOvertimeDecision = Boolean(session.awaitingOvertimeDecision);
+      const localClockSeconds = Number(periodClockSecondsRef.current || periodClockSeconds || 0);
+      const localClockIsRunning = Boolean(isPeriodClockRunningRef.current);
+      const localAwaitingPeriodStart = Boolean(awaitingPeriodStartRef.current);
+      const localCurrentQuarter = Number(currentQuarterRef.current || currentQuarter || 1);
+      const remoteIsOlderQuarter = resolvedRemoteQuarter < localCurrentQuarter;
+      const shouldSkipApplyDuringResumeLock = hasActiveLocalResumeLock && remoteIsOlderQuarter;
+      if (shouldSkipApplyDuringResumeLock) {
+        suppressLiveSessionSyncRef.current = false;
+        return;
+      }
+      const remoteSaysClockRunning = Boolean(session.isPeriodClockRunning) && !Boolean(session.isPlayPaused);
+      const shouldSkipStartRollbackDuringResumeLock = Boolean(
+        hasActiveLocalResumeLock && !isDifferentLiveSession && localClockIsRunning && localClockSeconds > 0 && !localAwaitingPeriodStart && (remoteAwaitingPeriodStart || !remoteSaysClockRunning || remoteClockSeconds <= 0)
+      );
+      if (shouldSkipStartRollbackDuringResumeLock) {
+        suppressLiveSessionSyncRef.current = false;
+        return;
+      }
+      const shouldPreserveLocalClockDuringResumeLock = hasActiveLocalResumeLock && !pauseActiveFromLog && !remoteAwaitingPeriodStart && !remoteAwaitingOvertimeDecision && localClockSeconds > 0 && remoteClockSeconds <= 0 && resolvedRemoteQuarter <= localCurrentQuarter;
+      const effectiveRemoteClockSeconds = shouldPreserveLocalClockDuringResumeLock ? localClockSeconds : remoteClockSeconds;
+      const shouldForceRunningDuringResumeLock = hasActiveLocalResumeLock && !pauseActiveFromLog && !remoteAwaitingPeriodStart && !remoteAwaitingOvertimeDecision && effectiveRemoteClockSeconds > 0;
+      const shouldForceLocalResumeState = hasActiveLocalResumeLock && (pauseActiveFromLog || shouldForceRunningDuringResumeLock);
+      const hasLocalOnly = (gameLogRef.current || []).some((event) => event?.id && !lastRemoteGameLogIdsRef.current.has(event.id));
+      setSyncDebug((prev) => ({
+        ...prev,
+        lastRemoteLineupRevision: remoteLineupRevision,
+        lastLocalLineupRevisionAtSync: localLineupRevision,
+        keepLocalRotation,
+        pendingQueue: (pendingLiveEventsRef.current || []).length,
+        hasLocalOnly,
+        forceLocalResume: shouldForceLocalResumeState,
+        forceRunningResumeLock: shouldForceRunningDuringResumeLock
+      }));
+      const effectiveLineupRevision = keepLocalRotation ? Math.max(localLineupRevision, remoteLineupRevision) : remoteLineupRevision;
+      const hasRotationHistory = (effectiveGameLog || []).some((event) => isRotationLogEvent(event));
+      const shouldPreferReplayedRotation = Boolean(replayed) && (hasRotationHistory || !session.liveGameSnapshot || !session.teamAId || !session.teamBId);
+      const incomingTeamALineup = keepLocalRotation ? teamALineupRef.current : shouldPreferReplayedRotation ? replayed?.teamALineup || [] : Array.isArray(session.teamALineup) ? session.teamALineup : replayed?.teamALineup || [];
+      const incomingTeamABench = keepLocalRotation ? teamABenchRef.current : shouldPreferReplayedRotation ? replayed?.teamABench || [] : Array.isArray(session.teamABench) ? session.teamABench : replayed?.teamABench || [];
+      const incomingTeamBLineup = keepLocalRotation ? teamBLineupRef.current : shouldPreferReplayedRotation ? replayed?.teamBLineup || [] : Array.isArray(session.teamBLineup) ? session.teamBLineup : replayed?.teamBLineup || [];
+      const incomingTeamBBench = keepLocalRotation ? teamBBenchRef.current : shouldPreferReplayedRotation ? replayed?.teamBBench || [] : Array.isArray(session.teamBBench) ? session.teamBBench : replayed?.teamBBench || [];
+      const teamARotation = sanitizeTeamRotation(remoteTeamAId, incomingTeamALineup, incomingTeamABench, { fillToFive: false });
+      const teamBRotation = sanitizeTeamRotation(remoteTeamBId, incomingTeamBLineup, incomingTeamBBench, { fillToFive: false });
+      setTeamAId(remoteTeamAId);
+      setTeamBId(remoteTeamBId);
+      setLiveSessionInstanceId(remoteSessionInstanceId);
+      setLiveSessionCreatedAt(remoteSessionCreatedAt);
+      setTeamAScore(replayed?.teamAScore || session.teamAScore || 0);
+      setTeamBScore(replayed?.teamBScore || session.teamBScore || 0);
+      setCurrentQuarter(resolvedRemoteQuarter);
+      setTeamALineup(teamARotation.lineup);
+      setTeamABench(teamARotation.bench);
+      setTeamBLineup(teamBRotation.lineup);
+      setTeamBBench(teamBRotation.bench);
+      setLiveStats(replayed?.liveStats || session.liveStats || {});
+      setPeriodSnapshots(Array.isArray(session.periodSnapshots) ? session.periodSnapshots : []);
+      setPeriodClockSeconds(effectiveRemoteClockSeconds);
+      const sessionSaysRunning = Boolean(session.isPeriodClockRunning) && !Boolean(session.isPlayPaused);
+      const shouldEnforcePauseFromLog = pauseActiveFromLog && !shouldForceLocalResumeState && !sessionSaysRunning;
+      setIsPeriodClockRunning(
+        shouldForceRunningDuringResumeLock ? true : shouldEnforcePauseFromLog ? false : Boolean(session.isPeriodClockRunning)
+      );
+      setIsPlayPaused(
+        shouldForceRunningDuringResumeLock ? false : shouldEnforcePauseFromLog ? true : Boolean(session.isPlayPaused)
+      );
+      setLivePlayerSeconds(session.livePlayerSeconds || {});
+      setLiveGameSnapshot(replaySnapshot || null);
+      setGameLog(effectiveGameLog);
+      if (!hasAdminFocusEvent) {
+        setSharedAdminFocus("both");
+        setOperatorFocus("both");
+      }
+      setLoggedHistory(effectiveLoggedHistory);
+      setPlayedPlayers(replayed?.playedPlayers || session.playedPlayers || []);
+      const keepLocalDnpState = isGameLiveRef.current && localDnpUpdatedAt > 0 && remoteDnpUpdatedAt < localDnpUpdatedAt;
+      setDnpPlayers(keepLocalDnpState ? dnpPlayersRef.current || [] : session.dnpPlayers || []);
+      setAwaitingPeriodStart(Boolean(session.awaitingPeriodStart));
+      sessionRevisionRef.current = Math.max(Number(sessionRevisionRef.current || 0), Number(session.sessionRevision || 0));
+      clockControlRevisionRef.current = Math.max(
+        Number(clockControlRevisionRef.current || 0),
+        remoteClockControlRevision
+      );
+      lastLocalSessionUpdatedAtRef.current = Math.max(localSessionUpdatedAt, remoteSessionUpdatedAt);
+      lastLocalDnpUpdatedAtRef.current = Math.max(localDnpUpdatedAt, remoteDnpUpdatedAt);
+      setLineupRevision((prev) => {
+        const next = Math.max(prev, effectiveLineupRevision || 0);
+        lineupRevisionRef.current = next;
+        return next;
+      });
+      hadLiveSessionRef.current = true;
+      setIsGameLive(true);
+    };
+    const clearRemoteLiveSession = () => {
+      clearLocalLiveSessionArtifacts({ keepTeamSelection: false });
+    };
+    const customFoulActions = [
+      {
+        id: "pf_offensive",
+        label: "OFFENSIVE FOUL",
+        category: "deficit",
+        stat: "pf",
+        val: 1,
+        countsTeamFoul: true,
+        trackingStat: "to",
+        colorClass: "bg-red-900/40 hover:bg-red-900/60 text-red-200 border-red-700/70 shadow-sm"
+      },
+      {
+        id: "pf_technical",
+        label: "TECHNICAL FOUL",
+        category: "deficit",
+        stat: "pf",
+        val: 1,
+        countsTeamFoul: true,
+        colorClass: "bg-amber-900/40 hover:bg-amber-900/60 text-amber-200 border-amber-700/70 shadow-sm"
+      }
+    ];
+    const availableCustomFoulActions = customFoulActions.filter((customAction) => {
+      return !statActions.some((existingAction) => existingAction.id === customAction.id);
+    });
+    const liveActionPool = [...statActions, ...availableCustomFoulActions];
+    const liveActionById = new Map(liveActionPool.map((action) => [action.id, action]));
+    const getActionsByOrder = (orderedIds) => {
+      const orderMap = new Map(orderedIds.map((id, idx) => [id, idx]));
+      return liveActionPool.filter((act) => orderMap.has(act.id)).sort((a, b) => orderMap.get(a.id) - orderMap.get(b.id));
+    };
+    const scoringActions = getActionsByOrder(["pts_2", "fg2m_miss", "pts_3", "fg3m_miss", "pts_1", "ft_miss"]);
+    const flowActions = getActionsByOrder(["ast", "stl", "blk"]);
+    const whistleActions = getActionsByOrder(["to", "pf", "pf_offensive"]);
+    const reboundAction = liveActionById.get("reb") || null;
+    const technicalFoulAction = liveActionById.get("pf_technical") || null;
+    const scoringActionIds = new Set(scoringActions.map((action) => String(action?.id || "")));
+    const autoResumeActionIds = /* @__PURE__ */ new Set(["pts_2", "pts_3", "fg2m_miss", "fg3m_miss", "reb", "ast", "to", "stl", "blk"]);
+    const isAutoResumeActionArmed = autoResumeActionIds.has(String(activeAction?.id || ""));
+    const getActionDisplayLabel = (action, fallbackLabel = "") => {
+      const actionId = String(action?.id || "");
+      const labelById = {
+        pts_2: "2PT MADE",
+        fg2m_miss: "2PT MISS",
+        pts_3: "3PT MADE",
+        fg3m_miss: "3PT MISS",
+        pts_1: "FT MADE",
+        ft_miss: "FT MISS",
+        ast: "+1 AST",
+        reb: "REB",
+        stl: "+1 STL",
+        blk: "+1 BLK",
+        to: "+1 TO",
+        pf: "+1 FOUL",
+        pf_offensive: "OFFENSIVE FOUL",
+        pf_technical: "TECHNICAL FOUL"
+      };
+      return labelById[actionId] || fallbackLabel || String(action?.label || "");
+    };
+    const liveHomeTeam = teams.find((t) => t.id === teamAId);
+    const liveAwayTeam = teams.find((t) => t.id === teamBId);
+    const homeTeamLabel = liveHomeTeam?.name || "HOME";
+    const awayTeamLabel = liveAwayTeam?.name || "AWAY";
+    const liveLogEditTargetTeam = liveLogEditTarget?.isTeamA === true ? liveHomeTeam : liveLogEditTarget?.isTeamA === false ? liveAwayTeam : (() => {
+      const targetPlayerId = String(liveLogEditTarget?.playerId || "").trim();
+      if (!targetPlayerId) return null;
+      return teams.find((team) => (team?.players || []).some((player) => player.id === targetPlayerId)) || null;
+    })();
+    const liveLogEditTargetPlayers = (liveLogEditTargetTeam?.players || []).filter((p) => !dnpPlayers.includes(p.id));
+    const formatLiveLogEditPlayerLabel = (player) => {
+      const rawName = String(player?.name || "").trim();
+      const formattedName = rawName.includes(",") ? rawName : rawName.split(/\s+/).filter(Boolean).reduce((accumulator, part, index, parts) => {
+        if (index === parts.length - 1) {
+          return accumulator ? `${part}, ${accumulator}` : part;
+        }
+        return accumulator ? accumulator : part;
+      }, "");
+      return `#${String(player?.number || "").trim()} ${formattedName || rawName}`.trim().toUpperCase();
+    };
+    const operatorHandledTeamLabel = effectiveOperatorFocus === "home" ? homeTeamLabel : effectiveOperatorFocus === "away" ? awayTeamLabel : "BOTH TEAMS";
+    const getFocusOptionLabel = (optionId) => {
+      if (optionId === "home") return homeTeamLabel;
+      if (optionId === "away") return awayTeamLabel;
+      return "BOTH";
+    };
+    const getFocusOptionActiveStyle = (optionId) => {
+      const optionColor = optionId === "home" ? liveHomeTeam?.color || "#06b6d4" : optionId === "away" ? liveAwayTeam?.color || "#ef4444" : "#f59e0b";
+      return {
+        backgroundColor: `${optionColor}40`,
+        borderColor: optionColor,
+        color: "#ffffff",
+        boxShadow: `0 0 0 1px ${optionColor}55`
+      };
+    };
+    useEffect(() => {
+      if (!liveLogEditTarget) {
+        setSelectedPlayerId("");
+        return;
+      }
+      const currentPlayerId = String(liveLogEditTarget.playerId || "").trim();
+      const currentPlayerName = String(liveLogEditTarget.playerName || "").trim().toLowerCase();
+      const matchedPlayer = liveLogEditTargetPlayers.find((player) => {
+        const playerName = String(player?.name || "").trim().toLowerCase();
+        return player.id === currentPlayerId || playerName === currentPlayerName;
+      });
+      setSelectedPlayerId(matchedPlayer?.id || currentPlayerId || "");
+    }, [liveLogEditTarget?.id, liveLogEditTarget?.playerId, liveLogEditTarget?.playerName, liveLogEditTargetTeam?.id, liveHomeTeam?.id, liveAwayTeam?.id]);
+    const isTieGame = teamAScore === teamBScore;
+    const canStartOvertime = isTieGame;
+    const hasLiveSessionIdentity = Boolean(String(liveSessionInstanceId || "").trim());
+    const homepageGameSummaries = [
+      ...isGameLive && hasLiveSessionIdentity && liveHomeTeam && liveAwayTeam ? [{
+        id: `live_${teamAId}_${teamBId}`,
+        status: "LIVE",
+        date: (/* @__PURE__ */ new Date()).toLocaleString(),
+        homeTeam: liveHomeTeam.name,
+        homeScore: teamAScore,
+        awayTeam: liveAwayTeam.name,
+        awayScore: teamBScore
+      }] : [],
+      ...games.map((g) => {
+        const isUpcoming = g.scheduled || Number(g.teamAScore || 0) + Number(g.teamBScore || 0) === 0;
+        return {
+          id: g.id,
+          status: isUpcoming ? "UPCOMING" : "ENDED",
+          date: g.date,
+          homeTeam: g.teamAName,
+          homeScore: g.teamAScore,
+          awayTeam: g.teamBName,
+          awayScore: g.teamBScore,
+          underReview: Boolean(g.underReview),
+          scheduled: Boolean(g.scheduled),
+          writeupSnippet: String(g.gameWriteup || "").trim().slice(0, 140)
+        };
+      })
+    ];
+    const availableSeasons = (() => {
+      const seasonSet = new Set(games.map((g) => g.season || CURRENT_SEASON));
+      return Array.from(seasonSet).sort((a, b) => b - a);
+    })();
+    const seasonRegularGames = games.filter(
+      (g) => (g.season || CURRENT_SEASON) === selectedSeason && (g.gameType || "regular") === "regular"
+    );
+    const seasonPlayoffGames = games.filter(
+      (g) => (g.season || CURRENT_SEASON) === selectedSeason && g.gameType === "playoff"
+    );
+    const hasPlayoffGames = seasonPlayoffGames.length > 0;
+    const buildStandingsFromGames = (filteredGames) => teams.map((team) => {
+      const rec = {
+        id: team.id,
+        name: team.name,
+        color: team.color,
+        wins: 0,
+        losses: 0,
+        gamesPlayed: 0,
+        pointsFor: 0,
+        pointsAgainst: 0
+      };
+      filteredGames.forEach((g) => {
+        if (g.teamAId !== team.id && g.teamBId !== team.id) return;
+        const teamScore = g.teamAId === team.id ? g.teamAScore || 0 : g.teamBScore || 0;
+        const oppScore = g.teamAId === team.id ? g.teamBScore || 0 : g.teamAScore || 0;
+        if (teamScore === 0 && oppScore === 0) return;
+        rec.gamesPlayed += 1;
+        rec.pointsFor += teamScore;
+        rec.pointsAgainst += oppScore;
+        if (teamScore > oppScore) rec.wins += 1;
+        if (teamScore < oppScore) rec.losses += 1;
+      });
+      const q = rec.pointsAgainst > 0 ? rec.pointsFor / rec.pointsAgainst : rec.pointsFor > 0 ? Number.POSITIVE_INFINITY : 1;
+      return { ...rec, quotient: q };
+    }).sort((a, b) => {
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (a.losses !== b.losses) return a.losses - b.losses;
+      if (b.quotient !== a.quotient) return b.quotient - a.quotient;
+      return b.pointsFor - a.pointsFor;
+    });
+    const teamStandings = buildStandingsFromGames(seasonRegularGames);
+    const playoffBracket = (() => {
+      const seeds = teamStandings.slice(0, 4);
+      if (seeds.length < 2) return null;
+      const seriesGames = (sid) => seasonPlayoffGames.filter((g) => g.seriesId === sid);
+      const computeSeries = (games2, highId, lowId, winsToAdvanceHigh, winsToAdvanceLow) => {
+        let highWins = 0;
+        let lowWins = 0;
+        const results = games2.map((g) => {
+          const highScore = g.teamAId === highId ? g.teamAScore || 0 : g.teamBScore || 0;
+          const lowScore = g.teamAId === lowId ? g.teamAScore || 0 : g.teamBScore || 0;
+          const highWon = highScore > lowScore;
+          if (highWon) highWins++;
+          else lowWins++;
+          return { highScore, lowScore, highWon, id: g.id };
+        });
+        const winnerId = highWins >= winsToAdvanceHigh ? highId : lowWins >= winsToAdvanceLow ? lowId : null;
+        return { highWins, lowWins, results, winnerId };
+      };
+      const s1 = seeds[0];
+      const s2 = seeds[1];
+      const s3 = seeds[2] || null;
+      const s4 = seeds[3] || null;
+      const semiA = s4 ? computeSeries(seriesGames("semi-a"), s1.id, s4.id, 1, 2) : null;
+      const semiB = s3 ? computeSeries(seriesGames("semi-b"), s2.id, s3.id, 1, 2) : null;
+      const finalTeam1Id = semiA?.winnerId || s1?.id;
+      const finalTeam2Id = semiB?.winnerId || s2?.id;
+      const finalTeam1 = teamStandings.find((t) => t.id === finalTeam1Id) || s1;
+      const finalTeam2 = teamStandings.find((t) => t.id === finalTeam2Id) || s2;
+      const finalSeries = computeSeries(seriesGames("final"), finalTeam1Id, finalTeam2Id, 2, 2);
+      return { seeds, semiA, semiB, finalTeam1, finalTeam2, finalSeries };
+    })();
+    const standingsLeaderDefs = [
+      { id: "pts", label: "PTS", tabLabel: "Points" },
+      { id: "reb", label: "REB", tabLabel: "Rebounds" },
+      { id: "ast", label: "AST", tabLabel: "Assists" },
+      { id: "stl", label: "STL", tabLabel: "Steals" },
+      { id: "blk", label: "BLK", tabLabel: "Blocks" },
+      { id: "fg3m", label: "3PM", tabLabel: "3-Pointers Made" },
+      { id: "ftm", label: "FTM", tabLabel: "Free Throws Made" },
+      { id: "to", label: "TO", tabLabel: "Turnovers" },
+      { id: "fgPct", label: "FG%", tabLabel: "Field Goal %" },
+      { id: "fg3Pct", label: "3P%", tabLabel: "Three Point %" },
+      { id: "ftPct", label: "FT%", tabLabel: "Free Throw %" },
+      { id: "pf", label: "PF", tabLabel: "Fouls" }
+    ];
+    const getTeamTotalValue = (team, key) => {
+      const players = Array.isArray(team?.players) ? team.players : [];
+      const totals = players.reduce((acc, player) => {
+        const s = player?.totalStats || {};
+        acc.pts += Number(s.pts || 0);
+        acc.reb += Number(s.reb || 0);
+        acc.ast += Number(s.ast || 0);
+        acc.stl += Number(s.stl || 0);
+        acc.blk += Number(s.blk || 0);
+        acc.to += Number(s.to || 0);
+        acc.pf += Number(s.pf || 0);
+        acc.fg2m += Number(s.fg2m || 0);
+        acc.fg2m_miss += Number(s.fg2m_miss || 0);
+        acc.fg3m += Number(s.fg3m || 0);
+        acc.fg3m_miss += Number(s.fg3m_miss || 0);
+        acc.ftm += Number(s.ftm || 0);
+        acc.ft_miss += Number(s.ft_miss || 0);
+        return acc;
+      }, { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg2m_miss: 0, fg3m: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 });
+      if (key === "fgPct") {
+        const made = totals.fg2m + totals.fg3m;
+        const att = made + totals.fg2m_miss + totals.fg3m_miss;
+        return att > 0 ? made / att * 100 : 0;
+      }
+      if (key === "fg3Pct") {
+        const made = totals.fg3m;
+        const att = made + totals.fg3m_miss;
+        return att > 0 ? made / att * 100 : 0;
+      }
+      if (key === "ftPct") {
+        const made = totals.ftm;
+        const att = made + totals.ft_miss;
+        return att > 0 ? made / att * 100 : 0;
+      }
+      return Number(totals[key] || 0);
+    };
+    const teamStatTotals = teams.map((team) => {
+      const players = Array.isArray(team.players) ? team.players : [];
+      const totalsByCategory = standingsLeaderDefs.reduce((acc, def) => {
+        acc[def.id] = getTeamTotalValue(team, def.id);
+        return acc;
+      }, {});
+      const standingRow = teamStandings.find((row) => row.id === team.id);
+      return {
+        id: team.id,
+        name: team.name,
+        color: team.color,
+        players,
+        gamesPlayed: standingRow?.gamesPlayed || 0,
+        totalsByCategory
+      };
+    });
+    const statCategoryLeaders = standingsLeaderDefs.map((def) => {
+      const sorted = [...teamStatTotals].sort((a, b) => {
+        const bRaw = Number(b.totalsByCategory[def.id] || 0);
+        const aRaw = Number(a.totalsByCategory[def.id] || 0);
+        const isPct2 = def.id === "fgPct" || def.id === "fg3Pct" || def.id === "ftPct";
+        const bGp = Math.max(1, Number(b.gamesPlayed || 0));
+        const aGp = Math.max(1, Number(a.gamesPlayed || 0));
+        const bVal = standingsStatMode === "perGame" && !isPct2 ? bRaw / bGp : bRaw;
+        const aVal = standingsStatMode === "perGame" && !isPct2 ? aRaw / aGp : aRaw;
+        if (bVal !== aVal) return bVal - aVal;
+        return a.name.localeCompare(b.name);
+      });
+      const top = sorted[0] || null;
+      const topRaw = Number(top?.totalsByCategory?.[def.id] || 0);
+      const isPct = def.id === "fgPct" || def.id === "fg3Pct";
+      const topGp = Math.max(1, Number(top?.gamesPlayed || 0));
+      const rankedTeams = sorted.map((team) => {
+        const raw = Number(team.totalsByCategory[def.id] || 0);
+        const gp = Math.max(1, Number(team.gamesPlayed || 0));
+        const value = standingsStatMode === "perGame" && !isPct ? raw / gp : raw;
+        return {
+          id: team.id,
+          name: team.name,
+          color: team.color,
+          value
+        };
+      });
+      const maxValue = rankedTeams.reduce((max, team) => Math.max(max, Math.max(0, Number(team.value || 0))), 0);
+      return {
+        id: def.id,
+        label: def.label,
+        teamId: top?.id || "",
+        teamName: top?.name || "-",
+        teamColor: top?.color || "#94a3b8",
+        value: standingsStatMode === "perGame" && !isPct ? topRaw / topGp : topRaw,
+        bars: rankedTeams.map((team) => ({
+          ...team,
+          width: maxValue > 0 ? Math.max(0, Number(team.value || 0)) / maxValue * 100 : 0
+        }))
+      };
+    });
+    const selectedStandingsLeader = statCategoryLeaders.find((row) => row.id === selectedStandingsLeaderStat) || statCategoryLeaders[0] || null;
+    useEffect(() => {
+      if (activeTab !== "standings") {
+        setStandingsBarsVisible(false);
+        return void 0;
+      }
+      setStandingsBarsVisible(false);
+      setStandingsBarsCycle((prev) => prev + 1);
+      let nextFrame = null;
+      const frame = window.requestAnimationFrame(() => {
+        nextFrame = window.requestAnimationFrame(() => {
+          setStandingsBarsVisible(true);
+        });
+      });
+      return () => {
+        window.cancelAnimationFrame(frame);
+        if (nextFrame !== null) {
+          window.cancelAnimationFrame(nextFrame);
+        }
+      };
+    }, [activeTab, standingsStatMode, selectedStandingsLeaderStat, teamStatTotals.length]);
+    useEffect(() => {
+      if (!standingsLeaderDefs.some((def) => def.id === selectedStandingsLeaderStat)) {
+        setSelectedStandingsLeaderStat(standingsLeaderDefs[0]?.id || "pts");
+      }
+    }, [selectedStandingsLeaderStat]);
+    const selectedHistoryGame = selectedHistoryGameId ? games.find((g) => g.id === selectedHistoryGameId) || null : null;
+    useEffect(() => {
+      if (activeTab !== "history") return;
+      if (!selectedHistoryGameId) return;
+      if (selectedHistoryGame) return;
+      setSelectedHistoryGameId(null);
+      setPendingSharedGameId(null);
+      setPendingSharedHistoryDetailTab("");
+      suppressNextNavHistoryPushRef.current = true;
+      syncHistoryShareUrl(null, "replace");
+    }, [activeTab, selectedHistoryGameId, selectedHistoryGame]);
+    useEffect(() => {
+      if (!selectedHistoryGameId) return;
+      if (!selectedHistoryGame) return;
+      if (selectedHistoryGame._detailLoaded) return;
+      let cancelled = false;
+      apiRequest(`/api/games/${encodeURIComponent(selectedHistoryGameId)}/detail`).then((data) => {
+        if (cancelled) return;
+        setGames((prev) => prev.map(
+          (g) => g.id !== selectedHistoryGameId ? g : { ...g, gameLog: data.gameLog || [], periodSnapshots: data.periodSnapshots || [], playerStats: data.playerStats || {}, _detailLoaded: true }
+        ));
+        if (!String(selectedHistoryGame?.manualPotgPlayerId || "").trim()) {
+          const teamAObj = teams.find((t) => t.id === selectedHistoryGame?.teamAId);
+          const teamBObj = teams.find((t) => t.id === selectedHistoryGame?.teamBId);
+          const loadedGame = { ...selectedHistoryGame, playerStats: data.playerStats || {}, _detailLoaded: true };
+          if (getPlayerOfTheGame(loadedGame, teamAObj, teamBObj)) {
+            setHistoryDetailTab((prev) => prev === "scoring" ? "potg" : prev);
+          }
+        }
+      }).catch(() => {
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [selectedHistoryGameId, selectedHistoryGame?._detailLoaded]);
+    const currentLiveGameLog = getCurrentGameLogSegment(gameLog);
+    const currentLiveGame = games.find((game) => game.status === "LIVE") || null;
+    const ROLE_PRESENCE_STALE_MS = 3e4;
+    const latestAdminFocusEvent = (() => {
+      let latestEvent = null;
+      let latestRevision = -1;
+      let latestTimestamp = -1;
+      let latestIndex = Number.POSITIVE_INFINITY;
+      (currentLiveGameLog || []).forEach((event, index) => {
+        if (!(event?.kind === "meta" && event.metaType === "adminFocusSet")) return;
+        const eventRevision = Number.parseInt(event?.focusRevision, 10) || 0;
+        const eventTimestamp = getEventTimestampFromId(event?.id);
+        const shouldUseEvent = !latestEvent || eventRevision > latestRevision || eventRevision === latestRevision && eventTimestamp > latestTimestamp || eventRevision === latestRevision && eventTimestamp === latestTimestamp && index < latestIndex;
+        if (!shouldUseEvent) return;
+        latestEvent = event;
+        latestRevision = eventRevision;
+        latestTimestamp = eventTimestamp;
+        latestIndex = index;
+      });
+      return latestEvent;
+    })();
+    const derivedSharedAdminFocus = (() => {
+      const focusFromField = String(latestAdminFocusEvent?.focus || "").toLowerCase();
+      const focusFromTextMatch = String(latestAdminFocusEvent?.text || "").toLowerCase().match(/admin focus:\s*(home|away|both)/);
+      const focusFromText = focusFromTextMatch ? String(focusFromTextMatch[1] || "") : "";
+      const focus = focusFromField || focusFromText;
+      if (focus === "home" || focus === "away" || focus === "both") return focus;
+      return null;
+    })();
+    const latestAdminPresenceEvent = getLatestLogEvent(
+      currentLiveGameLog,
+      (event) => event?.kind === "meta" && event.metaType === "rolePresence" && String(event?.role || "").toLowerCase() === "admin"
+    );
+    const freshRolePresenceEvents = currentLiveGameLog.filter((event) => {
+      if (!event || event.kind !== "meta" || event.metaType !== "rolePresence") return false;
+      const ts = getEventTimestampFromId(event.id);
+      return ts > 0 && Date.now() - ts <= ROLE_PRESENCE_STALE_MS;
+    });
+    const activeAdminPresenceCount = new Set(
+      freshRolePresenceEvents.filter((event) => String(event?.role || "").toLowerCase() === "admin").map((event) => String(event?.clientId || "unknown-admin"))
+    ).size;
+    const activeOperatorPresenceCount = new Set(
+      freshRolePresenceEvents.filter((event) => String(event?.role || "").toLowerCase() === "operator").map((event) => String(event?.clientId || "unknown-operator"))
+    ).size;
+    const adminPresenceAgeMs = latestAdminPresenceEvent ? Math.max(0, Date.now() - getEventTimestampFromId(latestAdminPresenceEvent.id)) : Number.POSITIVE_INFINITY;
+    const hasFreshAdminPresence = Boolean(latestAdminPresenceEvent) && adminPresenceAgeMs <= ROLE_PRESENCE_STALE_MS;
+    const finalizedPeriods = new Set(
+      currentLiveGameLog.filter((event) => event?.kind === "meta" && event?.metaType === "quarterEnd").map((event) => getQuarterFromEvent(event)).filter((quarter) => Number.isFinite(quarter) && quarter > 0)
+    );
+    const liveQuarterStatsFromLog = computeQuarterTeamStatsFromLog(currentLiveGameLog);
+    const frozenQuarterStatsByQuarter = new Map((periodSnapshots || []).map((snapshot) => [Number(snapshot?.quarter || 0), snapshot]));
+    const maxLiveQuarter = Math.max(
+      4,
+      currentQuarter || 1,
+      ...liveQuarterStatsFromLog.map((row) => Number(row?.quarter || 0)),
+      ...Array.from(frozenQuarterStatsByQuarter.keys())
+    );
+    const liveQuarterStats = Array.from({ length: maxLiveQuarter }, (_, idx) => idx + 1).map((quarter) => {
+      const frozen = frozenQuarterStatsByQuarter.get(quarter) || null;
+      if (frozen?.quarterStats) {
+        return {
+          quarter,
+          teamA: cloneQuarterStats(frozen.quarterStats.teamA),
+          teamB: cloneQuarterStats(frozen.quarterStats.teamB)
+        };
+      }
+      const logRow = liveQuarterStatsFromLog.find((row) => Number(row.quarter) === quarter) || null;
+      return {
+        quarter,
+        teamA: cloneQuarterStats(logRow?.teamA || createEmptyQuarterStats()),
+        teamB: cloneQuarterStats(logRow?.teamB || createEmptyQuarterStats())
+      };
+    });
+    const liveTimeouts = computeTimeoutsFromLog(currentLiveGameLog);
+    useEffect(() => {
+      if (!derivedSharedAdminFocus) return;
+      setSharedAdminFocus((prev) => prev === derivedSharedAdminFocus ? prev : derivedSharedAdminFocus);
+    }, [derivedSharedAdminFocus]);
+    useEffect(() => {
+      const latestFocusRevision = Number.parseInt(latestAdminFocusEvent?.focusRevision, 10) || 0;
+      if (latestFocusRevision > Number(adminFocusRevisionRef.current || 0)) {
+        adminFocusRevisionRef.current = latestFocusRevision;
+      }
+    }, [latestAdminFocusEvent?.id, latestAdminFocusEvent?.focusRevision]);
+    useEffect(() => {
+      const supervisorPresent = authRole === "admin" || hasFreshAdminPresence;
+      setIsAdminSupervisorPresent(supervisorPresent);
+      if (authRole === "operator" && isGameLive && !supervisorPresent) {
+        if (Date.now() - Number(adminMissingToastAtRef.current || 0) > 8e3) {
+          adminMissingToastAtRef.current = Date.now();
+          showToast("Admin must be active for operator to control live game.", "info");
+        }
+      }
+    }, [authRole, hasFreshAdminPresence, isGameLive]);
+    useEffect(() => {
+      const exceedsRoleCapacity = authRole === "admin" && activeAdminPresenceCount > 1 || authRole === "operator" && activeOperatorPresenceCount > 1;
+      setIsRoleCapacityExceeded(exceedsRoleCapacity);
+      if (!exceedsRoleCapacity) return;
+      if (Date.now() - Number(adminMissingToastAtRef.current || 0) > 8e3) {
+        adminMissingToastAtRef.current = Date.now();
+        showToast("Live game allows max 2 users: 1 admin and 1 operator.", "info");
+      }
+    }, [authRole, activeAdminPresenceCount, activeOperatorPresenceCount]);
+    useEffect(() => {
+      if (authRole !== "operator") return;
+      if (!isGameLive) return;
+      const enforcedFocus = sharedAdminFocus === "home" ? "away" : sharedAdminFocus === "away" ? "home" : "away";
+      if (operatorFocus !== enforcedFocus) {
+        setOperatorFocus(enforcedFocus);
+      }
+    }, [authRole, isGameLive, sharedAdminFocus, operatorFocus]);
+    useEffect(() => {
+      if (!isGameLive) return;
+      if (!(authRole === "admin" || authRole === "operator")) return;
+      const emitPresence = () => {
+        const now = Date.now();
+        if (now - Number(lastRolePresenceEmitAtRef.current || 0) < 9e3) return;
+        lastRolePresenceEmitAtRef.current = now;
+        const rolePresenceEvent = {
+          id: `${now}_${Math.random().toString(36).slice(2, 8)}`,
+          time: getWallClockTime(),
+          text: `${authRole.toUpperCase()} active`,
+          kind: "meta",
+          metaType: "rolePresence",
+          quarter: currentQuarter,
+          clockRemaining: formatSecondsAsClock(periodClockSeconds),
+          role: authRole,
+          clientId: syncClientIdRef.current,
+          hiddenFromLog: true
+        };
+        setGameLog((prev) => [rolePresenceEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+      };
+      emitPresence();
+      const timer = window.setInterval(emitPresence, 12e3);
+      return () => window.clearInterval(timer);
+    }, [isGameLive, authRole, currentQuarter, periodClockSeconds]);
+    const regulationQuarterCoverage = Array.from({ length: 4 }, (_, idx) => {
+      const quarter = idx + 1;
+      const hasEvidence = currentLiveGameLog.some((event) => {
+        if (!event || getQuarterFromEvent(event) !== quarter) return false;
+        if (event.kind === "stat" || event.kind === "sub") return true;
+        return event.kind === "meta" && (event.metaType === "quarterStart" || event.metaType === "quarterEnd");
+      });
+      return { quarter, hasEvidence };
+    });
+    const missingRegulationQuarters = regulationQuarterCoverage.filter((row) => !row.hasEvidence).map((row) => row.quarter);
+    const timeoutUsage = computeTimeoutUsage(currentLiveGameLog, currentQuarter);
+    const timeoutLimit = currentQuarter > 4 ? 1 : currentQuarter <= 2 ? 2 : 3;
+    const getTeamTimeoutUsed = (teamUsage) => {
+      if (currentQuarter > 4) return teamUsage.currentOvertime;
+      if (currentQuarter <= 2) return teamUsage.firstHalf;
+      return teamUsage.secondHalf;
+    };
+    const teamATimeoutUsed = getTeamTimeoutUsed(timeoutUsage.teamA);
+    const teamBTimeoutUsed = getTeamTimeoutUsed(timeoutUsage.teamB);
+    const periodClockLabel = formatSecondsAsClock(periodClockSeconds);
+    const hasMatchStarted = currentQuarter > 1 || currentLiveGameLog.some(
+      (event) => event?.kind === "meta" && (event.metaType === "matchStart" || event.metaType === "quarterStart" || event.metaType === "quarterEnd")
+    );
+    const hasCurrentQuarterStarted = currentLiveGameLog.some(
+      (event) => event.kind === "meta" && event.metaType === "quarterStart" && getQuarterFromEvent(event) === currentQuarter
+    );
+    const latestPeriodMetaEvent = getLatestLogEvent(
+      currentLiveGameLog,
+      (event) => event?.kind === "meta" && (event.metaType === "matchStart" || event.metaType === "quarterStart" || event.metaType === "quarterEnd")
+    );
+    const latestPeriodMetaQuarter = latestPeriodMetaEvent ? getQuarterFromEvent(latestPeriodMetaEvent) : 0;
+    const adjustedClockSecondsAfterQuarterEnd = Math.max(0, Number(periodClockSeconds || 0));
+    const awaitingPeriodStartFromLog = latestPeriodMetaEvent ? latestPeriodMetaEvent.metaType === "matchStart" || latestPeriodMetaEvent.metaType === "quarterEnd" && (adjustedClockSecondsAfterQuarterEnd <= 1 || !hasCurrentQuarterStarted || latestPeriodMetaQuarter === currentQuarter) : null;
+    const isAwaitingPeriodStart = awaitingPeriodStartFromLog === null ? awaitingPeriodStart : awaitingPeriodStartFromLog;
+    const nextPeriodToStart = hasCurrentQuarterStarted ? currentQuarter + 1 : currentQuarter;
+    const nextPeriodStartLabel = getPeriodLabel(nextPeriodToStart);
+    const isNextPeriodOvertime = nextPeriodToStart > 4;
+    const shouldBlockOvertimeStart = isNextPeriodOvertime && !isTieGame;
+    const undoLockedByQuarterEnd = isAwaitingPeriodStart || awaitingOvertimeDecision;
+    const latestPauseMetaType = getLatestActivePauseMetaType(currentLiveGameLog);
+    const latestFoulPauseEvent = getLatestLogEvent(
+      currentLiveGameLog,
+      (event) => event?.kind === "meta" && event.metaType === "foulPause"
+    );
+    const isLocallyTriggeredFoulPause = Boolean(
+      latestFoulPauseEvent?.id && localFoulPauseTriggerIdRef.current && latestFoulPauseEvent.id === localFoulPauseTriggerIdRef.current
+    );
+    const isRemoteFoulPause = latestPauseMetaType === "foulPause" && !isLocallyTriggeredFoulPause;
+    const timeoutIsActive = Boolean(isPlayPaused) && !isRemoteFoulPause;
+    const isSoloOperatorFocus = canOperateLive && effectiveOperatorFocus !== "both";
+    const isFoulPauseLockedForFocusedSide = Boolean(
+      isSoloOperatorFocus && latestPauseMetaType === "foulPause" && isLocallyTriggeredFoulPause && latestFoulPauseEvent && canOperateTeam(Boolean(latestFoulPauseEvent.isTeamA))
+    );
+    const allowAllActionsWhileManualPause = latestPauseMetaType === "manualPause";
+    const canCallOfficialsWhilePaused = latestPauseMetaType === "manualPause" || latestPauseMetaType === "foulPause";
+    const isTeamTimeoutPauseActive = timeoutIsActive && (latestPauseMetaType === "timeout" || latestPauseMetaType === "officialsTimeout");
+    const hasStartedCurrentPeriod = hasCurrentQuarterStarted && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
+    const hasStoppedCurrentPeriod = hasStartedCurrentPeriod && periodClockSeconds > 0 && !isPeriodClockRunning;
+    const derivedPeriodActionMode = !hasMatchStarted ? "startMatch" : isAwaitingPeriodStart ? shouldBlockOvertimeStart ? "endGame" : "startPeriod" : currentQuarter >= 4 && awaitingOvertimeDecision ? isTieGame ? "startOvertime" : "endGame" : hasStartedCurrentPeriod && periodClockSeconds <= 0 ? "endPeriod" : hasStartedCurrentPeriod && periodClockSeconds > 0 && isPeriodClockRunning ? "pauseGame" : hasStoppedCurrentPeriod ? "resume" : "startPeriod";
+    const safePendingPeriodActionMode = pendingPeriodActionMode === "startOvertime" && !isTieGame || pendingPeriodActionMode === "startPeriod" && shouldBlockOvertimeStart ? null : pendingPeriodActionMode;
+    const periodActionMode = safePendingPeriodActionMode || derivedPeriodActionMode;
+    const periodActionLabel = periodActionMode === "startMatch" ? "Start Match" : periodActionMode === "startPeriod" ? `Start ${nextPeriodStartLabel}` : periodActionMode === "startOvertime" ? `Start ${getPeriodLabel(currentQuarter + 1)}` : periodActionMode === "resume" ? `Resume ${getPeriodLabel(currentQuarter)}` : periodActionMode === "endGame" ? "End Game & Lock Stats" : periodActionMode === "pauseGame" ? "Pause Game" : currentQuarter <= 4 ? `End Quarter & Lock Data (${getPeriodLabel(currentQuarter)})` : `End Period & Lock Data (${getPeriodLabel(currentQuarter)})`;
+    const periodActionIsStart = periodActionLabel.startsWith("Start");
+    const periodActionIsResume = periodActionLabel.startsWith("Resume");
+    const periodActionIsEnd = periodActionLabel.startsWith("End");
+    const periodActionIsPause = periodActionMode === "pauseGame";
+    const periodActionIsPositive = periodActionIsStart || periodActionIsResume;
+    const periodActionRequiresAdminControl = periodActionIsPause || periodActionIsResume || periodActionIsEnd;
+    const canTriggerStatLogging = hasMatchStarted && isPeriodClockRunning && (!timeoutIsActive || allowAllActionsWhileManualPause) && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
+    const hasFinalizedPreviousPeriod = (isAwaitingPeriodStart || awaitingPeriodStart) && latestPeriodMetaEvent?.metaType === "quarterEnd" && !awaitingOvertimeDecision;
+    const hasQuarterEndedFromLog = latestPeriodMetaEvent?.metaType === "quarterEnd" && latestPeriodMetaQuarter === currentQuarter;
+    const hasQuarterClockExpiredFromLog = currentLiveGameLog.some(
+      (event) => event?.kind === "meta" && event?.metaType === "quarterClockExpired" && getQuarterFromEvent(event) === currentQuarter
+    );
+    const hasEndedPeriodBackfillWindow = isGameLive && !awaitingOvertimeDecision && (hasQuarterClockExpiredFromLog && Number(periodClockSeconds || 0) <= 0 || hasQuarterEndedFromLog || hasFinalizedPreviousPeriod);
+    const isBackfillMode = hasEndedPeriodBackfillWindow && !isPeriodClockRunning;
+    const canBackfillEndedPeriodStats = isBackfillMode;
+    const backfillTargetQuarter = canBackfillEndedPeriodStats && hasFinalizedPreviousPeriod ? Number(latestPeriodMetaQuarter || 0) > 0 ? Number(latestPeriodMetaQuarter || 0) : Math.max(1, Number(currentQuarter || 1) - 1) : currentQuarter;
+    const backfillClockLabel = canBackfillEndedPeriodStats ? "00:00" : formatSecondsAsClock(periodClockSeconds);
+    const liveGameplayControlDisplay = isLiveGameplayModalActive && liveGameplayControlSnapshotRef.current ? liveGameplayControlSnapshotRef.current : {
+      canTriggerStatLogging,
+      isPeriodClockRunning,
+      periodActionLabel,
+      periodActionIsStart,
+      periodActionIsResume,
+      periodActionIsEnd,
+      periodActionIsPause,
+      periodActionIsPositive
+    };
+    const displayCanTriggerStatLogging = liveGameplayControlDisplay.canTriggerStatLogging;
+    const displayIsPeriodClockRunning = liveGameplayControlDisplay.isPeriodClockRunning;
+    const displayPeriodActionLabel = liveGameplayControlDisplay.periodActionLabel;
+    const displayPeriodActionIsStart = liveGameplayControlDisplay.periodActionIsStart;
+    const displayPeriodActionIsResume = liveGameplayControlDisplay.periodActionIsResume;
+    const displayPeriodActionIsEnd = liveGameplayControlDisplay.periodActionIsEnd;
+    const displayPeriodActionIsPause = liveGameplayControlDisplay.periodActionIsPause;
+    const displayPeriodActionIsPositive = liveGameplayControlDisplay.periodActionIsPositive;
+    useEffect(() => {
+      if (isLiveGameplayModalActive) return;
+      liveGameplayControlSnapshotRef.current = {
+        canTriggerStatLogging,
+        isPeriodClockRunning,
+        periodActionLabel,
+        periodActionIsStart,
+        periodActionIsResume,
+        periodActionIsEnd,
+        periodActionIsPause,
+        periodActionIsPositive
+      };
+    }, [
+      isLiveGameplayModalActive,
+      canTriggerStatLogging,
+      isPeriodClockRunning,
+      periodActionLabel,
+      periodActionIsStart,
+      periodActionIsResume,
+      periodActionIsEnd,
+      periodActionIsPause,
+      periodActionIsPositive
+    ]);
+    useEffect(() => {
+      if (latestPauseMetaType === "foulPause") return;
+      localFoulPauseTriggerIdRef.current = "";
+    }, [latestPauseMetaType]);
+    const alwaysAllowedActionIds = /* @__PURE__ */ new Set(["pf_technical"]);
+    const stoppedClockActionIds = /* @__PURE__ */ new Set(["pts_1", "ft_miss"]);
+    const canTriggerAlwaysAction = (action) => Boolean(action && isGameLive && alwaysAllowedActionIds.has(action.id));
+    const canTriggerStoppedClockAction = (action) => Boolean(
+      action && isGameLive && stoppedClockActionIds.has(action.id) && hasMatchStarted && !displayIsPeriodClockRunning
+    );
+    const canUseActionTrigger = (action) => {
+      if (!action || !isGameLive || !canOperateLive) return false;
+      if (stoppedClockActionIds.has(action.id)) {
+        return canTriggerStoppedClockAction(action);
+      }
+      return true;
+    };
+    const isBackfillActionEnabled = Boolean(isBackfillMode && canOperateLive && isGameLive);
+    const isActionDisabled = (action) => !isBackfillActionEnabled && !canUseActionTrigger(action);
+    const getActionDisabledTitle = (action) => {
+      if (!isActionDisabled(action)) return void 0;
+      if (stoppedClockActionIds.has(action?.id) && isPeriodClockRunning) {
+        return "Free Throw and Free Throw Missed are only allowed when the clock is stopped or paused.";
+      }
+      return "Unavailable right now";
+    };
+    const isSyncClockControlDisabled = showSyncClockEditor || !canAdminControlClock;
+    const teamACanTimeout = teamATimeoutUsed < timeoutLimit;
+    const teamBCanTimeout = teamBTimeoutUsed < timeoutLimit;
+    const teamATimeoutEnabled = hasMatchStarted && !isTeamTimeoutPauseActive && teamACanTimeout;
+    const teamBTimeoutEnabled = hasMatchStarted && !isTeamTimeoutPauseActive && teamBCanTimeout;
+    const canPauseGame = hasMatchStarted && !timeoutIsActive && !isAwaitingPeriodStart && isPeriodClockRunning;
+    const canOfficialsTimeout = hasMatchStarted && (!isAwaitingPeriodStart || hasCurrentQuarterStarted) && (!timeoutIsActive || canCallOfficialsWhilePaused);
+    const canEndCurrentPeriod = hasMatchStarted && hasCurrentQuarterStarted && !isAwaitingPeriodStart && !awaitingOvertimeDecision;
+    const canFinalizeGame = hasMatchStarted && periodActionMode === "endGame";
+    const latestUndoEntry = (loggedHistory || []).find((entry) => !entry?.isUndoCompensation) || null;
+    const latestUndoLog = latestUndoEntry ? gameLog.find((log) => log.id === latestUndoEntry.id) : null;
+    const latestUndoPlayer = latestUndoEntry?.playerId ? teams.flatMap((team) => team.players || []).find((player) => player.id === latestUndoEntry.playerId) : null;
+    const undoStatLabelMap = {
+      pts: "PTS",
+      reb: "REB",
+      ast: "AST",
+      stl: "STL",
+      blk: "BLK",
+      to: "TO",
+      pf: "PF",
+      fg2m: "2FGM",
+      fg3m: "3FGM",
+      fg2m_miss: "2FG Miss",
+      fg3m_miss: "3FG Miss",
+      ftm: "FTM",
+      ft_miss: "FT Miss"
+    };
+    const undoDelta = Number(latestUndoEntry?.changeAmount || 0);
+    const undoDeltaText = `${undoDelta >= 0 ? "+" : ""}${undoDelta}`;
+    const undoStatLabel = latestUndoEntry?.statField ? undoStatLabelMap[latestUndoEntry.statField] || String(latestUndoEntry.statField).toUpperCase() : "";
+    const undoTargetSummary = undoLockedByQuarterEnd ? "" : latestUndoEntry && latestUndoPlayer ? `Undo target: #${latestUndoPlayer.number || "-"} ${latestUndoPlayer.name} ${undoDeltaText} ${undoStatLabel}` : "";
+    const undoTargetBlockedReason = undoLockedByQuarterEnd ? "locked after period end" : isProtectedLogEntry(latestUndoLog, finalizedPeriods) ? String(latestUndoLog?.lockReason || "").includes("checkpoint10") ? "checkpoint lock" : "period-end lock" : "";
+    const canUndoLatest = Boolean(latestUndoEntry) && canUseLiveControls && !undoLockedByQuarterEnd && !isProtectedLogEntry(latestUndoLog, finalizedPeriods);
+    const teamAFoulsForDisplay = currentQuarter <= 4 ? Number(liveQuarterStats.find((row) => row.quarter === currentQuarter)?.teamA?.pf || 0) : liveQuarterStats.filter((row) => row.quarter >= 4 && row.quarter <= currentQuarter).reduce((sum, row) => sum + Number(row.teamA?.pf || 0), 0);
+    const teamBFoulsForDisplay = currentQuarter <= 4 ? Number(liveQuarterStats.find((row) => row.quarter === currentQuarter)?.teamB?.pf || 0) : liveQuarterStats.filter((row) => row.quarter >= 4 && row.quarter <= currentQuarter).reduce((sum, row) => sum + Number(row.teamB?.pf || 0), 0);
+    const buildQuarterFoulMapForTeam = (isTeamAValue) => {
+      return (currentLiveGameLog || []).reduce((acc, event) => {
+        if (!event || event.kind !== "stat" || event.statField !== "pf") return acc;
+        if (Boolean(event.isTeamA) !== Boolean(isTeamAValue)) return acc;
+        const playerId = event.playerId;
+        const quarter = Number.parseInt(event.quarter, 10);
+        const delta = Number(event.changeAmount || 0);
+        if (!playerId || !Number.isFinite(quarter) || quarter <= 0 || !delta) return acc;
+        const playerQuarterMap = acc[playerId] || {};
+        const nextQuarterValue = Math.max(0, Number(playerQuarterMap[quarter] || 0) + delta);
+        acc[playerId] = {
+          ...playerQuarterMap,
+          [quarter]: nextQuarterValue
+        };
+        return acc;
+      }, {});
+    };
+    const homeQuarterFoulMap = buildQuarterFoulMapForTeam(true);
+    const awayQuarterFoulMap = buildQuarterFoulMapForTeam(false);
+    const remainingRegulationPeriods = currentQuarter > 4 ? 1 : Math.max(1, 4 - currentQuarter);
+    const homeFoulTroublePlayers = (teams.find((t) => t.id === teamAId)?.players || []).map((player) => ({
+      ...player,
+      fouls: Number(liveStats[player.id]?.pf || 0),
+      quarterFouls: homeQuarterFoulMap[player.id] || {},
+      peakQuarterFouls: Object.values(homeQuarterFoulMap[player.id] || {}).reduce((max, value) => Math.max(max, Number(value || 0)), 0)
+    })).map((player) => {
+      const foulsToLimit = Math.max(0, 5 - Number(player.fouls || 0));
+      const allowedPerRemainingPeriod = foulsToLimit / remainingRegulationPeriods;
+      const isHighRiskFoulPace = allowedPerRemainingPeriod <= 1;
+      const isThreeFoulConcern = Number(player.fouls || 0) >= 3;
+      const isFoulTrouble = Number(player.fouls || 0) >= 5 || isHighRiskFoulPace || isThreeFoulConcern;
+      return {
+        ...player,
+        foulsToLimit,
+        allowedPerRemainingPeriod,
+        isHighRiskFoulPace,
+        isThreeFoulConcern,
+        isFoulTrouble
+      };
+    }).filter((player) => player.isFoulTrouble).sort((a, b) => Number(a.fouls >= 5) - Number(b.fouls >= 5) || a.allowedPerRemainingPeriod - b.allowedPerRemainingPeriod || b.fouls - a.fouls || String(a.number || "").localeCompare(String(b.number || "")));
+    const awayFoulTroublePlayers = (teams.find((t) => t.id === teamBId)?.players || []).map((player) => ({
+      ...player,
+      fouls: Number(liveStats[player.id]?.pf || 0),
+      quarterFouls: awayQuarterFoulMap[player.id] || {},
+      peakQuarterFouls: Object.values(awayQuarterFoulMap[player.id] || {}).reduce((max, value) => Math.max(max, Number(value || 0)), 0)
+    })).map((player) => {
+      const foulsToLimit = Math.max(0, 5 - Number(player.fouls || 0));
+      const allowedPerRemainingPeriod = foulsToLimit / remainingRegulationPeriods;
+      const isHighRiskFoulPace = allowedPerRemainingPeriod <= 1;
+      const isThreeFoulConcern = Number(player.fouls || 0) >= 3;
+      const isFoulTrouble = Number(player.fouls || 0) >= 5 || isHighRiskFoulPace || isThreeFoulConcern;
+      return {
+        ...player,
+        foulsToLimit,
+        allowedPerRemainingPeriod,
+        isHighRiskFoulPace,
+        isThreeFoulConcern,
+        isFoulTrouble
+      };
+    }).filter((player) => player.isFoulTrouble).sort((a, b) => Number(a.fouls >= 5) - Number(b.fouls >= 5) || a.allowedPerRemainingPeriod - b.allowedPerRemainingPeriod || b.fouls - a.fouls || String(a.number || "").localeCompare(String(b.number || "")));
+    const foulBarMax = 5;
+    const foulPeriodLabel = currentQuarter <= 4 ? getPeriodLabel(currentQuarter) : `${getPeriodLabel(4)}+`;
+    const timeoutScopeLabel = currentQuarter > 4 ? getPeriodLabel(currentQuarter) : "Reg";
+    const homeCanClearOnCourt = isGameLive && teamALineup.length > 0;
+    const awayCanClearOnCourt = isGameLive && teamBLineup.length > 0;
+    const homeCanAddOnCourt = isGameLive && teamALineup.length < 5 && hasAvailableBenchPlayer(true);
+    const awayCanAddOnCourt = isGameLive && teamBLineup.length < 5 && hasAvailableBenchPlayer(false);
+    const handlePeriodClockExpired = () => {
+      markLocalSessionUpdated();
+      setPeriodClockSeconds(0);
+      setIsPeriodClockRunning(false);
+      const periodLabel = getPeriodLabel(currentQuarter);
+      setGameLog((prev) => {
+        const alreadyLoggedForQuarter = (prev || []).some(
+          (event) => event?.kind === "meta" && event?.metaType === "quarterClockExpired" && getQuarterFromEvent(event) === currentQuarter
+        );
+        if (alreadyLoggedForQuarter) return prev;
+        const quarterClockExpiredEvent = {
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          time: getWallClockTime(),
+          text: `${periodLabel} reached 00:00`,
+          kind: "meta",
+          metaType: "quarterClockExpired",
+          quarter: currentQuarter,
+          clockRemaining: "00:00",
+          hiddenFromLog: true
+        };
+        return [quarterClockExpiredEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES);
+      });
+      showToast(`${periodLabel} reached 00:00. Press End ${periodLabel} to finalize period stats.`, "info");
+    };
+    useEffect(() => {
+      if (!isGameLive) return;
+      if (suppressPeriodAutoStopRef.current) return;
+      const shouldForceZeroClock = hasQuarterClockExpiredFromLog || awaitingOvertimeDecision || isAwaitingPeriodStart && hasCurrentQuarterStarted;
+      const hasInactivePeriodState = !hasMatchStarted || isAwaitingPeriodStart || awaitingOvertimeDecision || hasQuarterClockExpiredFromLog;
+      if (!hasInactivePeriodState) return;
+      if (isPlayPaused) {
+        setIsPlayPaused(false);
+      }
+      if (isPeriodClockRunning) {
+        setIsPeriodClockRunning(false);
+      }
+      if (shouldForceZeroClock && periodClockSeconds !== 0) {
+        setPeriodClockSeconds(0);
+      }
+    }, [isGameLive, hasMatchStarted, hasCurrentQuarterStarted, isAwaitingPeriodStart, awaitingOvertimeDecision, hasQuarterClockExpiredFromLog, isPeriodClockRunning, periodClockSeconds, isPlayPaused]);
+    useEffect(() => {
+      if (!isGameLive) return;
+      if (suppressPeriodAutoStopRef.current) return;
+      if (suppressTimeoutAutoStopRef.current) {
+        suppressTimeoutAutoStopRef.current = false;
+        return;
+      }
+      if (!timeoutIsActive) return;
+      if (!isPeriodClockRunning) return;
+      setIsPeriodClockRunning(false);
+    }, [isGameLive, timeoutIsActive, isPeriodClockRunning]);
+    useEffect(() => {
+      if (!isGameLive) return;
+      if (Date.now() >= Number(localResumeLockUntilRef.current || 0)) return;
+      if (timeoutIsActive) return;
+      if (hasQuarterClockExpiredFromLog) return;
+      if (isAwaitingPeriodStart || awaitingOvertimeDecision) return;
+      if (Number(periodClockSeconds) <= 0) return;
+      if (isPeriodClockRunning) return;
+      suppressPeriodAutoStopRef.current = true;
+      setIsPlayPaused(false);
+      suppressTimeoutAutoStopRef.current = true;
+      setIsPeriodClockRunning(true);
+    }, [
+      isGameLive,
+      timeoutIsActive,
+      hasQuarterClockExpiredFromLog,
+      isAwaitingPeriodStart,
+      awaitingOvertimeDecision,
+      periodClockSeconds,
+      isPeriodClockRunning
+    ]);
+    useEffect(() => {
+      if (!isGameLive) return;
+      const latestClockControlEvent = getLatestLogEvent(
+        currentLiveGameLog,
+        (event) => event?.kind === "meta" && [
+          "matchStart",
+          "quarterStart",
+          "timeout",
+          "officialsTimeout",
+          "manualPause",
+          "foulPause",
+          "timeoutResume",
+          "playResume",
+          "quarterClockExpired",
+          "quarterEnd"
+        ].includes(event.metaType)
+      );
+      if (!latestClockControlEvent?.metaType) return;
+      const timelineClockSeconds = parseClockInputToSeconds(latestClockControlEvent.clockRemaining);
+      const latestClockEventId = String(latestClockControlEvent.id || "");
+      const isNewClockControlEvent = latestClockEventId && latestClockEventId !== String(lastClockControlReconcileEventIdRef.current || "");
+      const isStartBoundaryEvent = ["matchStart", "quarterStart"].includes(latestClockControlEvent.metaType);
+      if (isNewClockControlEvent) {
+        lastClockControlReconcileEventIdRef.current = latestClockEventId;
+      }
+      if (isNewClockControlEvent && !isStartBoundaryEvent && timelineClockSeconds !== null && timelineClockSeconds !== Number(periodClockSeconds || 0)) {
+        setPeriodClockSeconds(timelineClockSeconds);
+      }
+      if (["quarterClockExpired", "quarterEnd"].includes(latestClockControlEvent.metaType)) {
+        if (periodClockSeconds !== 0) {
+          setPeriodClockSeconds(0);
+        }
+        if (isPeriodClockRunning) {
+          setIsPeriodClockRunning(false);
+        }
+        return;
+      }
+      if (["matchStart", "quarterStart"].includes(latestClockControlEvent.metaType)) {
+        if (!isNewClockControlEvent) {
+          return;
+        }
+        if (isPlayPaused) {
+          setIsPlayPaused(false);
+        }
+        if (!isAwaitingPeriodStart && !awaitingOvertimeDecision && Number(periodClockSeconds || 0) > 0 && !isPeriodClockRunning) {
+          suppressPeriodAutoStopRef.current = true;
+          suppressTimeoutAutoStopRef.current = true;
+          setIsPeriodClockRunning(true);
+        }
+        return;
+      }
+      const isPauseTimelineEvent = [
+        "timeout",
+        "officialsTimeout",
+        "manualPause",
+        "foulPause"
+      ].includes(latestClockControlEvent.metaType);
+      if (isPauseTimelineEvent) {
+        if (!isPlayPaused) {
+          setIsPlayPaused(true);
+        }
+        if (isPeriodClockRunning) {
+          setIsPeriodClockRunning(false);
+        }
+        return;
+      }
+      if (hasQuarterClockExpiredFromLog) return;
+      if (isAwaitingPeriodStart || awaitingOvertimeDecision) return;
+      const hasTimeRemaining = Number(periodClockSeconds || 0) > 0;
+      if (isPlayPaused) {
+        setIsPlayPaused(false);
+      }
+      if (hasTimeRemaining && !isPeriodClockRunning) {
+        suppressPeriodAutoStopRef.current = true;
+        suppressTimeoutAutoStopRef.current = true;
+        setIsPeriodClockRunning(true);
+      }
+    }, [
+      isGameLive,
+      currentLiveGameLog,
+      hasQuarterClockExpiredFromLog,
+      isAwaitingPeriodStart,
+      awaitingOvertimeDecision,
+      periodClockSeconds,
+      isPlayPaused,
+      isPeriodClockRunning
+    ]);
+    useEffect(() => {
+      if (!isGameLive || !isPeriodClockRunning) return;
+      if (suppressPeriodAutoStopRef.current) {
+        suppressPeriodAutoStopRef.current = false;
+      }
+      if (pendingPeriodActionMode) {
+        const pendingIsStartTransition = pendingPeriodActionMode === "pauseGame";
+        const startTransitionSettled = !isAwaitingPeriodStart && hasCurrentQuarterStarted;
+        if (!pendingIsStartTransition || startTransitionSettled) {
+          setPendingPeriodActionMode(null);
+        }
+      }
+      const timerId = window.setInterval(() => {
+        setPeriodClockSeconds((prev) => {
+          if (prev <= 1) {
+            handlePeriodClockExpired();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1e3);
+      return () => window.clearInterval(timerId);
+    }, [
+      isGameLive,
+      isPeriodClockRunning,
+      currentQuarter,
+      pendingPeriodActionMode,
+      isAwaitingPeriodStart,
+      hasCurrentQuarterStarted
+    ]);
+    useEffect(() => {
+      if (!isGameLive) return;
+      const recomputed = deriveTotalPlayerSecondsFromTimeline(gameLog, currentQuarter, periodClockSeconds);
+      setLivePlayerSeconds((prev) => {
+        const prevKeys = Object.keys(prev || {});
+        const nextKeys = Object.keys(recomputed || {});
+        if (prevKeys.length !== nextKeys.length) return recomputed;
+        const changed = nextKeys.some((playerId) => Math.round(Number(prev?.[playerId] || 0)) !== Math.round(Number(recomputed?.[playerId] || 0)));
+        return changed ? recomputed : prev;
+      });
+    }, [isGameLive, gameLog, currentQuarter, periodClockSeconds]);
+    useEffect(() => {
+      if (isGameLive) return;
+      if (!pendingPeriodActionMode) return;
+      setPendingPeriodActionMode(null);
+    }, [isGameLive, pendingPeriodActionMode]);
+    useEffect(() => {
+      if (!canFinalizeGame) return;
+      setShowExtraGameControls(true);
+    }, [canFinalizeGame]);
+    useEffect(() => {
+      if (isEditingClockInput) return;
+      setManualClockInput(formatSecondsAsClock(periodClockSeconds));
+    }, [periodClockSeconds, isEditingClockInput]);
+    useEffect(() => {
+      if (!selectedHistoryGameId) {
+        setHistoryVideoInput("");
+        return;
+      }
+      setHistoryVideoInput(selectedHistoryGame?.youtubeUrl || "");
+    }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.youtubeUrl : ""]);
+    useEffect(() => {
+      setGameMetaSeason(selectedHistoryGame?.season || CURRENT_SEASON);
+      setGameMetaSeriesId(selectedHistoryGame?.seriesId || "");
+    }, [selectedHistoryGameId]);
+    useEffect(() => {
+      if (!selectedHistoryGameId) {
+        setHistoryWriteupInput("");
+        return;
+      }
+      setHistoryWriteupInput(selectedHistoryGame?.gameWriteup || "");
+    }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.gameWriteup : ""]);
+    useEffect(() => {
+      const playerId = selectedRosterPlayer?.playerId;
+      if (!playerId) {
+        setSelectedPlayerGameStats(null);
+        return;
+      }
+      let cancelled = false;
+      setSelectedPlayerGameStats(null);
+      apiRequest(`/api/players/${encodeURIComponent(playerId)}/game-stats`).then((data) => {
+        if (!cancelled) setSelectedPlayerGameStats(data.statsByGame || {});
+      }).catch(() => {
+        if (!cancelled) setSelectedPlayerGameStats({});
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [selectedRosterPlayer?.playerId]);
+    const AUTO_GENERATE_POTG_WRITEUP = false;
+    useEffect(() => {
+      if (!AUTO_GENERATE_POTG_WRITEUP) return;
+      if (activeTab !== "history" || historyDetailTab !== "potg") return;
+      if (!selectedHistoryGame) return;
+      if (String(selectedHistoryGame.potgWriteup || "").trim()) return;
+      if (generatingPotgWriteupGameId === selectedHistoryGame.id) return;
+      if (attemptedAutoPotgWriteupRef.current.has(selectedHistoryGame.id)) return;
+      const teamAObj = teams.find((team) => team.id === selectedHistoryGame.teamAId);
+      const teamBObj = teams.find((team) => team.id === selectedHistoryGame.teamBId);
+      const playerOfTheGame = getPlayerOfTheGame(selectedHistoryGame, teamAObj, teamBObj);
+      if (!playerOfTheGame) return;
+      attemptedAutoPotgWriteupRef.current.add(selectedHistoryGame.id);
+      handleGeneratePotgWriteup({
+        game: selectedHistoryGame,
+        playerOfTheGame,
+        auto: true
+      });
+    }, [activeTab, historyDetailTab, selectedHistoryGame, teams, generatingPotgWriteupGameId]);
+    useEffect(() => {
+      setPlayerArtSourceDataUrl("");
+      setPlayerArtOutputDataUrl("");
+      setPlayerArtDirection("");
+    }, [selectedHistoryGameId]);
+    useEffect(() => {
+      const isAnyModalOpen = showNewTeamModal || showNewPlayerModal || showSubstitutionModal || showAddFromBenchModal || showLoggingModal || isAdvancedPlayerModalOpen || isConfirmDialogOpen || isFoulAlertOpen || showAuthModal || isLiveLogEditModalOpen;
+      if (isAnyModalOpen) {
+        if (!bodyScrollLockedRef.current) {
+          bodyScrollLockYRef.current = window.scrollY || window.pageYOffset || 0;
+          bodyScrollLockedRef.current = true;
+        }
+        document.body.style.overflow = "hidden";
+        document.body.style.position = "fixed";
+        document.body.style.width = "100%";
+        document.body.style.top = `-${bodyScrollLockYRef.current}px`;
+        document.body.style.left = "0";
+        document.body.style.right = "0";
+      } else {
+        document.body.style.overflow = "";
+        document.body.style.position = "";
+        document.body.style.width = "";
+        document.body.style.top = "";
+        document.body.style.left = "";
+        document.body.style.right = "";
+        if (bodyScrollLockedRef.current) {
+          window.scrollTo(0, bodyScrollLockYRef.current || 0);
+          bodyScrollLockedRef.current = false;
+        }
+      }
+      return () => {
+        document.body.style.overflow = "";
+        document.body.style.position = "";
+        document.body.style.width = "";
+        document.body.style.top = "";
+        document.body.style.left = "";
+        document.body.style.right = "";
+        if (bodyScrollLockedRef.current) {
+          window.scrollTo(0, bodyScrollLockYRef.current || 0);
+          bodyScrollLockedRef.current = false;
+        }
+      };
+    }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, showLoggingModal, isAdvancedPlayerModalOpen, isConfirmDialogOpen, isFoulAlertOpen, showAuthModal, isLiveLogEditModalOpen]);
+    const handleImportCSV = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.readAsText(file);
+      reader.onload = (event) => {
+        try {
+          const text = event.target.result;
+          const lines = text.split("\n").map(
+            (line) => line.split(",").map((cell) => cell.trim().replace(/^["']|["']$/g, ""))
+          ).filter((row) => row.length > 1 && row.some((cell) => cell !== ""));
+          if (lines.length < 2) {
+            showToast("CSV file is empty or invalid.", "error");
+            return;
+          }
+          const headers = lines[0].map((h) => h.toLowerCase().trim().replace(/^["']|["']$/g, ""));
+          const teamIndex = headers.findIndex((h) => h.includes("team"));
+          const nameIndex = headers.findIndex(
+            (h) => h.includes("player") || h.includes("athlete") || h.includes("member") || h.includes("name") && !h.includes("team")
+          );
+          const numberIndex = headers.findIndex((h) => h.includes("number") || h.includes("jersey") || h.includes("no") || h === "#");
+          if (teamIndex === -1 || nameIndex === -1) {
+            showToast("CSV must have 'Team' and 'Player Name' columns.", "error");
+            return;
+          }
+          const teamMap = {};
+          const colors = ["#e2e8f0", "#3b82f6", "#475569", "#991b1b", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
+          let colorIdx = 0;
+          for (let i = 1; i < lines.length; i++) {
+            const row = lines[i];
+            if (row.length < Math.max(teamIndex, nameIndex) + 1 || !row[teamIndex] || !row[nameIndex]) continue;
+            const teamName = row[teamIndex];
+            const playerName = row[nameIndex];
+            const playerNo = numberIndex !== -1 && row[numberIndex] ? row[numberIndex] : "0";
+            if (!teamMap[teamName]) {
+              teamMap[teamName] = {
+                id: `team_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                name: teamName,
+                color: colors[colorIdx % colors.length],
+                players: []
+              };
+              colorIdx++;
+            }
+            teamMap[teamName].players.push({
+              id: `player_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+              name: playerName,
+              number: playerNo,
+              positions: [],
+              gamesPlayed: 0,
+              totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+            });
+          }
+          const parsedTeams = Object.values(teamMap);
+          if (parsedTeams.length === 0) {
+            showToast("No valid rosters found in CSV.", "error");
+            return;
+          }
+          saveTeamState(parsedTeams);
+          showToast(`Imported ${parsedTeams.length} teams from CSV successfully!`, "success");
+        } catch (err) {
+          showToast("Failed to parse CSV file.", "error");
+        }
+      };
+    };
+    useEffect(() => {
+      const loadState = async () => {
+        const cachedState = readCachedAppState();
+        const isSharedGameUrl = (() => {
+          try {
+            const pathParts = String(window.location.pathname || "").split("/").filter(Boolean);
+            if (pathParts[0] === "history" && pathParts[1] === "game" && pathParts[2]) return true;
+            const params = new URL(window.location.href).searchParams;
+            return params.get("view") === "game" && Boolean(params.get("gameId"));
+          } catch {
+            return false;
+          }
+        })();
+        if (cachedState?.dirty && !isSharedGameUrl) {
+          const cachedGames = Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : [];
+          setTeams(normalizeTeamsForStorage(cachedState.teams));
+          setGames(cachedGames);
+          setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
+        }
+        try {
+          const pendingRaw = localStorage.getItem(PENDING_COMPLETED_GAME_KEY);
+          if (pendingRaw) {
+            const pendingGame = JSON.parse(pendingRaw);
+            if (pendingGame?.id) {
+              await apiRequest(`/api/games/${encodeURIComponent(String(pendingGame.id))}`, {
+                method: "PUT",
+                body: JSON.stringify({ game: pendingGame })
+              });
+              localStorage.removeItem(PENDING_COMPLETED_GAME_KEY);
+            }
+          }
+        } catch (_) {
+        }
+        try {
+          const bootstrap = await apiRequest("/api/bootstrap", {
+            cache: "no-store"
+          });
+          const loadedTeams = Array.isArray(bootstrap?.state?.teams) ? bootstrap.state.teams : [];
+          const loadedGames = Array.isArray(bootstrap?.state?.games) ? bootstrap.state.games : [];
+          const loadedActions = Array.isArray(bootstrap?.statActions) ? bootstrap.statActions : [];
+          const normalizedTeams = normalizeTeamsForStorage(loadedTeams);
+          const normalizedGames = loadedGames.map((game) => ({
+            ...game,
+            underReview: Boolean(game?.underReview)
+          })).sort((a, b) => b.id.localeCompare(a.id));
+          setTeams(normalizedTeams);
+          setGames(normalizedGames);
+          setStatActions(loadedActions);
+          writeCachedAppState(normalizedTeams, normalizedGames, loadedActions, { dirty: false });
+          gamesBootstrappedRef.current = true;
+        } catch (e) {
+          if (cachedState) {
+            const cachedGames = Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : [];
+            setTeams(normalizeTeamsForStorage(cachedState.teams));
+            setGames(cachedGames);
+            setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
+            gamesBootstrappedRef.current = true;
+            return;
+          }
+          console.error("Failed to load persisted state, using defaults.", e);
+          setTeams([]);
+          setGames([]);
+          setStatActions([]);
+          gamesBootstrappedRef.current = true;
+        }
+      };
+      loadState();
+    }, []);
+    useEffect(() => {
+      const hydrateSession = (session) => {
+        if (!session) return;
+        applyRemoteLiveSession(session);
+      };
+      const readBootstrapLocalCachedSession = () => {
+        try {
+          const activeSession = localStorage.getItem("active_live_session");
+          if (!activeSession) return null;
+          const parsedSession = JSON.parse(activeSession);
+          if (!parsedSession || typeof parsedSession !== "object") return null;
+          return parsedSession;
+        } catch (e) {
+          return null;
+        }
+      };
+      const bootstrapLocalCachedSession = readBootstrapLocalCachedSession();
+      const bootstrapLocalSessionId = getLiveSessionIdentity(bootstrapLocalCachedSession);
+      try {
+        const savedPending = localStorage.getItem(LIVE_EVENTS_QUEUE_KEY);
+        const parsedPending = savedPending ? JSON.parse(savedPending) : [];
+        const normalizedPending = Array.isArray(parsedPending) ? parsedPending : [];
+        pendingLiveEventsRef.current = bootstrapLocalSessionId ? normalizedPending.filter((event) => String(event?.sessionInstanceId || "").trim() === bootstrapLocalSessionId) : [];
+        persistPendingLiveEvents();
+      } catch (e) {
+        pendingLiveEventsRef.current = [];
+      }
+      try {
+        const savedSessionSync = localStorage.getItem(ACTIVE_SESSION_SYNC_KEY);
+        const parsedSessionSync = savedSessionSync ? JSON.parse(savedSessionSync) : null;
+        const normalizedSessionSync = parsedSessionSync && typeof parsedSessionSync === "object" ? parsedSessionSync : null;
+        if (normalizedSessionSync?.mode === "put") {
+          const queuedSessionId = getLiveSessionIdentity(normalizedSessionSync?.session);
+          pendingActiveSessionSyncRef.current = queuedSessionId && queuedSessionId === bootstrapLocalSessionId ? normalizedSessionSync : null;
+        } else if (normalizedSessionSync?.mode === "delete") {
+          const queuedDeleteSessionId = String(normalizedSessionSync?.discardedSessionInstanceId || "").trim();
+          pendingActiveSessionSyncRef.current = queuedDeleteSessionId && bootstrapLocalSessionId && queuedDeleteSessionId === bootstrapLocalSessionId ? normalizedSessionSync : null;
+        } else {
+          pendingActiveSessionSyncRef.current = normalizedSessionSync;
+        }
+        persistPendingActiveSessionSync();
+      } catch (e) {
+        pendingActiveSessionSyncRef.current = null;
+      }
+      try {
+        const savedSeq = Number.parseInt(localStorage.getItem(LIVE_EVENTS_LAST_SEQ_KEY) || "0", 10) || 0;
+        lastLiveSeqRef.current = savedSeq;
+      } catch (e) {
+        lastLiveSeqRef.current = 0;
+      }
+      try {
+        const savedTombstone = localStorage.getItem(DISCARDED_LIVE_SESSION_TOMBSTONE_KEY);
+        const parsedTombstone = savedTombstone ? JSON.parse(savedTombstone) : null;
+        const safeSessionId = String(parsedTombstone?.sessionInstanceId || "").trim();
+        const safeDiscardedAt = Number.parseInt(parsedTombstone?.discardedAt, 10) || 0;
+        discardedLiveSessionTombstoneRef.current = {
+          sessionInstanceId: safeSessionId,
+          discardedAt: safeDiscardedAt
+        };
+      } catch (e) {
+        discardedLiveSessionTombstoneRef.current = { sessionInstanceId: "", discardedAt: 0 };
+      }
+      const loadActiveSession = async () => {
+        const purgeStaleLocalSessionArtifacts = () => {
+          localStorage.removeItem("active_live_session");
+          localStorage.removeItem(LIVE_EVENTS_QUEUE_KEY);
+          localStorage.removeItem(ACTIVE_SESSION_SYNC_KEY);
+          localStorage.removeItem(LIVE_EVENTS_LAST_SEQ_KEY);
+          pendingActiveSessionSyncRef.current = null;
+          persistPendingActiveSessionSync();
+          pendingLiveEventsRef.current = [];
+          persistPendingLiveEvents();
+        };
+        const readLocalCachedSession = () => {
+          try {
+            const raw = localStorage.getItem("active_live_session");
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : null;
+          } catch (e) {
+            return null;
+          }
+        };
+        const localCachedSession = readLocalCachedSession();
+        const localCachedSessionId = getLiveSessionIdentity(localCachedSession);
+        const isLocalSessionTombstoned = () => {
+          if (!localCachedSessionId) return false;
+          const tombstone = discardedLiveSessionTombstoneRef.current || {};
+          const tid = String(tombstone.sessionInstanceId || "").trim();
+          const tts = Number(tombstone.discardedAt || 0);
+          if (!tid || tts <= 0 || tid !== localCachedSessionId) return false;
+          const touched = getLiveSessionLastTouchedAt(localCachedSession);
+          return touched <= 0 || touched <= tts;
+        };
+        const canHydrateLocalCachedSession = () => Boolean(localCachedSession) && Boolean(localCachedSessionId) && !isLocalSessionTombstoned() && !isLiveSessionStale(localCachedSession) && !isLiveSessionOlderThanLatestEndedGame(localCachedSession, latestEndedGameTimestampRef.current);
+        const isRecentLocalCachedSession = () => {
+          const touched = getLiveSessionLastTouchedAt(localCachedSession);
+          if (touched <= 0) return false;
+          return Date.now() - touched <= 2 * 60 * 1e3;
+        };
+        let hydratedFromRemote = false;
+        let serverReachable = false;
+        try {
+          const payload = await apiRequest("/api/active-session");
+          serverReachable = true;
+          if (payload?.session) {
+            const remoteSessionId = getLiveSessionIdentity(payload.session);
+            const tombstone = discardedLiveSessionTombstoneRef.current || {};
+            const tombstoneId = String(tombstone.sessionInstanceId || "").trim();
+            const tombstoneTs = Number(tombstone.discardedAt || 0);
+            const remoteLastTouched = getLiveSessionLastTouchedAt(payload.session);
+            const isRemoteTombstoned = tombstoneId && tombstoneTs > 0 && remoteSessionId === tombstoneId && (remoteLastTouched <= 0 || remoteLastTouched <= tombstoneTs);
+            if (isRemoteTombstoned) {
+              purgeStaleLocalSessionArtifacts();
+            } else {
+              hydrateSession(payload.session);
+              hydratedFromRemote = true;
+            }
+          } else {
+            purgeStaleLocalSessionArtifacts();
+          }
+        } catch (e) {
+        }
+        if (!serverReachable && !hydratedFromRemote) {
+          if (canHydrateLocalCachedSession()) {
+            hydrateSession(localCachedSession);
+          } else {
+            if (localCachedSessionId) {
+              markDiscardedSessionTombstone(localCachedSessionId, Date.now());
+            }
+            purgeStaleLocalSessionArtifacts();
+          }
+        }
+        const runSyncWarmup = () => {
+          fetchMissingLiveEvents();
+          flushPendingLiveEvents();
+          flushPendingActiveSessionSync();
+        };
+        if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+          window.requestIdleCallback(() => runSyncWarmup(), { timeout: 1500 });
+        } else {
+          setTimeout(runSyncWarmup, 0);
+        }
+      };
+      loadActiveSession();
+    }, []);
+    useEffect(() => {
+      if (!isGameLive) return;
+      if (!latestPeriodMetaEvent || latestPeriodMetaEvent.metaType !== "quarterEnd") return;
+      const quarterEndId = String(latestPeriodMetaEvent.id || "");
+      if (!quarterEndId) return;
+      if (lastPersistedQuarterEndIdRef.current === quarterEndId) return;
+      lastPersistedQuarterEndIdRef.current = quarterEndId;
+      const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
+      const sessionUpdatedAt = markLocalSessionUpdated();
+      const clockControlRevision = Math.max(
+        Number(clockControlRevisionRef.current || 0),
+        getClockControlRevisionFromLogs(gameLog, 0)
+      );
+      clockControlRevisionRef.current = clockControlRevision;
+      const persistedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now());
+      const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+      sessionRevisionRef.current = nextSessionRevision;
+      const checkpointSession = {
+        teamAId,
+        teamBId,
+        teamAScore,
+        teamBScore,
+        liveSessionInstanceId,
+        sessionCreatedAt: persistedSessionCreatedAt,
+        sessionRevision: nextSessionRevision,
+        clockControlRevision,
+        currentQuarter,
+        periodClockSeconds,
+        isPeriodClockRunning,
+        isPlayPaused,
+        livePlayerSeconds,
+        teamALineup,
+        teamABench,
+        teamBLineup,
+        teamBBench,
+        lineupRevision: persistedLineupRevision,
+        liveStats,
+        liveGameSnapshot,
+        periodSnapshots,
+        gameLog,
+        loggedHistory,
+        playedPlayers,
+        dnpPlayers,
+        dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+        awaitingPeriodStart,
+        sessionUpdatedAt
+      };
+      queueActiveSessionSync("put", checkpointSession);
+      flushPendingLiveEvents();
+      flushPendingActiveSessionSync();
+    }, [
+      isGameLive,
+      latestPeriodMetaEvent,
+      teamAId,
+      teamBId,
+      teamAScore,
+      teamBScore,
+      liveSessionInstanceId,
+      liveSessionCreatedAt,
+      currentQuarter,
+      periodClockSeconds,
+      isPeriodClockRunning,
+      isPlayPaused,
+      livePlayerSeconds,
+      teamALineup,
+      teamABench,
+      teamBLineup,
+      teamBBench,
+      lineupRevision,
+      liveStats,
+      liveGameSnapshot,
+      periodSnapshots,
+      gameLog,
+      loggedHistory,
+      playedPlayers,
+      dnpPlayers,
+      awaitingPeriodStart
+    ]);
+    useEffect(() => {
+      latestEndedGameTimestampRef.current = getLatestEndedGameTimestamp(games);
+    }, [games]);
+    useEffect(() => {
+      if (activeTab !== "live") return;
+      const socketProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socketHost = window.location.host || "localhost:3000";
+      const connectSocket = () => {
+        if (socketManualCloseRef.current) return;
+        let socket = null;
+        try {
+          socket = new WebSocket(`${socketProtocol}//${socketHost}`);
+        } catch (error) {
+          scheduleReconnect();
+          return;
+        }
+        syncSocketRef.current = socket;
+        socket.addEventListener("message", (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload?.type === "session_cleared") {
+              if (payload.sourceClientId && payload.sourceClientId === syncClientIdRef.current) {
+                return;
+              }
+              const clearedSessionId = String(payload.sessionInstanceId || "").trim();
+              const localSessionId = String(liveSessionInstanceIdRef.current || "").trim();
+              if (localSessionId && clearedSessionId && localSessionId !== clearedSessionId) {
+                pullActiveSessionSnapshot();
+                return;
+              }
+              clearRemoteLiveSession();
+              return;
+            }
+            if (payload?.type === "live_event") {
+              if (payload.sourceClientId && payload.sourceClientId === syncClientIdRef.current) {
+                return;
+              }
+              applyIncomingLiveEvent(payload);
+              return;
+            }
+            if (payload?.type === "sync") {
+              if (payload.sourceClientId && payload.sourceClientId === syncClientIdRef.current) {
+                return;
+              }
+              if (payload.statActions) {
+                setStatActions(Array.isArray(payload.statActions) ? payload.statActions : []);
+              }
+              if (payload.state) {
+                const normalizedRemoteTeams = normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []);
+                setGames((prevGames) => {
+                  const locallyDeletedGameIds = locallyDeletedGameIdsRef.current || /* @__PURE__ */ new Set();
+                  const remoteGames = Array.isArray(payload.state.games) ? payload.state.games.filter((game) => !locallyDeletedGameIds.has(String(game?.id || ""))).sort((a, b) => b.id.localeCompare(a.id)) : [];
+                  const remoteGameIds = new Set(remoteGames.map((g) => String(g?.id || "")));
+                  if (locallyDeletedGameIds.size > 0) {
+                    Array.from(locallyDeletedGameIds).forEach((deletedGameId) => {
+                      if (!remoteGameIds.has(String(deletedGameId || ""))) {
+                        locallyDeletedGameIds.delete(String(deletedGameId || ""));
+                      }
+                    });
+                  }
+                  const pendingLocalGames = (prevGames || []).filter((g) => {
+                    const localGameId = String(g?.id || "");
+                    if (!localGameId) return false;
+                    if (remoteGameIds.has(localGameId)) return false;
+                    if (locallyDeletedGameIds.has(localGameId)) return false;
+                    return true;
+                  });
+                  const merged = pendingLocalGames.length ? [...pendingLocalGames, ...remoteGames].sort((a, b) => String(b.id || "").localeCompare(String(a.id || ""))) : remoteGames;
+                  const now = Date.now();
+                  const prevGameMap = new Map((prevGames || []).map((g) => [String(g?.id || ""), g]));
+                  const resolvedGames = merged.map((remoteGame) => {
+                    const gameId = String(remoteGame?.id || "");
+                    const prevGame = prevGameMap.get(gameId);
+                    if (prevGame?._detailLoaded) {
+                      remoteGame = { ...remoteGame, gameLog: prevGame.gameLog, periodSnapshots: prevGame.periodSnapshots, playerStats: prevGame.playerStats, _detailLoaded: true };
+                    }
+                    const pending = pendingYoutubeSaveRef.current[gameId];
+                    if (!pending) return remoteGame;
+                    if (!pending.expiresAt || pending.expiresAt <= now) {
+                      delete pendingYoutubeSaveRef.current[gameId];
+                      return remoteGame;
+                    }
+                    const pendingUrl = normalizeYouTubeUrl(pending.url || "");
+                    const remoteUrl = normalizeYouTubeUrl(remoteGame?.youtubeUrl || "");
+                    if (remoteUrl === pendingUrl) {
+                      delete pendingYoutubeSaveRef.current[gameId];
+                      return remoteGame;
+                    }
+                    if (pendingUrl) {
+                      return {
+                        ...remoteGame,
+                        youtubeUrl: pendingUrl
+                      };
+                    }
+                    const nextGame = { ...remoteGame };
+                    delete nextGame.youtubeUrl;
+                    return nextGame;
+                  });
+                  setTeams(normalizedRemoteTeams);
+                  return resolvedGames;
+                });
+              }
+              if ("session" in payload) {
+                if (payload.session) {
+                  applyRemoteLiveSession(payload.session);
+                } else {
+                  if (isGameLiveRef.current) {
+                    flushPendingActiveSessionSync();
+                    pullActiveSessionSnapshot();
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Failed to process websocket sync payload.", error);
+          }
+        });
+        socket.addEventListener("open", () => {
+          socketReconnectAttemptsRef.current = 0;
+          fetchMissingLiveEvents();
+          flushPendingLiveEvents();
+          flushPendingActiveSessionSync();
+        });
+        socket.addEventListener("error", () => {
+        });
+        socket.addEventListener("close", () => {
+          if (syncSocketRef.current === socket) {
+            syncSocketRef.current = null;
+          }
+          scheduleReconnect();
+        });
+      };
+      const scheduleReconnect = () => {
+        if (socketManualCloseRef.current) return;
+        if (socketReconnectTimerRef.current) return;
+        const attempt = Number(socketReconnectAttemptsRef.current || 0) + 1;
+        socketReconnectAttemptsRef.current = attempt;
+        const delayMs = Math.min(1e4, 500 * 2 ** Math.min(attempt - 1, 5));
+        socketReconnectTimerRef.current = window.setTimeout(() => {
+          socketReconnectTimerRef.current = null;
+          connectSocket();
+        }, delayMs);
+      };
+      socketManualCloseRef.current = false;
+      connectSocket();
+      return () => {
+        socketManualCloseRef.current = true;
+        if (socketReconnectTimerRef.current) {
+          window.clearTimeout(socketReconnectTimerRef.current);
+          socketReconnectTimerRef.current = null;
+        }
+        const socket = syncSocketRef.current;
+        syncSocketRef.current = null;
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+          socket.close();
+        }
+      };
+    }, [activeTab]);
+    useEffect(() => {
+      if (activeTab !== "live") return;
+      const heartbeat = window.setInterval(() => {
+        const socket = syncSocketRef.current;
+        const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
+        if (!socketIsOpen) {
+          pullActiveSessionSnapshot();
+        }
+        fetchMissingLiveEvents();
+        flushPendingLiveEvents();
+        flushPendingActiveSessionSync();
+      }, 3e4);
+      return () => window.clearInterval(heartbeat);
+    }, [activeTab]);
+    useEffect(() => {
+      if (activeTab !== "live") return;
+      const fallback = window.setInterval(() => {
+        const socket = syncSocketRef.current;
+        const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
+        if (!socketIsOpen) {
+          pullActiveSessionSnapshot();
+          fetchMissingLiveEvents();
+        }
+        flushPendingLiveEvents();
+        flushPendingActiveSessionSync();
+      }, 2500);
+      return () => window.clearInterval(fallback);
+    }, [activeTab]);
+    useEffect(() => {
+      const handleOnline = () => {
+        pullActiveSessionSnapshot();
+        fetchMissingLiveEvents();
+        flushPendingLiveEvents();
+        flushPendingActiveSessionSync();
+        try {
+          const pendingRaw = localStorage.getItem(PENDING_COMPLETED_GAME_KEY);
+          if (pendingRaw) {
+            const pendingGame = JSON.parse(pendingRaw);
+            if (pendingGame?.id) {
+              apiRequest(`/api/games/${encodeURIComponent(String(pendingGame.id))}`, {
+                method: "PUT",
+                body: JSON.stringify({ game: pendingGame })
+              }).then(() => {
+                try {
+                  localStorage.removeItem(PENDING_COMPLETED_GAME_KEY);
+                } catch (_) {
+                }
+              }).catch(() => {
+              });
+            }
+          }
+        } catch (_) {
+        }
+      };
+      window.addEventListener("online", handleOnline);
+      return () => {
+        window.removeEventListener("online", handleOnline);
+      };
+    }, []);
+    useEffect(() => {
+      if (!isGameLive) {
+        liveEventQueueReadyRef.current = false;
+        return;
+      }
+      if (!liveEventQueueReadyRef.current) {
+        (gameLog || []).forEach((log) => {
+          if (log?.id) processedGameLogIdsRef.current.add(log.id);
+        });
+        liveEventQueueReadyRef.current = true;
+        flushPendingLiveEvents();
+        return;
+      }
+      (gameLog || []).forEach((log) => {
+        if (!log?.id) return;
+        if (processedGameLogIdsRef.current.has(log.id)) return;
+        processedGameLogIdsRef.current.add(log.id);
+        if (remoteEventIdsRef.current.has(log.id)) {
+          remoteEventIdsRef.current.delete(log.id);
+          return;
+        }
+        enqueueLiveEvent(log);
+      });
+    }, [isGameLive, gameLog]);
+    useEffect(() => {
+      if (!isGameLive) {
+        prevLiveStatsRef.current = cloneStatsMap(liveStats);
+        return;
+      }
+      const previous = prevLiveStatsRef.current || {};
+      const next = liveStats || {};
+      if (Object.keys(previous).length === 0) {
+        prevLiveStatsRef.current = cloneStatsMap(next);
+        return;
+      }
+      const watchedFields = ["pts", "ast", "reb", "stl", "blk", "to", "pf", "fg2m", "fg3m", "fg2m_miss", "fg3m_miss", "ftm", "ft_miss"];
+      const changedPlayers = /* @__PURE__ */ new Set();
+      (/* @__PURE__ */ new Set([...Object.keys(previous), ...Object.keys(next)])).forEach((playerId) => {
+        const prevStats = previous[playerId] || {};
+        const nextStats = next[playerId] || {};
+        const changed = watchedFields.some((field) => Number(prevStats[field] || 0) !== Number(nextStats[field] || 0));
+        if (changed) {
+          changedPlayers.add(playerId);
+        }
+      });
+      prevLiveStatsRef.current = cloneStatsMap(next);
+      changedPlayers.forEach(triggerPlayerFlash);
+    }, [isGameLive, liveStats]);
+    useEffect(() => {
+      if (!isGameLive) {
+        prevLiveScoresRef.current = { teamA: teamAScore, teamB: teamBScore };
+        return;
+      }
+      const prevScores = prevLiveScoresRef.current || { teamA: null, teamB: null };
+      const hasBaseline = prevScores.teamA !== null && prevScores.teamB !== null;
+      if (hasBaseline) {
+        if (Number(prevScores.teamA) !== Number(teamAScore)) {
+          triggerScoreFlash("teamA");
+        }
+        if (Number(prevScores.teamB) !== Number(teamBScore)) {
+          triggerScoreFlash("teamB");
+        }
+      }
+      prevLiveScoresRef.current = { teamA: teamAScore, teamB: teamBScore };
+    }, [isGameLive, teamAScore, teamBScore]);
+    useEffect(() => {
+      if (!isGameLive || !Array.isArray(gameLog) || gameLog.length === 0) return;
+      const latestEvent = gameLog[0];
+      if (!latestEvent?.id) return;
+      if (!lastObservedLogIdRef.current) {
+        lastObservedLogIdRef.current = latestEvent.id;
+        return;
+      }
+      if (lastObservedLogIdRef.current === latestEvent.id) return;
+      lastObservedLogIdRef.current = latestEvent.id;
+      const isSubEvent = latestEvent.kind === "sub" || typeof latestEvent.text === "string" && latestEvent.text.includes("SUB:");
+      if (!isSubEvent) return;
+      triggerSubLogGlow(latestEvent.id);
+      triggerSubGlow(latestEvent.outId);
+      triggerSubGlow(latestEvent.inId);
+      flashPlayerElements(latestEvent.outId);
+      flashPlayerElements(latestEvent.inId);
+    }, [isGameLive, gameLog]);
+    useEffect(() => {
+      if (!Array.isArray(gameLog) || gameLog.length === 0) return;
+      let changed = false;
+      const next = [...gameLog];
+      let ordinal = gameLog.length;
+      for (let idx = gameLog.length - 1; idx >= 0; idx -= 1) {
+        const entry = gameLog[idx];
+        const reason = getLogLockReason(entry, ordinal);
+        if (reason && entry?.lockProtected !== true) {
+          next[idx] = {
+            ...entry || {},
+            lockProtected: true,
+            lockReason: reason
+          };
+          changed = true;
+        }
+        ordinal -= 1;
+      }
+      if (changed) {
+        setGameLog(next);
+      }
+    }, [gameLog]);
+    useEffect(() => {
+      teamsRef.current = teams;
+      isGameLiveRef.current = isGameLive;
+      teamALineupRef.current = teamALineup;
+      teamABenchRef.current = teamABench;
+      teamBLineupRef.current = teamBLineup;
+      teamBBenchRef.current = teamBBench;
+      gameLogRef.current = gameLog;
+      liveGameSnapshotRef.current = liveGameSnapshot;
+      loggedHistoryRef.current = loggedHistory;
+      dnpPlayersRef.current = dnpPlayers;
+      lineupRevisionRef.current = lineupRevision;
+      liveSessionInstanceIdRef.current = liveSessionInstanceId;
+      liveSessionCreatedAtRef.current = liveSessionCreatedAt;
+      currentQuarterRef.current = currentQuarter;
+      periodClockSecondsRef.current = periodClockSeconds;
+      isPeriodClockRunningRef.current = isPeriodClockRunning;
+      awaitingPeriodStartRef.current = awaitingPeriodStart;
+    }, [teams, isGameLive, teamALineup, teamABench, teamBLineup, teamBBench, gameLog, liveGameSnapshot, loggedHistory, dnpPlayers, lineupRevision, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, awaitingPeriodStart]);
+    const isQuotaExceededStorageError = (error) => {
+      if (!error) return false;
+      const name = String(error?.name || "");
+      const message = String(error?.message || "");
+      return name === "QuotaExceededError" || /quota/i.test(message);
+    };
+    const buildCompactLiveSessionCache = (session) => {
+      const safeSession = session && typeof session === "object" ? session : {};
+      return {
+        ...safeSession,
+        // Keep session identity and latest state, but cap the heaviest arrays.
+        periodSnapshots: Array.isArray(safeSession.periodSnapshots) ? safeSession.periodSnapshots.slice(-16) : [],
+        gameLog: Array.isArray(safeSession.gameLog) ? safeSession.gameLog.slice(-200) : [],
+        loggedHistory: Array.isArray(safeSession.loggedHistory) ? safeSession.loggedHistory.slice(-80) : []
+      };
+    };
+    const persistActiveLiveSessionToLocal = (session) => {
+      try {
+        localStorage.setItem("active_live_session", JSON.stringify(session));
+        return true;
+      } catch (error) {
+        if (!isQuotaExceededStorageError(error)) {
+          return false;
+        }
+      }
+      try {
+        const compactSession = buildCompactLiveSessionCache(session);
+        localStorage.setItem("active_live_session", JSON.stringify(compactSession));
+        return true;
+      } catch (_) {
+        try {
+          localStorage.removeItem("active_live_session");
+        } catch (__) {
+        }
+        return false;
+      }
+    };
+    useEffect(() => {
+      if (suppressLiveSessionSyncRef.current) {
+        const hasPendingLocalEvents = (pendingLiveEventsRef.current || []).length > 0;
+        const remoteLogIds = lastRemoteGameLogIdsRef.current || /* @__PURE__ */ new Set();
+        const hasLocalOnlyLogEvents = (gameLog || []).some((event) => event?.id && !remoteLogIds.has(event.id));
+        setSyncDebug((prev) => ({
+          ...prev,
+          pendingQueue: (pendingLiveEventsRef.current || []).length,
+          hasLocalOnly: hasLocalOnlyLogEvents
+        }));
+        if (!hasPendingLocalEvents && !hasLocalOnlyLogEvents) {
+          suppressLiveSessionSyncRef.current = false;
+          return;
+        }
+        suppressLiveSessionSyncRef.current = false;
+      }
+      const hasValidLiveIdentity = Boolean(isGameLive && liveSessionInstanceId && teamAId && teamBId);
+      if (hasValidLiveIdentity) {
+        const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
+        const sessionUpdatedAt = Date.now();
+        const clockControlRevision = Math.max(
+          Number(clockControlRevisionRef.current || 0),
+          getClockControlRevisionFromLogs(gameLog, 0)
+        );
+        clockControlRevisionRef.current = clockControlRevision;
+        const persistedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now());
+        const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+        sessionRevisionRef.current = nextSessionRevision;
+        lastLocalSessionUpdatedAtRef.current = sessionUpdatedAt;
+        const session = { teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, clockControlRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
+        const persistedLocally = persistActiveLiveSessionToLocal(session);
+        hadLiveSessionRef.current = true;
+        setSyncDebug((prev) => ({
+          ...prev,
+          pendingQueue: (pendingLiveEventsRef.current || []).length,
+          lastPersist: `PUT QUEUED ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`,
+          persistError: persistedLocally ? "" : "Local session cache skipped (storage full)."
+        }));
+        queueActiveSessionSync("put", session);
+        flushPendingActiveSessionSync();
+      } else {
+        localStorage.removeItem("active_live_session");
+        if (hadLiveSessionRef.current) {
+          hadLiveSessionRef.current = false;
+          setSyncDebug((prev) => ({
+            ...prev,
+            lastPersist: `DELETE QUEUED ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`,
+            persistError: ""
+          }));
+          queueActiveSessionSync("delete");
+          flushPendingActiveSessionSync();
+        }
+      }
+    }, [isGameLive, teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
+    const showToast = (message, type = "success") => {
+      setToast({ message, type });
+      setTimeout(() => setToast(null), 3500);
+    };
+    const getWallClockTime = () => {
+      return (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    };
+    const hasAnyTrackedLiveStat = (playerId) => {
+      const stats = liveStats[playerId] || {};
+      return Object.values(stats).some((val) => Number(val || 0) > 0);
+    };
+    const normalizePlayerForStorage = (player) => {
+      const safePlayer = player || {};
+      return {
+        ...safePlayer,
+        height: String(safePlayer.height || "").trim(),
+        pictureUrl: safePlayer.pictureUrl || "",
+        birthday: safePlayer.birthday || "",
+        email: safePlayer.email || "",
+        social: safePlayer.social || "",
+        contact: safePlayer.contact || "",
+        positions: normalizePlayerPositions(safePlayer),
+        totalStats: {
+          pts: 0,
+          ast: 0,
+          reb: 0,
+          stl: 0,
+          blk: 0,
+          to: 0,
+          pf: 0,
+          fg2m: 0,
+          fg3m: 0,
+          fg2m_miss: 0,
+          fg3m_miss: 0,
+          ftm: 0,
+          ft_miss: 0,
+          ...safePlayer.totalStats || {}
+        }
+      };
+    };
+    const normalizeTeamsForStorage = (teamList) => {
+      return (Array.isArray(teamList) ? teamList : []).map((team) => ({
+        ...team,
+        players: (Array.isArray(team?.players) ? team.players : []).map(normalizePlayerForStorage)
+      }));
+    };
+    const readCachedAppState = () => {
+      try {
+        const cached = localStorage.getItem(LOCAL_APP_STATE_CACHE_KEY);
+        if (!cached) return null;
+        const parsed = JSON.parse(cached);
+        if (!parsed || typeof parsed !== "object") return null;
+        return {
+          version: Number(parsed.version || 1),
+          dirty: Boolean(parsed.dirty),
+          updatedAt: Number(parsed.updatedAt || 0),
+          teams: Array.isArray(parsed.teams) ? parsed.teams : [],
+          games: Array.isArray(parsed.games) ? parsed.games : [],
+          statActions: Array.isArray(parsed.statActions) ? parsed.statActions : []
+        };
+      } catch (error) {
+        return null;
+      }
+    };
+    const writeCachedAppState = (nextTeams, nextGames, nextStatActions, { dirty = false } = {}) => {
+      try {
+        const payload = {
+          version: 1,
+          dirty: Boolean(dirty),
+          updatedAt: Date.now(),
+          teams: normalizeTeamsForStorage(nextTeams),
+          games: Array.isArray(nextGames) ? nextGames : [],
+          statActions: Array.isArray(nextStatActions) ? nextStatActions : []
+        };
+        localStorage.setItem(LOCAL_APP_STATE_CACHE_KEY, JSON.stringify(payload));
+      } catch (error) {
+      }
+    };
+    const removeGameFromCachedAppState = (gameId, nextTeams = null) => {
+      try {
+        const targetGameId = String(gameId || "").trim();
+        if (!targetGameId) return;
+        const cached = readCachedAppState();
+        if (!cached) return;
+        const filteredGames = (Array.isArray(cached.games) ? cached.games : []).filter((game) => String(game?.id || "").trim() !== targetGameId);
+        const cachedTeams = Array.isArray(nextTeams) ? nextTeams : Array.isArray(cached.teams) ? cached.teams : [];
+        writeCachedAppState(cachedTeams, filteredGames, Array.isArray(cached.statActions) ? cached.statActions : statActions, { dirty: cached.dirty });
+      } catch (error) {
+      }
+    };
+    const togglePlayerDidNotPlay = (playerId) => {
+      if (!canUseLiveControls) {
+        showToast("Live controls are locked right now.", "info");
+        return;
+      }
+      const teamAObj = teams.find((team) => team.id === teamAId);
+      const teamBObj = teams.find((team) => team.id === teamBId);
+      const isTeamAPlayer = Boolean(teamAObj?.players?.some((player) => player.id === playerId));
+      const isTeamBPlayer = Boolean(teamBObj?.players?.some((player) => player.id === playerId));
+      if (isTeamAPlayer && !ensureTeamOperationAccess(true, "manage DNP for this team")) return;
+      if (isTeamBPlayer && !ensureTeamOperationAccess(false, "manage DNP for this team")) return;
+      const currentlyMarked = dnpPlayers.includes(playerId);
+      const alreadyPlayed = hasAnyTrackedLiveStat(playerId);
+      if (!currentlyMarked && alreadyPlayed) {
+        showToast("Cannot mark DNP after a player has recorded stats.", "info");
+        return;
+      }
+      markLocalSessionUpdated();
+      lastLocalDnpUpdatedAtRef.current = Date.now();
+      setDnpPlayers((prev) => currentlyMarked ? prev.filter((id) => id !== playerId) : [...prev, playerId]);
+    };
+    const saveFullState = async (updatedTeams, updatedGames) => {
+      const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
+      writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: true });
+      try {
+        if (navigator.onLine !== false) {
+          const slimGames = (Array.isArray(updatedGames) ? updatedGames : []).map((game) => {
+            if (!game || typeof game !== "object") return game;
+            const nextGame = { ...game };
+            delete nextGame.socialCoverDataUrl;
+            delete nextGame.socialCoverLen;
+            delete nextGame.gameLog;
+            delete nextGame.periodSnapshots;
+            return nextGame;
+          });
+          const payload = await apiRequest("/api/state", {
+            cache: "no-store",
+            method: "PUT",
+            body: JSON.stringify({ teams: normalizedTeams, games: slimGames })
+          });
+          const persistedTeams = Array.isArray(payload?.teams) ? normalizeTeamsForStorage(payload.teams) : normalizedTeams;
+          const persistedGames = Array.isArray(payload?.games) ? payload.games : updatedGames;
+          setTeams(persistedTeams);
+          setGames(persistedGames);
+          writeCachedAppState(persistedTeams, persistedGames, statActions, { dirty: false });
+        }
+        return true;
+      } catch (error) {
+        writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: true });
+        return false;
+      }
+    };
+    const getGameLogExportTeams = (game) => {
+      const teamIds = [game?.teamAId, game?.teamBId].map((id) => String(id || "").trim()).filter(Boolean);
+      return normalizeTeamsForStorage(
+        teamIds.map((teamId) => teams.find((team) => String(team?.id || "").trim() === teamId) || null).filter(Boolean)
+      );
+    };
+    const mergeImportedTeamsIntoState = (importedTeams = []) => {
+      const normalizedImportedTeams = normalizeTeamsForStorage(importedTeams);
+      if (!normalizedImportedTeams.length) return teams;
+      const mergedTeams = [...teams];
+      normalizedImportedTeams.forEach((importedTeam) => {
+        const existingIndex = mergedTeams.findIndex((team) => String(team?.id || "") === String(importedTeam?.id || ""));
+        if (existingIndex >= 0) {
+          mergedTeams[existingIndex] = {
+            ...mergedTeams[existingIndex],
+            ...importedTeam
+          };
+        } else {
+          mergedTeams.push(importedTeam);
+        }
+      });
+      return normalizeTeamsForStorage(mergedTeams);
+    };
+    const exportGameLogPayload = (game, detail = {}) => ({
+      type: "wknd-game-log",
+      version: 2,
+      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      gameId: game?.id || "",
+      gameLog: Array.isArray(detail.gameLog) ? detail.gameLog : Array.isArray(game?.gameLog) ? game.gameLog : [],
+      periodSnapshots: Array.isArray(detail.periodSnapshots) ? detail.periodSnapshots : Array.isArray(game?.periodSnapshots) ? game.periodSnapshots : [],
+      dnpPlayers: Array.isArray(game?.dnpPlayers) ? game.dnpPlayers : [],
+      teamAId: game?.teamAId || "",
+      teamBId: game?.teamBId || "",
+      teamAName: game?.teamAName || "",
+      teamBName: game?.teamBName || "",
+      game: {
+        date: game?.date || "",
+        teamAId: game?.teamAId || "",
+        teamBId: game?.teamBId || "",
+        teamAName: game?.teamAName || "",
+        teamBName: game?.teamBName || "",
+        teamAScore: Number(game?.teamAScore || 0),
+        teamBScore: Number(game?.teamBScore || 0),
+        underReview: Boolean(game?.underReview),
+        playerStats: detail.playerStats || game?.playerStats || {},
+        gameWriteup: game?.gameWriteup || "",
+        potgWriteup: game?.potgWriteup || "",
+        youtubeUrl: game?.youtubeUrl || ""
+      },
+      teams: getGameLogExportTeams(game)
+    });
+    const handleExportGameLog = async (game) => {
+      if (!game) return;
+      try {
+        let detail = {};
+        if (!game._detailLoaded && game.id) {
+          try {
+            detail = await apiRequest(`/api/games/${encodeURIComponent(game.id)}/detail`);
+          } catch (_) {
+          }
+        }
+        const exportPayload = exportGameLogPayload(game, detail);
+        const fileName = `wknd_gamelog_${String(game.id || "game").replace(/[^a-zA-Z0-9_-]+/g, "_")}_${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.json`;
+        const dataStr = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(exportPayload, null, 2))}`;
+        const downloadAnchor = document.createElement("a");
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", fileName);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast("Game log exported.", "success");
+      } catch (error) {
+        showToast("Failed to export game log.", "error");
+      }
+    };
+    const handleImportGameLog = (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      const fileReader = new FileReader();
+      fileReader.readAsText(file, "UTF-8");
+      fileReader.onload = async (event) => {
+        try {
+          const parsed = JSON.parse(event.target.result);
+          const importedGameLog = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.gameLog) ? parsed.gameLog : null;
+          if (!Array.isArray(importedGameLog)) {
+            showToast("Imported file does not contain a game log.", "error");
+            return;
+          }
+          const importedTeams = Array.isArray(parsed?.teams) ? parsed.teams : [];
+          const mergedTeams = importedTeams.length ? mergeImportedTeamsIntoState(importedTeams) : teams;
+          const importedGameMeta = parsed?.game && typeof parsed.game === "object" ? parsed.game : {};
+          const importedTeamAId = String(importedGameMeta?.teamAId || parsed?.teamAId || "").trim();
+          const importedTeamBId = String(importedGameMeta?.teamBId || parsed?.teamBId || "").trim();
+          const resolvedTeamAName = String(importedGameMeta?.teamAName || parsed?.teamAName || "").trim();
+          const resolvedTeamBName = String(importedGameMeta?.teamBName || parsed?.teamBName || "").trim();
+          const fallbackTeamAName = mergedTeams.find((team) => String(team?.id || "") === importedTeamAId)?.name || "HOME";
+          const fallbackTeamBName = mergedTeams.find((team) => String(team?.id || "") === importedTeamBId)?.name || "AWAY";
+          const idSeedRaw = String(parsed?.gameId || importedTeamAId || importedTeamBId || "gamelog").trim();
+          const idSeed = idSeedRaw.replace(/[^a-zA-Z0-9_-]+/g, "_") || "gamelog";
+          let nextImportedGameId = `${idSeed}_import_${Date.now()}`;
+          while (games.some((game) => game.id === nextImportedGameId)) {
+            nextImportedGameId = `${idSeed}_import_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          }
+          const importedPlayerStats = importedGameMeta?.playerStats && typeof importedGameMeta.playerStats === "object" ? importedGameMeta.playerStats : {};
+          const importedDate = String(importedGameMeta?.date || parsed?.exportedAt || (/* @__PURE__ */ new Date()).toISOString()).trim();
+          const importedGame = {
+            id: nextImportedGameId,
+            date: importedDate,
+            teamAId: importedTeamAId,
+            teamBId: importedTeamBId,
+            teamAName: resolvedTeamAName || fallbackTeamAName,
+            teamBName: resolvedTeamBName || fallbackTeamBName,
+            teamAScore: Number(importedGameMeta?.teamAScore || 0),
+            teamBScore: Number(importedGameMeta?.teamBScore || 0),
+            underReview: Boolean(importedGameMeta?.underReview),
+            playerStats: importedPlayerStats,
+            dnpPlayers: Array.isArray(parsed?.dnpPlayers) ? parsed.dnpPlayers : [],
+            periodSnapshots: Array.isArray(parsed?.periodSnapshots) ? parsed.periodSnapshots : [],
+            gameLog: importedGameLog
+          };
+          const maybeGameWriteup = String(importedGameMeta?.gameWriteup || "").trim();
+          if (maybeGameWriteup) {
+            importedGame.gameWriteup = maybeGameWriteup;
+          }
+          const maybePotgWriteup = String(importedGameMeta?.potgWriteup || "").trim();
+          if (maybePotgWriteup) {
+            importedGame.potgWriteup = maybePotgWriteup;
+          }
+          const maybeYoutubeUrl = String(importedGameMeta?.youtubeUrl || "").trim();
+          if (maybeYoutubeUrl) {
+            importedGame.youtubeUrl = maybeYoutubeUrl;
+          }
+          const updatedGames = [importedGame, ...games].sort((a, b) => String(b.id || "").localeCompare(String(a.id || "")));
+          setTeams(mergedTeams);
+          setGames(updatedGames);
+          let persistedToServer = false;
+          try {
+            if (navigator.onLine !== false) {
+              await apiRequest(`/api/games/${encodeURIComponent(nextImportedGameId)}`, {
+                method: "PUT",
+                body: JSON.stringify({ game: importedGame })
+              });
+              persistedToServer = true;
+            }
+          } catch (_) {
+          }
+          if (!persistedToServer) {
+            await saveFullState(mergedTeams, updatedGames);
+          } else {
+            writeCachedAppState(normalizeTeamsForStorage(mergedTeams), updatedGames, statActions, { dirty: false });
+          }
+          setSelectedHistoryGameId(nextImportedGameId);
+          showToast("Game log imported as a new game.", "success");
+        } catch (error) {
+          showToast("Failed to import game log.", "error");
+        }
+      };
+    };
+    const saveTeamState = async (updatedTeams) => {
+      const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
+      setTeams(normalizedTeams);
+      writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
+      try {
+        if (navigator.onLine !== false) {
+          const payload = await apiRequest("/api/teams", {
+            method: "PUT",
+            body: JSON.stringify({ teams: normalizedTeams })
+          });
+          const persistedTeams = Array.isArray(payload?.teams) ? normalizeTeamsForStorage(payload.teams) : normalizedTeams;
+          setTeams(persistedTeams);
+          writeCachedAppState(persistedTeams, games, statActions, { dirty: false });
+        }
+        return true;
+      } catch (error) {
+        writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
+        return false;
+      }
+    };
+    const saveNewGameState = async (newGame, updatedTeams) => {
+      const updatedGames = [newGame, ...games.filter((game) => game?.id !== newGame?.id)];
+      const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
+      const isOnline = navigator.onLine !== false;
+      setTeams(normalizedTeams);
+      setGames(updatedGames);
+      writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: !isOnline });
+      if (!isOnline) {
+        return { persistedToServer: false, savedLocally: true };
+      }
+      let didPersist = false;
+      try {
+        localStorage.setItem(PENDING_COMPLETED_GAME_KEY, JSON.stringify(newGame));
+      } catch (_) {
+      }
+      try {
+        await apiRequest(`/api/games/${encodeURIComponent(String(newGame?.id || ""))}`, {
+          method: "PUT",
+          body: JSON.stringify({ game: newGame })
+        });
+        didPersist = true;
+        try {
+          localStorage.removeItem(PENDING_COMPLETED_GAME_KEY);
+        } catch (_) {
+        }
+      } catch (error) {
+        didPersist = false;
+      }
+      const didFullSync = await saveFullState(normalizedTeams, updatedGames);
+      if (!didPersist) {
+        didPersist = didFullSync;
+      }
+      return {
+        persistedToServer: didPersist,
+        savedLocally: true
+      };
+    };
+    const handleSaveGameVideoLink = async (gameId) => {
+      if (!gameId) return;
+      const normalizedUrl = normalizeYouTubeUrl(historyVideoInput);
+      if (historyVideoInput.trim() && !normalizedUrl) {
+        showToast("Please enter a valid YouTube link.", "error");
+        return;
+      }
+      const updatedGames = games.map((existingGame) => {
+        if (existingGame.id !== gameId) return existingGame;
+        const nextGame = { ...existingGame };
+        if (normalizedUrl) {
+          nextGame.youtubeUrl = normalizedUrl;
+        } else {
+          delete nextGame.youtubeUrl;
+        }
+        return nextGame;
+      });
+      pendingYoutubeSaveRef.current[String(gameId)] = {
+        url: normalizedUrl || "",
+        expiresAt: Date.now() + 15e3
+      };
+      writeCachedAppState(teams, updatedGames, statActions, { dirty: true });
+      setGames(updatedGames);
+      try {
+        const payload = await apiRequest(`/api/games/${encodeURIComponent(gameId)}/video`, {
+          method: "PUT",
+          body: JSON.stringify({ youtubeUrl: normalizedUrl || "" })
+        });
+        const persistedGame = payload?.game && typeof payload.game === "object" ? payload.game : null;
+        setGames((prevGames) => {
+          const mergedGames = prevGames.map((existingGame) => {
+            if (existingGame.id !== gameId) return existingGame;
+            if (!persistedGame) {
+              return normalizedUrl ? { ...existingGame, youtubeUrl: normalizedUrl } : (() => {
+                const nextGame = { ...existingGame };
+                delete nextGame.youtubeUrl;
+                return nextGame;
+              })();
+            }
+            return {
+              ...existingGame,
+              ...persistedGame
+            };
+          });
+          writeCachedAppState(teams, mergedGames, statActions, { dirty: false });
+          return mergedGames;
+        });
+        delete pendingYoutubeSaveRef.current[String(gameId)];
+        trackAnalyticsEvent("save_video_link", {
+          game_id: String(gameId),
+          has_video_link: normalizedUrl ? 1 : 0
+        });
+        showToast(normalizedUrl ? "YouTube link saved for this game." : "YouTube link removed.", "success");
+      } catch (error) {
+        const didFallbackSave = await saveFullState(teams, updatedGames);
+        delete pendingYoutubeSaveRef.current[String(gameId)];
+        if (didFallbackSave) {
+          trackAnalyticsEvent("save_video_link", {
+            game_id: String(gameId),
+            has_video_link: normalizedUrl ? 1 : 0
+          });
+          showToast(normalizedUrl ? "YouTube link saved for this game." : "YouTube link removed.", "success");
+          return;
+        }
+        setGames(games);
+        writeCachedAppState(teams, games, statActions, { dirty: true });
+        showToast(String(error?.message || "Could not save YouTube link right now. Please try again."), "error");
+      }
+    };
+    const PLAYOFF_SERIES_OPTIONS = [
+      { value: "", label: "Regular Season", gameType: "regular", playoffRound: "" },
+      { value: "semi-a", label: "Semifinal A  (#1 vs #4)", gameType: "playoff", playoffRound: "semi" },
+      { value: "semi-b", label: "Semifinal B  (#2 vs #3)", gameType: "playoff", playoffRound: "semi" },
+      { value: "final", label: "Finals  (Best of 3)", gameType: "playoff", playoffRound: "final" }
+    ];
+    const handleSaveGameMeta = async (gameId) => {
+      if (!gameId) return;
+      const seriesOpt = PLAYOFF_SERIES_OPTIONS.find((o) => o.value === gameMetaSeriesId) || PLAYOFF_SERIES_OPTIONS[0];
+      const updatedGames = games.map((existingGame) => {
+        if (existingGame.id !== gameId) return existingGame;
+        return {
+          ...existingGame,
+          season: gameMetaSeason,
+          seriesId: seriesOpt.value,
+          gameType: seriesOpt.gameType,
+          playoffRound: seriesOpt.playoffRound
+        };
+      });
+      const updatedGame = updatedGames.find((g) => g.id === gameId);
+      writeCachedAppState(teams, updatedGames, statActions, { dirty: true });
+      setGames(updatedGames);
+      try {
+        await apiRequest(`/api/games/${encodeURIComponent(gameId)}`, {
+          method: "PUT",
+          body: JSON.stringify({ game: updatedGame })
+        });
+        writeCachedAppState(teams, updatedGames, statActions, { dirty: false });
+        showToast("Game info updated.", "success");
+      } catch (error) {
+        setGames(games);
+        writeCachedAppState(teams, games, statActions, { dirty: true });
+        showToast("Could not save game info. Please try again.", "error");
+      }
+    };
+    const handleSaveGameWriteup = async (gameId) => {
+      if (!gameId) return;
+      const writeupText = String(historyWriteupInput || "");
+      const updatedGames = games.map((existingGame) => {
+        if (existingGame.id !== gameId) return existingGame;
+        const nextGame = { ...existingGame };
+        if (writeupText.trim()) {
+          nextGame.gameWriteup = writeupText;
+        } else {
+          delete nextGame.gameWriteup;
+        }
+        return nextGame;
+      });
+      setGames(updatedGames);
+      await saveFullState(teams, updatedGames);
+      showToast(writeupText.trim() ? "Game recap saved." : "Game recap removed.", "success");
+    };
+    const handleToggleGameUnderReview = async (gameId) => {
+      if (!gameId || !isLoggedIn) return;
+      const updatedGames = games.map((existingGame) => {
+        if (existingGame.id !== gameId) return existingGame;
+        return {
+          ...existingGame,
+          underReview: !Boolean(existingGame?.underReview)
+        };
+      });
+      setGames(updatedGames);
+      await saveFullState(teams, updatedGames);
+      const updated = updatedGames.find((game) => game.id === gameId);
+      showToast(updated?.underReview ? "Marked as pending stats review." : "Marked as review complete.", "success");
+    };
+    const handleGenerateGameWriteup = async ({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers }) => {
+      if (!game || !canOperateLive) return;
+      setGeneratingWriteupGameId(game.id);
+      try {
+        const toPromptPerformer = (entry, teamName) => ({
+          name: entry.name,
+          number: entry.number,
+          teamName,
+          perScore: Number(entry.perScore || 0),
+          stats: {
+            pts: Number(entry.stats?.pts || 0),
+            reb: Number(entry.stats?.reb || 0),
+            ast: Number(entry.stats?.ast || 0),
+            stl: Number(entry.stats?.stl || 0),
+            blk: Number(entry.stats?.blk || 0),
+            to: Number(entry.stats?.to || 0)
+          }
+        });
+        const standoutPerformersByTeam = {
+          teamA: (topTeamAPerformers || []).slice(0, 2).map((entry) => toPromptPerformer(entry, game.teamAName)),
+          teamB: (topTeamBPerformers || []).slice(0, 2).map((entry) => toPromptPerformer(entry, game.teamBName))
+        };
+        const bestPerformers = [...topTeamAPerformers || [], ...topTeamBPerformers || []].map((entry) => {
+          const belongsToTeamA = !!teamAObj?.players?.some((p) => p.id === entry.id);
+          return toPromptPerformer(entry, belongsToTeamA ? game.teamAName : game.teamBName);
+        }).sort((a, b) => b.perScore - a.perScore || b.stats.pts - a.stats.pts).slice(0, 8);
+        const autoPlayerOfTheGame = (() => {
+          const manualPotgSet = String(game?.manualPotgPlayerId || "").trim();
+          if (!manualPotgSet) return playerOfTheGame;
+          const topAll = [...topTeamAPerformers || [], ...topTeamBPerformers || []].sort((a, b) => Number(b.perScore || 0) - Number(a.perScore || 0));
+          return topAll[0] || null;
+        })();
+        const potgSelectionMode = game?.manualPotgPlayerId ? "manual" : "auto";
+        const orderedGameLog = [...Array.isArray(game.gameLog) ? game.gameLog : []].reverse();
+        const isRecapNoiseEvent = (entry, idx, allEntries) => {
+          const text = String(entry?.text || "").toLowerCase();
+          const metaType = String(entry?.metaType || "").trim();
+          if (entry?.hiddenFromLog) return true;
+          if (entry?.metaType === "periodCheckpoint") return true;
+          if (entry?.isUndoCompensation) return true;
+          if (entry?.kind === "stat" && entry?.undoOfId) return true;
+          if (entry?.metaType === "clockAdjust") return true;
+          if (/clock adjusted|sync clock|clock updated/.test(text)) return true;
+          if (/^undo:\s*reversed/i.test(text)) return true;
+          if (/\bcorrection\b/.test(text)) return true;
+          if (metaType === "adminFocusSet" || metaType === "rolePresence") return true;
+          if (entry?.metaType === "manualPause") return true;
+          if (text.trim() === "manual pause" || text.trim() === "pause game" || text.trim() === "pause") return true;
+          const isPlayResume = entry?.metaType === "playResume" || text.startsWith("play resumed");
+          if (isPlayResume) {
+            let precedingPauseType = "";
+            for (let cursor = idx - 1; cursor >= 0; cursor -= 1) {
+              const prior = allEntries[cursor];
+              const priorMetaType = String(prior?.metaType || "").trim();
+              if (!priorMetaType) continue;
+              if (priorMetaType === "manualPause" || priorMetaType === "timeout" || priorMetaType === "officialsTimeout" || priorMetaType === "foulPause") {
+                precedingPauseType = priorMetaType;
+                break;
+              }
+              if (priorMetaType === "playResume" || priorMetaType === "timeoutResume" || priorMetaType === "quarterStart" || priorMetaType === "matchStart" || priorMetaType === "hardReset") {
+                break;
+              }
+            }
+            if (precedingPauseType === "manualPause") return true;
+          }
+          if (entry?.kind === "meta" && entry?.metaType === "foulPause") return true;
+          return false;
+        };
+        const recapReadyGameLog = orderedGameLog.filter((entry, idx, allEntries) => !isRecapNoiseEvent(entry, idx, allEntries));
+        const finalMomentRawEvents = recapReadyGameLog.slice(-45);
+        const pbpForPrompt = recapReadyGameLog.slice(-180).map((entry) => ({
+          quarter: Number(entry?.quarter || 0) || 1,
+          clock: String(entry?.clockRemaining || ""),
+          team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : "Neutral",
+          text: String(entry?.text || "")
+        })).filter((entry) => entry.text.trim());
+        const finalMomentsForPrompt = finalMomentRawEvents.map((entry) => ({
+          quarter: Number(entry?.quarter || 0) || 1,
+          clock: String(entry?.clockRemaining || ""),
+          team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : "Neutral",
+          text: String(entry?.text || "")
+        })).filter((entry) => entry.text.trim());
+        const extractScorePairFromLogText = (text) => {
+          const normalized = String(text || "");
+          const legacyMatch = normalized.match(/\[(\d+)\s*-\s*(\d+)\]/);
+          if (legacyMatch) {
+            return {
+              teamAScore: Number(legacyMatch[1]),
+              teamBScore: Number(legacyMatch[2])
+            };
+          }
+          const acronymMatch = normalized.match(/\[[A-Za-z0-9]{2,6}\s+(\d+)\s*-\s*[A-Za-z0-9]{2,6}\s+(\d+)\]/);
+          if (acronymMatch) {
+            return {
+              teamAScore: Number(acronymMatch[1]),
+              teamBScore: Number(acronymMatch[2])
+            };
+          }
+          return null;
+        };
+        const scoreSnapshots = recapReadyGameLog.map((entry) => {
+          const text = String(entry?.text || "");
+          const parsedScores = extractScorePairFromLogText(text);
+          if (!parsedScores) return null;
+          const teamAScore2 = Number(parsedScores.teamAScore);
+          const teamBScore2 = Number(parsedScores.teamBScore);
+          if (!Number.isFinite(teamAScore2) || !Number.isFinite(teamBScore2)) return null;
+          return {
+            time: String(entry?.time || ""),
+            teamAScore: teamAScore2,
+            teamBScore: teamBScore2,
+            marginA: teamAScore2 - teamBScore2
+          };
+        }).filter(Boolean);
+        let leadSwingSummary = null;
+        if (scoreSnapshots.length > 0) {
+          let largestLead = {
+            teamKey: "none",
+            teamName: "None",
+            leadPoints: 0,
+            atTime: scoreSnapshots[0].time || ""
+          };
+          scoreSnapshots.forEach((snap) => {
+            const absLead = Math.abs(Number(snap.marginA || 0));
+            if (absLead <= largestLead.leadPoints) return;
+            largestLead = {
+              teamKey: snap.marginA > 0 ? "teamA" : snap.marginA < 0 ? "teamB" : "none",
+              teamName: snap.marginA > 0 ? game.teamAName : snap.marginA < 0 ? game.teamBName : "None",
+              leadPoints: absLead,
+              atTime: snap.time || ""
+            };
+          });
+          const peakIndex = scoreSnapshots.findIndex((snap) => {
+            const absLead = Math.abs(Number(snap.marginA || 0));
+            return absLead === largestLead.leadPoints;
+          });
+          const tail = peakIndex >= 0 ? scoreSnapshots.slice(peakIndex + 1) : [];
+          let leadWasErased = false;
+          let leadWasNearlyErased = false;
+          if (largestLead.teamKey === "teamA") {
+            const minMarginAfterPeak = tail.length ? Math.min(...tail.map((snap) => Number(snap.marginA || 0))) : largestLead.leadPoints;
+            leadWasErased = minMarginAfterPeak <= 0;
+            leadWasNearlyErased = minMarginAfterPeak <= 2;
+          } else if (largestLead.teamKey === "teamB") {
+            const maxMarginAfterPeak = tail.length ? Math.max(...tail.map((snap) => Number(snap.marginA || 0))) : -largestLead.leadPoints;
+            leadWasErased = maxMarginAfterPeak >= 0;
+            leadWasNearlyErased = maxMarginAfterPeak >= -2;
+          }
+          leadSwingSummary = {
+            largestLeadTeam: largestLead.teamName,
+            largestLeadPoints: Number(largestLead.leadPoints || 0),
+            largestLeadAtTime: largestLead.atTime,
+            leadWasErased,
+            leadWasNearlyErased,
+            isHugeLead: Number(largestLead.leadPoints || 0) >= 10
+          };
+        }
+        const substitutionEvents = recapReadyGameLog.filter((entry) => entry?.kind === "sub");
+        const teamASubEvents = substitutionEvents.filter((entry) => entry?.isTeamA === true);
+        const teamBSubEvents = substitutionEvents.filter((entry) => entry?.isTeamA === false);
+        const classifyRotationPattern = (subCount) => {
+          if (subCount >= 14) return "heavy rotation";
+          if (subCount >= 8) return "balanced rotation";
+          if (subCount >= 4) return "tight rotation";
+          return "very tight rotation";
+        };
+        const buildLineupPattern = (teamObj, subEvents, isTeamA) => {
+          const playersUsed = (teamObj?.players || []).filter((player) => Boolean(game?.playerStats?.[player.id])).length;
+          const uniqueSubPlayers = /* @__PURE__ */ new Set();
+          subEvents.forEach((event) => {
+            if (event?.outId) uniqueSubPlayers.add(event.outId);
+            if (event?.inId) uniqueSubPlayers.add(event.inId);
+          });
+          const lateSubCount = finalMomentRawEvents.filter((raw) => raw?.kind === "sub" && raw?.isTeamA === isTeamA).length;
+          return {
+            teamName: teamObj?.name || (isTeamA ? game.teamAName : game.teamBName),
+            subCount: subEvents.length,
+            playersUsed,
+            uniqueSubPlayers: uniqueSubPlayers.size,
+            lateSubCount,
+            rotationPattern: classifyRotationPattern(subEvents.length)
+          };
+        };
+        const lineupPatternSummary = {
+          teamA: buildLineupPattern(teamAObj, teamASubEvents, true),
+          teamB: buildLineupPattern(teamBObj, teamBSubEvents, false)
+        };
+        const response = await apiRequest("/api/generate-writeup", {
+          method: "POST",
+          body: JSON.stringify({
+            game: {
+              id: game.id,
+              date: game.date,
+              teamAName: game.teamAName,
+              teamBName: game.teamBName,
+              teamAScore: Number(game.teamAScore || 0),
+              teamBScore: Number(game.teamBScore || 0)
+            },
+            playerOfTheGame: playerOfTheGame ? {
+              name: playerOfTheGame.name,
+              number: playerOfTheGame.number,
+              teamName: playerOfTheGame.teamName,
+              perScore: Number(playerOfTheGame.perScore || 0),
+              stats: playerOfTheGame.stats || {}
+            } : null,
+            originalPlayerOfTheGame: potgSelectionMode === "manual" && autoPlayerOfTheGame && autoPlayerOfTheGame.id !== playerOfTheGame?.id ? {
+              name: autoPlayerOfTheGame.name,
+              number: autoPlayerOfTheGame.number,
+              teamName: autoPlayerOfTheGame.teamName,
+              perScore: Number(autoPlayerOfTheGame.perScore || 0),
+              stats: autoPlayerOfTheGame.stats || {}
+            } : null,
+            potgSelectionMode,
+            bestPerformers,
+            standoutPerformersByTeam,
+            playByPlay: pbpForPrompt,
+            finalMoments: finalMomentsForPrompt,
+            leadSwingSummary,
+            lineupPatternSummary
+          })
+        });
+        const generated = String(response?.writeup || "").trim();
+        if (!generated) {
+          showToast("Could not generate a writeup for this game.", "error");
+          return;
+        }
+        setHistoryWriteupInput(generated);
+        showToast("Writeup generated. Review and save when ready.", "success");
+      } catch (error) {
+        showToast(error?.message || "Failed to generate writeup.", "error");
+      } finally {
+        setGeneratingWriteupGameId(null);
+      }
+    };
+    const handleGeneratePotgWriteup = async ({ game, playerOfTheGame, auto = false }) => {
+      if (!game || !playerOfTheGame || !canOperateLive) return;
+      if (generatingPotgWriteupGameId === game.id) return;
+      setGeneratingPotgWriteupGameId(game.id);
+      try {
+        const response = await apiRequest("/api/generate-potg-writeup", {
+          method: "POST",
+          body: JSON.stringify({
+            game: {
+              id: game.id,
+              date: game.date,
+              teamAId: game.teamAId,
+              teamBId: game.teamBId,
+              teamAName: game.teamAName,
+              teamBName: game.teamBName,
+              teamAScore: Number(game.teamAScore || 0),
+              teamBScore: Number(game.teamBScore || 0)
+            },
+            playerOfTheGame: {
+              id: playerOfTheGame.id,
+              name: playerOfTheGame.name,
+              number: playerOfTheGame.number,
+              teamId: playerOfTheGame.teamId,
+              teamName: playerOfTheGame.teamName,
+              stats: playerOfTheGame.stats || {}
+            }
+          })
+        });
+        const generated = String(response?.writeup || "").trim();
+        if (!generated) {
+          throw new Error("Could not generate a player spotlight for this game.");
+        }
+        const updatedGames = games.map((existingGame) => {
+          if (existingGame.id !== game.id) return existingGame;
+          return {
+            ...existingGame,
+            potgWriteup: generated
+          };
+        });
+        setGames(updatedGames);
+        const updatedGame = updatedGames.find((existingGame) => existingGame.id === game.id) || null;
+        if (updatedGame && navigator.onLine !== false) {
+          try {
+            await apiRequest(`/api/games/${encodeURIComponent(game.id)}`, {
+              method: "PUT",
+              body: JSON.stringify({ game: updatedGame })
+            });
+            writeCachedAppState(teams, updatedGames, statActions, { dirty: false });
+            if (!auto) {
+              showToast("POTG spotlight generated and saved.", "success");
+            }
+            return;
+          } catch (patchError) {
+          }
+        }
+        await saveFullState(teams, updatedGames);
+        if (!auto) {
+          showToast("POTG spotlight generated and saved.", "success");
+        }
+      } catch (error) {
+        if (auto) {
+          attemptedAutoPotgWriteupRef.current.delete(game.id);
+        } else {
+          showToast(error?.message || "Failed to generate POTG spotlight.", "error");
+        }
+      } finally {
+        setGeneratingPotgWriteupGameId(null);
+      }
+    };
+    const handleSetManualPotg = async (gameIdOrPlayerId, maybePlayerId = null) => {
+      if (!isLoggedIn) {
+        showToast("Log in to edit POTG.", "info");
+        return;
+      }
+      if (!canOperateLive) return;
+      const targetGameId = maybePlayerId ? String(gameIdOrPlayerId || "").trim() : "";
+      const playerId = maybePlayerId ? maybePlayerId : gameIdOrPlayerId;
+      const targetGame = targetGameId ? games.find((existingGame) => existingGame.id === targetGameId) || null : null;
+      const currentPotgPlayerId = String(
+        targetGame?.manualPotgPlayerId || (!targetGameId ? liveGameSnapshot?.manualPotgPlayerId : "") || ""
+      ).trim();
+      const nextPotgPlayerId = currentPotgPlayerId === String(playerId || "") ? "" : String(playerId || "");
+      const winningTeamId = Number(targetGame?.teamAScore || 0) === Number(targetGame?.teamBScore || 0) ? "" : Number(targetGame?.teamAScore || 0) > Number(targetGame?.teamBScore || 0) ? String(targetGame?.teamAId || "") : String(targetGame?.teamBId || "");
+      const selectedPlayerTeamId = String(
+        teams.find((team) => (team.players || []).some((player) => player.id === String(playerId || "")))?.id || ""
+      );
+      if (nextPotgPlayerId && winningTeamId && selectedPlayerTeamId && selectedPlayerTeamId !== winningTeamId) {
+        showToast("Manual POTG must come from the winning team.", "info");
+        return;
+      }
+      if (!targetGame) {
+        const nextLiveSnapshot = liveGameSnapshot ? {
+          ...liveGameSnapshot,
+          manualPotgPlayerId: nextPotgPlayerId
+        } : null;
+        if (!nextLiveSnapshot) {
+          showToast("Could not update POTG for the active game right now.", "error");
+          return;
+        }
+        setLiveGameSnapshot(nextLiveSnapshot);
+        const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+        const nextClockControlRevision = Number(clockControlRevisionRef.current || 0);
+        const nextSessionUpdatedAt = Date.now();
+        const liveSessionPayload = {
+          teamAId,
+          teamBId,
+          teamAScore,
+          teamBScore,
+          liveSessionInstanceId,
+          sessionCreatedAt: Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now()),
+          sessionRevision: nextSessionRevision,
+          clockControlRevision: nextClockControlRevision,
+          currentQuarter,
+          periodClockSeconds,
+          isPeriodClockRunning,
+          isPlayPaused,
+          livePlayerSeconds,
+          teamALineup,
+          teamABench,
+          teamBLineup,
+          teamBBench,
+          lineupRevision,
+          liveStats,
+          liveGameSnapshot: nextLiveSnapshot,
+          periodSnapshots,
+          gameLog,
+          loggedHistory,
+          playedPlayers,
+          dnpPlayers,
+          dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+          awaitingPeriodStart,
+          sessionUpdatedAt: nextSessionUpdatedAt
+        };
+        await saveSessionToServer(liveSessionPayload);
+        showToast(nextPotgPlayerId ? "Manual POTG selected." : "Manual POTG cleared.", "success");
+        return;
+      }
+      const updatedGames = games.map((existingGame) => {
+        if (existingGame.id !== targetGameId) return existingGame;
+        const nextGame = { ...existingGame };
+        if (nextPotgPlayerId) {
+          nextGame.manualPotgPlayerId = nextPotgPlayerId;
+        } else {
+          delete nextGame.manualPotgPlayerId;
+        }
+        return nextGame;
+      });
+      setGames(updatedGames);
+      const updatedGame = updatedGames.find((existingGame) => existingGame.id === targetGameId) || null;
+      if (updatedGame && navigator.onLine !== false) {
+        try {
+          await apiRequest(`/api/games/${encodeURIComponent(targetGameId)}`, {
+            method: "PUT",
+            body: JSON.stringify({ game: updatedGame })
+          });
+          writeCachedAppState(teams, updatedGames, statActions, { dirty: false });
+          showToast(nextPotgPlayerId ? "Manual POTG selected." : "Manual POTG cleared.", "success");
+          return;
+        } catch (patchError) {
+        }
+      }
+      await saveFullState(teams, updatedGames);
+      showToast(nextPotgPlayerId ? "Manual POTG selected." : "Manual POTG cleared.", "success");
+    };
+    const handleExportData = () => {
+      try {
+        const backupData = { teams, games };
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData));
+        const downloadAnchor = document.createElement("a");
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `league_stats_backup_${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast("Database backup file downloaded!", "success");
+      } catch (e) {
+        showToast("Failed to export database.", "error");
+      }
+    };
+    const handleImportData = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fileReader = new FileReader();
+      fileReader.readAsText(file, "UTF-8");
+      fileReader.onload = async (event) => {
+        try {
+          const parsedData = JSON.parse(event.target.result);
+          if (parsedData && Array.isArray(parsedData.teams)) {
+            const normalizedTeams = normalizeTeamsForStorage(parsedData.teams);
+            const importedGames = Array.isArray(parsedData.games) ? parsedData.games : [];
+            setTeams(normalizedTeams);
+            setGames(importedGames);
+            await saveFullState(normalizedTeams, importedGames);
+            showToast("Database backup successfully restored!", "success");
+          }
+        } catch (err) {
+          showToast("Failed to parse system backup file.", "error");
+        }
+      };
+    };
+    const handleMergeData = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fileReader = new FileReader();
+      fileReader.readAsText(file, "UTF-8");
+      fileReader.onload = async (event) => {
+        try {
+          const parsedData = JSON.parse(event.target.result);
+          if (!parsedData || !Array.isArray(parsedData.teams) || !Array.isArray(parsedData.games)) {
+            showToast("Invalid backup file format for merging.", "error");
+            return;
+          }
+          let localTeamsCopy = JSON.parse(JSON.stringify(teams));
+          let localGamesCopy = JSON.parse(JSON.stringify(games));
+          const newGamesToMerge = parsedData.games.filter((ig) => !localGamesCopy.some((lg) => lg.id === ig.id));
+          if (newGamesToMerge.length === 0) {
+            showToast("No new game records found to merge. All imported matches already exist.", "info");
+            return;
+          }
+          let mergeCount = 0;
+          newGamesToMerge.forEach((game) => {
+            let localTeamA = localTeamsCopy.find((t) => t.name.toLowerCase().trim() === game.teamAName.toLowerCase().trim());
+            if (!localTeamA) {
+              const impTeam = parsedData.teams.find((t) => t.id === game.teamAId) || { color: "#e2e8f0" };
+              localTeamA = {
+                id: `team_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                name: game.teamAName,
+                color: impTeam.color,
+                players: []
+              };
+              localTeamsCopy.push(localTeamA);
+            }
+            let localTeamB = localTeamsCopy.find((t) => t.name.toLowerCase().trim() === game.teamBName.toLowerCase().trim());
+            if (!localTeamB) {
+              const impTeam = parsedData.teams.find((t) => t.id === game.teamBId) || { color: "#3b82f6" };
+              localTeamB = {
+                id: `team_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                name: game.teamBName,
+                color: impTeam.color,
+                players: []
+              };
+              localTeamsCopy.push(localTeamB);
+            }
+            const mappedPlayerStats = {};
+            Object.entries(game.playerStats || {}).forEach(([impPlayerId, stats]) => {
+              let impPlayerObj = null;
+              for (let t of parsedData.teams) {
+                impPlayerObj = t.players.find((p) => p.id === impPlayerId);
+                if (impPlayerObj) break;
+              }
+              if (!impPlayerObj) {
+                impPlayerObj = { name: `Unknown Player (${impPlayerId})`, number: "0" };
+              }
+              const importedTeamWithPlayer = parsedData.teams.find((t) => t.players.some((p) => p.id === impPlayerId));
+              const isTeamA = importedTeamWithPlayer && importedTeamWithPlayer.name.toLowerCase().trim() === game.teamAName.toLowerCase().trim();
+              const targetLocalTeam = isTeamA ? localTeamA : localTeamB;
+              const impNameClean = impPlayerObj.name.toLowerCase().trim();
+              let localPlayer = targetLocalTeam.players.find((p) => p.name.toLowerCase().trim() === impNameClean);
+              if (!localPlayer) {
+                const getLastName = (name) => name.split(",")[0].trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+                const impLastName = getLastName(impPlayerObj.name);
+                localPlayer = targetLocalTeam.players.find((p) => {
+                  const localLastName = getLastName(p.name);
+                  return localLastName === impLastName && impLastName.length >= 2;
+                });
+              }
+              if (!localPlayer) {
+                const cleanString = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, "");
+                const impClean = cleanString(impPlayerObj.name);
+                localPlayer = targetLocalTeam.players.find((p) => {
+                  const localClean = cleanString(p.name);
+                  return (localClean.includes(impClean) || impClean.includes(localClean)) && impClean.length >= 2;
+                });
+              }
+              if (!localPlayer) {
+                localPlayer = {
+                  id: `player_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                  name: impPlayerObj.name,
+                  number: impPlayerObj.number,
+                  positions: normalizePlayerPositions(impPlayerObj),
+                  gamesPlayed: 0,
+                  totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+                };
+                targetLocalTeam.players.push(localPlayer);
+              }
+              localPlayer.gamesPlayed = (localPlayer.gamesPlayed || 0) + 1;
+              localPlayer.totalStats.pts = (localPlayer.totalStats.pts || 0) + (stats.pts || 0);
+              localPlayer.totalStats.ast = (localPlayer.totalStats.ast || 0) + (stats.ast || 0);
+              localPlayer.totalStats.reb = (localPlayer.totalStats.reb || 0) + (stats.reb || 0);
+              localPlayer.totalStats.stl = (localPlayer.totalStats.stl || 0) + (stats.stl || 0);
+              localPlayer.totalStats.blk = (localPlayer.totalStats.blk || 0) + (stats.blk || 0);
+              localPlayer.totalStats.to = (localPlayer.totalStats.to || 0) + (stats.to || 0);
+              localPlayer.totalStats.pf = (localPlayer.totalStats.pf || 0) + (stats.pf || 0);
+              localPlayer.totalStats.fg2m = (localPlayer.totalStats.fg2m || 0) + (stats.fg2m || 0);
+              localPlayer.totalStats.fg3m = (localPlayer.totalStats.fg3m || 0) + (stats.fg3m || 0);
+              localPlayer.totalStats.fg2m_miss = (localPlayer.totalStats.fg2m_miss || 0) + (stats.fg2m_miss || 0);
+              localPlayer.totalStats.fg3m_miss = (localPlayer.totalStats.fg3m_miss || 0) + (stats.fg3m_miss || 0);
+              localPlayer.totalStats.ftm = (localPlayer.totalStats.ftm || 0) + (stats.ftm || 0);
+              localPlayer.totalStats.ft_miss = (localPlayer.totalStats.ft_miss || 0) + (stats.ft_miss || 0);
+              mappedPlayerStats[localPlayer.id] = stats;
+            });
+            const mappedGame = {
+              ...game,
+              teamAId: localTeamA.id,
+              teamBId: localTeamB.id,
+              playerStats: mappedPlayerStats
+            };
+            localGamesCopy.push(mappedGame);
+            mergeCount++;
+          });
+          localGamesCopy.sort((a, b) => b.id.localeCompare(a.id));
+          setTeams(localTeamsCopy);
+          setGames(localGamesCopy);
+          await saveFullState(localTeamsCopy, localGamesCopy);
+          showToast(`Successfully merged ${mergeCount} match(es)! Career stats matched continuously by Name.`, "success");
+        } catch (err) {
+          console.error(err);
+          showToast("Failed to complete data merge.", "error");
+        }
+      };
+    };
+    const handleExportRostersOnly = () => {
+      try {
+        const rostersOnly = teams.map((t) => ({
+          id: t.id,
+          name: t.name,
+          color: t.color,
+          players: t.players.map((p) => ({
+            id: p.id,
+            name: p.name,
+            number: p.number,
+            positions: normalizePlayerPositions(p),
+            gamesPlayed: 0,
+            totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+          }))
+        }));
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(rostersOnly));
+        const downloadAnchor = document.createElement("a");
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `league_rosters_${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast("Roster templates exported!", "success");
+      } catch (e) {
+        showToast("Failed to compile roster export.", "error");
+      }
+    };
+    const handleImportRostersOnly = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const fileReader = new FileReader();
+      fileReader.readAsText(file, "UTF-8");
+      fileReader.onload = (event) => {
+        try {
+          const parsedRosters = JSON.parse(event.target.result);
+          if (parsedRosters && Array.isArray(parsedRosters)) {
+            saveTeamState(parsedRosters);
+            showToast("Team rosters imported!", "success");
+          }
+        } catch (err) {
+          showToast("Failed to process roster upload.", "error");
+        }
+      };
+    };
+    const clearTransientLiveActionState = () => {
+      setActiveAction(null);
+      setCorrectionMode(false);
+      setShowLoggingModal(false);
+      setShowSyncClockEditor(false);
+      setIsEditingClockInput(false);
+      setShowSubstitutionModal(false);
+      setSubTargetPlayer(null);
+      setShowAddFromBenchModal(false);
+      setAddFromBenchTeam(null);
+      setAddFromBenchSelection([]);
+    };
+    const createLiveCheckpointSnapshot = (quarterValue = currentQuarter) => ({
+      teamAId,
+      teamBId,
+      teamAScore,
+      teamBScore,
+      currentQuarter: quarterValue || currentQuarter || 1,
+      teamALineup: [...teamALineup],
+      teamABench: [...teamABench],
+      teamBLineup: [...teamBLineup],
+      teamBBench: [...teamBBench],
+      liveStats: cloneStatsMap(liveStats || {}),
+      playedPlayers: [...playedPlayers]
+    });
+    const clearLocalLiveSessionArtifacts = ({ keepTeamSelection = false } = {}) => {
+      localStorage.removeItem("active_live_session");
+      localStorage.removeItem(LIVE_EVENTS_QUEUE_KEY);
+      localStorage.removeItem(ACTIVE_SESSION_SYNC_KEY);
+      try {
+        localStorage.removeItem(LIVE_EVENTS_LAST_SEQ_KEY);
+      } catch (err) {
+      }
+      pendingLiveEventsRef.current = [];
+      persistPendingLiveEvents();
+      lastLiveSeqRef.current = 0;
+      try {
+        localStorage.setItem(LIVE_EVENTS_LAST_SEQ_KEY, "0");
+      } catch (err) {
+      }
+      processedGameLogIdsRef.current = /* @__PURE__ */ new Set();
+      remoteEventIdsRef.current = /* @__PURE__ */ new Set();
+      liveEventQueueReadyRef.current = false;
+      lastRemoteGameLogIdsRef.current = /* @__PURE__ */ new Set();
+      locallyDeletedLiveLogIdsRef.current = /* @__PURE__ */ new Set();
+      lastObservedLogIdRef.current = null;
+      pendingActiveSessionSyncRef.current = null;
+      persistPendingActiveSessionSync();
+      setSyncDebug((prev) => ({
+        ...prev,
+        pendingQueue: 0,
+        hasLocalOnly: false
+      }));
+      hadLiveSessionRef.current = false;
+      isGameLiveRef.current = false;
+      liveSessionInstanceIdRef.current = "";
+      liveSessionCreatedAtRef.current = 0;
+      setIsGameLive(false);
+      setIsPlayPaused(false);
+      setActiveAction(null);
+      setCorrectionMode(false);
+      setAwaitingOvertimeDecision(false);
+      setAwaitingPeriodStart(false);
+      setShowLoggingModal(false);
+      setShowSubstitutionModal(false);
+      setSubTargetPlayer(null);
+      setShowAddFromBenchModal(false);
+      setAddFromBenchTeam(null);
+      setAddFromBenchSelection([]);
+      setShowHomeBenchAdder(false);
+      setShowAwayBenchAdder(false);
+      setShowSyncClockEditor(false);
+      setIsEditingClockInput(false);
+      setFoulAlert(null);
+      if (!keepTeamSelection) {
+        setTeamAId("");
+        setTeamBId("");
+      }
+      setLiveSessionInstanceId("");
+      setLiveSessionCreatedAt(0);
+      setTeamAScore(0);
+      setTeamBScore(0);
+      setCurrentQuarter(1);
+      setPeriodClockSeconds(getPeriodDurationSeconds(1));
+      setIsPeriodClockRunning(false);
+      setManualClockInput(formatSecondsAsClock(getPeriodDurationSeconds(1)));
+      setPendingPeriodActionMode(null);
+      setTeamALineup([]);
+      setTeamABench([]);
+      setTeamBLineup([]);
+      setTeamBBench([]);
+      setLiveStats({});
+      setLivePlayerSeconds({});
+      setLiveGameSnapshot(null);
+      setPeriodSnapshots([]);
+      setGameLog([]);
+      setLoggedHistory([]);
+      setPlayedPlayers([]);
+      setDnpPlayers([]);
+      setLineupRevision(0);
+      lineupRevisionRef.current = 0;
+      sessionRevisionRef.current = 0;
+    };
+    const clearLiveSessionEverywhere = async ({ keepTeamSelection = false, terminationStatus = "discarded" } = {}) => {
+      let clearedOnServer = false;
+      const discardedSessionInstanceId = String(liveSessionInstanceIdRef.current || "").trim();
+      const discardedSessionCreatedAt = Number(liveSessionCreatedAtRef.current || 0);
+      if (discardedSessionInstanceId) {
+        markDiscardedSessionTombstone(discardedSessionInstanceId, Date.now());
+      }
+      clearLocalLiveSessionArtifacts({ keepTeamSelection });
+      if (navigator.onLine) {
+        try {
+          const deleteResult = await apiRequest("/api/active-session", {
+            method: "DELETE",
+            body: JSON.stringify({
+              sourceClientId: syncClientIdRef.current,
+              clearLiveEvents: true,
+              discardedSessionInstanceId,
+              discardedSessionCreatedAt,
+              terminationStatus
+            })
+          });
+          if (deleteResult?.applied === false) {
+            const forcedDeleteResult = await apiRequest("/api/active-session", {
+              method: "DELETE",
+              body: JSON.stringify({
+                sourceClientId: syncClientIdRef.current,
+                clearLiveEvents: true,
+                discardedSessionInstanceId,
+                discardedSessionCreatedAt,
+                terminationStatus
+              })
+            });
+            clearedOnServer = forcedDeleteResult?.applied !== false;
+          } else {
+            clearedOnServer = true;
+          }
+        } catch (error) {
+          clearedOnServer = false;
+        }
+      }
+      if (!clearedOnServer) {
+        queueActiveSessionSync("delete", null, {
+          clearLiveEvents: true,
+          discardedSessionInstanceId,
+          discardedSessionCreatedAt,
+          terminationStatus
+        });
+        flushPendingActiveSessionSync();
+      }
+      return clearedOnServer;
+    };
+    const clearAnyRemoteActiveSessionBeforeStart = async () => {
+      if (navigator.onLine === false) return false;
+      try {
+        const payload = await apiRequest("/api/active-session");
+        const activeSession = payload?.session;
+        if (!activeSession || typeof activeSession !== "object") {
+          return true;
+        }
+        const activeSessionId = String(activeSession.liveSessionInstanceId || activeSession.sessionInstanceId || "").trim();
+        const activeSessionCreatedAt = Number(activeSession.sessionCreatedAt || 0);
+        const targetedDelete = await apiRequest("/api/active-session", {
+          method: "DELETE",
+          body: JSON.stringify({
+            sourceClientId: syncClientIdRef.current,
+            clearLiveEvents: true,
+            discardedSessionInstanceId: activeSessionId,
+            discardedSessionCreatedAt: activeSessionCreatedAt,
+            terminationStatus: "discarded"
+          })
+        });
+        if (targetedDelete?.applied === false) {
+          const forcedDelete = await apiRequest("/api/active-session", {
+            method: "DELETE",
+            body: JSON.stringify({
+              sourceClientId: syncClientIdRef.current,
+              clearLiveEvents: true,
+              terminationStatus: "discarded"
+            })
+          });
+          return forcedDelete?.applied !== false;
+        }
+        return true;
+      } catch (error) {
+        return false;
+      }
+    };
+    const saveSessionToServer = async (sessionOverride = null) => {
+      const sessionId = String(liveSessionInstanceIdRef.current || "").trim();
+      if (!sessionId) return;
+      const persistedLineupRevision = Math.max(lineupRevision || 0, getLineupRevisionFromLog(gameLog));
+      const sessionUpdatedAt = markLocalSessionUpdated();
+      const clockControlRevision = Math.max(
+        Number(clockControlRevisionRef.current || 0),
+        getClockControlRevisionFromLogs(gameLog, 0)
+      );
+      clockControlRevisionRef.current = clockControlRevision;
+      const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+      sessionRevisionRef.current = nextSessionRevision;
+      const session = sessionOverride || {
+        teamAId,
+        teamBId,
+        teamAScore,
+        teamBScore,
+        liveSessionInstanceId: sessionId,
+        sessionCreatedAt: Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now()),
+        sessionRevision: nextSessionRevision,
+        clockControlRevision,
+        currentQuarter,
+        periodClockSeconds,
+        isPeriodClockRunning,
+        isPlayPaused,
+        livePlayerSeconds,
+        teamALineup,
+        teamABench,
+        teamBLineup,
+        teamBBench,
+        lineupRevision: persistedLineupRevision,
+        liveStats,
+        liveGameSnapshot,
+        periodSnapshots,
+        gameLog,
+        loggedHistory,
+        playedPlayers,
+        dnpPlayers,
+        dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+        awaitingPeriodStart,
+        sessionUpdatedAt
+      };
+      persistActiveLiveSessionToLocal(session);
+      hadLiveSessionRef.current = true;
+      try {
+        const putResult = await apiRequest("/api/active-session", {
+          method: "PUT",
+          body: JSON.stringify({ session, sourceClientId: syncClientIdRef.current })
+        });
+        if (putResult?.applied === false) {
+          queueActiveSessionSync("put", session);
+          flushPendingActiveSessionSync();
+        }
+      } catch (_) {
+        queueActiveSessionSync("put", session);
+        flushPendingActiveSessionSync();
+      }
+    };
+    const handleStartMatch = async (e) => {
+      e?.preventDefault?.();
+      if (!canAdminControlClock) {
+        showToast("Only admin can create a live game.", "info");
+        return;
+      }
+      if (navigator.onLine === false) {
+        showToast("Internet connection is required to start a new match.", "error");
+        return;
+      }
+      if (!teamAId || !teamBId || teamAId === teamBId) return;
+      const teamAObj = teams.find((t) => t.id === teamAId);
+      const teamBObj = teams.find((t) => t.id === teamBId);
+      if (!teamAObj || !teamBObj || teamAObj.players.length === 0 || teamBObj.players.length === 0) return;
+      const didClearRemoteSession = await clearAnyRemoteActiveSessionBeforeStart();
+      if (!didClearRemoteSession) {
+        showToast("Could not clear previous active session on server. Please retry Start Match.", "error");
+        return;
+      }
+      await clearLiveSessionEverywhere({ keepTeamSelection: true, terminationStatus: "discarded" });
+      discardedLiveSessionTombstoneRef.current = { sessionInstanceId: "", discardedAt: 0 };
+      persistDiscardedSessionTombstone();
+      const startersA = teamAObj.players.slice(0, 5).map((p) => p.id);
+      const benchA = teamAObj.players.slice(5).map((p) => p.id);
+      const startersB = teamBObj.players.slice(0, 5).map((p) => p.id);
+      const benchB = teamBObj.players.slice(5).map((p) => p.id);
+      const nextSessionInstanceId = generateLiveSessionInstanceId();
+      const nextSessionCreatedAt = Date.now();
+      const focusEventTs = Date.now();
+      const nextFocusRevision = Math.max(Number(adminFocusRevisionRef.current || 0) + 1, focusEventTs * 1e3);
+      adminFocusRevisionRef.current = nextFocusRevision;
+      setTeamALineup(startersA);
+      setTeamABench(benchA);
+      setTeamBLineup(startersB);
+      setTeamBBench(benchB);
+      setPlayedPlayers([...startersA, ...startersB]);
+      setDnpPlayers([]);
+      const initializedStats = {};
+      teamAObj.players.forEach((p) => {
+        initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+      });
+      teamBObj.players.forEach((p) => {
+        initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+      });
+      const initialLiveSnapshot = {
+        teamAId,
+        teamBId,
+        teamAScore: 0,
+        teamBScore: 0,
+        currentQuarter: 1,
+        teamALineup: startersA,
+        teamABench: benchA,
+        teamBLineup: startersB,
+        teamBBench: benchB,
+        liveStats: initializedStats,
+        playedPlayers: [...startersA, ...startersB]
+      };
+      setLiveStats(initializedStats);
+      setPeriodSnapshots([]);
+      setLiveSessionInstanceId(nextSessionInstanceId);
+      setLiveSessionCreatedAt(nextSessionCreatedAt);
+      sessionRevisionRef.current = 0;
+      setTeamAScore(0);
+      setTeamBScore(0);
+      setCurrentQuarter(1);
+      setPeriodClockSeconds(0);
+      setIsPlayPaused(false);
+      setIsPeriodClockRunning(false);
+      setPendingPeriodActionMode(null);
+      setLivePlayerSeconds({});
+      setAwaitingOvertimeDecision(false);
+      setAwaitingPeriodStart(true);
+      setSharedAdminFocus("both");
+      setOperatorFocus("both");
+      clearTransientLiveActionState();
+      setLoggedHistory([]);
+      locallyDeletedLiveLogIdsRef.current = /* @__PURE__ */ new Set();
+      const initialGameLog = [
+        {
+          id: `${focusEventTs}_${Math.random().toString(36).slice(2, 8)}`,
+          time: getWallClockTime(),
+          text: "Admin focus: BOTH",
+          kind: "meta",
+          metaType: "adminFocusSet",
+          quarter: 1,
+          clockRemaining: formatSecondsAsClock(0),
+          role: "admin",
+          focus: "both",
+          focusRevision: nextFocusRevision,
+          clientId: syncClientIdRef.current
+        },
+        {
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          time: getWallClockTime(),
+          text: "Start Match",
+          kind: "meta",
+          metaType: "matchStart",
+          quarter: 1,
+          clockRemaining: formatSecondsAsClock(0)
+        }
+      ];
+      setGameLog(initialGameLog);
+      setLiveGameSnapshot(initialLiveSnapshot);
+      setLineupRevision(0);
+      lineupRevisionRef.current = 0;
+      const sessionUpdatedAt = markLocalSessionUpdated();
+      const nextSessionRevision = 1;
+      const initialClockControlRevision = Math.max(
+        Number(clockControlRevisionRef.current || 0),
+        focusEventTs
+      );
+      clockControlRevisionRef.current = initialClockControlRevision;
+      sessionRevisionRef.current = nextSessionRevision;
+      liveSessionInstanceIdRef.current = nextSessionInstanceId;
+      liveSessionCreatedAtRef.current = nextSessionCreatedAt;
+      const initialSession = {
+        teamAId,
+        teamBId,
+        teamAScore: 0,
+        teamBScore: 0,
+        liveSessionInstanceId: nextSessionInstanceId,
+        sessionCreatedAt: nextSessionCreatedAt,
+        sessionRevision: nextSessionRevision,
+        clockControlRevision: initialClockControlRevision,
+        currentQuarter: 1,
+        periodClockSeconds: 0,
+        isPeriodClockRunning: false,
+        isPlayPaused: false,
+        livePlayerSeconds: {},
+        teamALineup: startersA,
+        teamABench: benchA,
+        teamBLineup: startersB,
+        teamBBench: benchB,
+        lineupRevision: 0,
+        liveStats: initializedStats,
+        liveGameSnapshot: initialLiveSnapshot,
+        periodSnapshots: [],
+        gameLog: initialGameLog,
+        loggedHistory: [],
+        playedPlayers: [...startersA, ...startersB],
+        dnpPlayers: [],
+        dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0),
+        awaitingPeriodStart: true,
+        sessionUpdatedAt
+      };
+      await saveSessionToServer(initialSession);
+      setIsGameLive(true);
+      trackAnalyticsEvent("start_match", {
+        team_a_id: teamAId,
+        team_b_id: teamBId
+      });
+      showToast("Match started. Press Start Q1 to begin period play.", "success");
+    };
+    const handlePlayerClick = (playerId, isTeamA, options = {}) => {
+      const skipAccessChecks = Boolean(options?.skipAccessChecks);
+      if (!skipAccessChecks && !canUseLiveControls) {
+        showToast("Live controls are locked right now.", "info");
+        return;
+      }
+      if (!skipAccessChecks && !ensureTeamOperationAccess(isTeamA, "log stats for this team")) return;
+      if (!activeAction) {
+        showToast("Select a stat action first.", "info");
+        return;
+      }
+      const isTechnicalFoulAction = String(activeAction?.id || "") === "pf_technical";
+      const isFoulLikeSelectedAction = isFoulLikeAction(activeAction);
+      const isPrimaryAction = scoringActionIds.has(String(activeAction?.id || ""));
+      const isAutoResumeAction = autoResumeActionIds.has(String(activeAction?.id || ""));
+      const isStoppedClockAction = stoppedClockActionIds.has(String(activeAction?.id || ""));
+      const isManualPauseSource = latestPauseMetaType === "manualPause";
+      const isTimeoutOrFoulPauseSource = isTeamTimeoutPauseActive || latestPauseMetaType === "foulPause";
+      const canAutoResumeClockFromStat = !correctionMode && !canBackfillEndedPeriodStats && hasMatchStarted && hasCurrentQuarterStarted && !isAwaitingPeriodStart && !awaitingOvertimeDecision && Number(periodClockSeconds || 0) > 0 && !isPeriodClockRunning && !isManualPauseSource && (!isTimeoutOrFoulPauseSource || isAutoResumeAction) && !isStoppedClockAction;
+      if (isTimeoutOrFoulPauseSource && !isAutoResumeAction && !isTechnicalFoulAction && !isFoulLikeSelectedAction && !isStoppedClockAction && !canBackfillEndedPeriodStats) {
+        showToast("Clock is stopped for timeout/stoppage. Resume play before logging this action.", "info");
+        return;
+      }
+      if (!playerId) {
+        showToast("Select a player to record the action.", "info");
+        return;
+      }
+      const playerObjForModal = teams.flatMap((t) => t.players).find((p) => p.id === playerId);
+      if (isTechnicalFoulAction && !pendingTechnicalFoulReasonRef.current) {
+        setReasonInput({
+          type: "technicalFoul",
+          playerName: playerObjForModal?.name || "Player",
+          playerId,
+          isTeamA,
+          selectedReason: "",
+          customReason: ""
+        });
+        return;
+      }
+      const shouldConfirmResumeForNonPrimary = !isAutoResumeAction && !isStoppedClockAction && !isFoulLikeSelectedAction && canAutoResumeClockFromStat && !nonPrimaryResumeConfirmRef.current;
+      if (shouldConfirmResumeForNonPrimary) {
+        setConfirmDialog({
+          title: "Resume Clock?",
+          text: "Clock is currently stopped. Resume the clock and record this stat?",
+          cancelLabel: "Cancel",
+          confirmLabel: "Resume & Record",
+          onConfirm: () => {
+            setConfirmDialog(null);
+            nonPrimaryResumeConfirmRef.current = true;
+            handlePlayerClick(playerId, isTeamA);
+          }
+        });
+        return;
+      }
+      let targetQuarterForLog = backfillTargetQuarter;
+      let targetClockLabelForLog = backfillClockLabel;
+      if (!hasMatchStarted && !canBackfillEndedPeriodStats) {
+        if (periodActionMode === "startMatch") {
+          handlePeriodAction();
+          showToast("Match auto-started from stat trigger.", "info");
+        } else {
+          showToast("Match has not started yet.", "info");
+        }
+        return;
+      }
+      if (isAwaitingPeriodStart && !hasCurrentQuarterStarted && !canBackfillEndedPeriodStats) {
+        if (periodActionMode === "startPeriod") {
+          handleStartNextQuarter();
+          targetQuarterForLog = nextPeriodToStart;
+          targetClockLabelForLog = formatSecondsAsClock(getPeriodDurationSeconds(nextPeriodToStart));
+          showToast(`${nextPeriodStartLabel} auto-started from stat trigger.`, "info");
+        } else if (periodActionMode === "startOvertime") {
+          handleStartOvertime();
+          targetQuarterForLog = nextPeriodToStart;
+          targetClockLabelForLog = formatSecondsAsClock(getPeriodDurationSeconds(nextPeriodToStart));
+          showToast(`${nextPeriodStartLabel} auto-started from stat trigger.`, "info");
+        } else {
+          showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, "info");
+          return;
+        }
+      }
+      if (stoppedClockActionIds.has(activeAction?.id) && isPeriodClockRunning) {
+        showToast("Free Throw and Free Throw Missed are only allowed when the clock is stopped or paused.", "info");
+        return;
+      }
+      const currentFouls = liveStats[playerId]?.pf || 0;
+      if (currentFouls >= 5) {
+        const playerObj2 = teams.flatMap((t) => t.players).find((p) => p.id === playerId);
+        if (playerObj2) {
+          showToast(`${playerObj2.name} is already disqualified with 5 fouls.`, "info");
+        }
+        return;
+      }
+      const multiplier = correctionMode ? -1 : 1;
+      const changeAmount = activeAction.val * multiplier;
+      const statField = activeAction.stat;
+      const attachedTrackingStat = activeAction.trackingStat;
+      const countsTeamFoul = activeAction.stat !== "pf" ? true : activeAction.countsTeamFoul !== false;
+      const playerObj = teams.flatMap((t) => t.players).find((p) => p.id === playerId);
+      let logText = "";
+      if (playerObj) {
+        if (correctionMode) {
+          logText = `\u{1F504} CORRECTION: ${playerObj.name} stat adjusted`;
+        } else {
+          logText = `\u26A1 ${playerObj.name}: ${activeAction.label}`;
+        }
+      }
+      const isPointOrFieldGoalAction = statField === "pts" || /^fg|^ft/.test(String(statField || "")) || /^fg|^ft/.test(String(attachedTrackingStat || ""));
+      const projectedTeamAScore = statField === "pts" && isTeamA ? Math.max(0, teamAScore + changeAmount) : teamAScore;
+      const projectedTeamBScore = statField === "pts" && !isTeamA ? Math.max(0, teamBScore + changeAmount) : teamBScore;
+      const scoreSuffix = isPointOrFieldGoalAction ? ` ${formatScoreTag(projectedTeamAScore, projectedTeamBScore)}` : "";
+      let foulOutRemovalEvent = null;
+      if (statField === "pf" && !correctionMode) {
+        const currentFouls2 = liveStats[playerId]?.pf || 0;
+        const nextFouls = currentFouls2 + changeAmount;
+        if (nextFouls === 4) {
+          setFoulAlert({ playerName: playerObj.name, number: playerObj.number, fouls: 4, type: "warning" });
+        } else if (nextFouls >= 5) {
+          setFoulAlert({ playerName: playerObj.name, number: playerObj.number, fouls: 5, type: "disqualified" });
+          const lineup = isTeamA ? teamALineup : teamBLineup;
+          const bench = isTeamA ? teamABench : teamBBench;
+          if (lineup.includes(playerId)) {
+            const sanitized = sanitizeTeamRotation(
+              isTeamA ? teamAId : teamBId,
+              lineup.filter((id) => id !== playerId),
+              bench.includes(playerId) ? bench : [...bench, playerId],
+              { fillToFive: false }
+            );
+            if (isTeamA) {
+              setTeamALineup(sanitized.lineup);
+              setTeamABench(sanitized.bench);
+            } else {
+              setTeamBLineup(sanitized.lineup);
+              setTeamBBench(sanitized.bench);
+            }
+            const foulOutEventId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            foulOutRemovalEvent = {
+              id: foulOutEventId,
+              time: getWallClockTime(),
+              text: `Auto-removed on-court: ${playerObj?.name || "Player"} fouled out (5 PF)`,
+              kind: "meta",
+              metaType: "onCourtRemove",
+              quarter: targetQuarterForLog,
+              clockRemaining: targetClockLabelForLog,
+              isTeamA,
+              playerId
+            };
+            const removeRevision = getLineupRevisionFromEventId(foulOutEventId);
+            if (removeRevision > 0) {
+              setLineupRevision((prev) => {
+                const next = Math.max(prev, removeRevision);
+                lineupRevisionRef.current = next;
+                return next;
+              });
+            }
+            processedGameLogIdsRef.current.add(foulOutEventId);
+            enqueueLiveEvent(foulOutRemovalEvent);
+          }
+        }
+      }
+      const shouldAutoResumeFromStatTrigger = canAutoResumeClockFromStat && (isAutoResumeAction || nonPrimaryResumeConfirmRef.current);
+      const loggedWhileClockStopped = !isPeriodClockRunning && Number(periodClockSeconds || 0) > 0;
+      const pauseStateSuffix = loggedWhileClockStopped && !shouldAutoResumeFromStatTrigger ? " [Clock Stopped]" : "";
+      const logWithTag = `${logText}${scoreSuffix}${pauseStateSuffix}`;
+      const isSelectedFoulAction = statField === "pf";
+      const shouldAutoPauseForFoul = isSelectedFoulAction && !correctionMode && changeAmount > 0;
+      const logEntryId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const historyEntry = { id: logEntryId, playerId, statField, changeAmount, attachedTrackingStat, trackingDelta: 1 * multiplier, previousTeamAScore: teamAScore, previousTeamBScore: teamBScore, logText: logWithTag, kind: "stat" };
+      historyEntry.actionId = activeAction.id;
+      historyEntry.countsTeamFoul = countsTeamFoul;
+      setLoggedHistory((prev) => [historyEntry, ...prev]);
+      if (!playedPlayers.includes(playerId)) {
+        setPlayedPlayers((prev) => [...prev, playerId]);
+      }
+      if (dnpPlayers.includes(playerId)) {
+        setDnpPlayers((prev) => prev.filter((id) => id !== playerId));
+      }
+      setLiveStats((prev) => {
+        const currentVal = prev[playerId]?.[statField] || 0;
+        const newVal = Math.max(0, currentVal + changeAmount);
+        let playerUpdate = { ...prev[playerId], [statField]: newVal };
+        if (attachedTrackingStat) {
+          const currentTrackVal = prev[playerId]?.[attachedTrackingStat] || 0;
+          playerUpdate[attachedTrackingStat] = Math.max(0, currentTrackVal + 1 * multiplier);
+        }
+        const updated = { ...prev, [playerId]: playerUpdate };
+        let totalA = 0, totalB = 0;
+        const teamAObj = teams.find((t) => t.id === teamAId);
+        const teamBObj = teams.find((t) => t.id === teamBId);
+        if (teamAObj) teamAObj.players.forEach((p) => {
+          totalA += updated[p.id]?.pts || 0;
+        });
+        if (teamBObj) teamBObj.players.forEach((p) => {
+          totalB += updated[p.id]?.pts || 0;
+        });
+        setTeamAScore(totalA);
+        setTeamBScore(totalB);
+        return updated;
+      });
+      const statLogEvent = {
+        id: logEntryId,
+        time: getWallClockTime(),
+        text: logWithTag,
+        kind: "stat",
+        quarter: targetQuarterForLog,
+        clockRemaining: targetClockLabelForLog,
+        isTeamA,
+        actionId: activeAction.id,
+        countsTeamFoul,
+        playerId,
+        statField,
+        changeAmount,
+        attachedTrackingStat,
+        trackingDelta: 1 * multiplier
+      };
+      markLocalSessionUpdated();
+      const autoResumeEvent = shouldAutoResumeFromStatTrigger ? {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        time: getWallClockTime(),
+        text: `Play resumed (${getPeriodLabel(currentQuarter)})`,
+        kind: "meta",
+        metaType: "playResume",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds)
+      } : null;
+      if (shouldAutoPauseForFoul) {
+        const technicalFoulReason = isTechnicalFoulAction ? pendingTechnicalFoulReasonRef.current : "";
+        const foulText = isTechnicalFoulAction ? technicalFoulReason ? `Technical Foul on ${playerObj?.name || "player"}: ${technicalFoulReason}` : `Technical Foul on ${playerObj?.name || "player"}` : `Official stoppage: Foul on ${playerObj?.name || "player"}`;
+        const foulPauseEvent = {
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          time: getWallClockTime(),
+          text: foulText,
+          kind: "meta",
+          metaType: "foulPause",
+          quarter: targetQuarterForLog,
+          clockRemaining: targetClockLabelForLog,
+          isTeamA,
+          ...isTechnicalFoulAction && { isTechnicalFoul: true },
+          ...technicalFoulReason && { reason: technicalFoulReason }
+        };
+        pendingTechnicalFoulReasonRef.current = "";
+        localFoulPauseTriggerIdRef.current = foulPauseEvent.id;
+        const prependedEvents = foulOutRemovalEvent ? [foulPauseEvent, foulOutRemovalEvent, statLogEvent] : [foulPauseEvent, statLogEvent];
+        setGameLog((prev) => [...prependedEvents, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+      } else {
+        const prependedEvents = [
+          ...foulOutRemovalEvent ? [foulOutRemovalEvent] : [],
+          statLogEvent,
+          ...autoResumeEvent ? [autoResumeEvent] : []
+        ];
+        setGameLog((prev) => [...prependedEvents, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      }
+      triggerPlayerFlash(playerId);
+      flashPlayerElements(playerId);
+      setActiveAction(null);
+      setCorrectionMode(false);
+      setShowLoggingModal(false);
+      if (shouldAutoPauseForFoul) {
+        nonPrimaryResumeConfirmRef.current = false;
+        markLocalSessionUpdated();
+        setIsPlayPaused(true);
+        setIsPeriodClockRunning(false);
+        showToast("Clock stopped for foul stoppage. Press Resume to continue.", "info");
+        return;
+      }
+      nonPrimaryResumeConfirmRef.current = false;
+      if (autoResumeEvent) {
+        markLocalSessionUpdated();
+        setPendingPeriodActionMode("pauseGame");
+        setAwaitingPeriodStart(false);
+        setAwaitingOvertimeDecision(false);
+        armLocalResumeStabilityWindow();
+        setIsPlayPaused(false);
+        suppressPeriodAutoStopRef.current = true;
+        suppressTimeoutAutoStopRef.current = true;
+        setIsPeriodClockRunning(true);
+        showToast("Clock auto-resumed on live action.", "info");
+      }
+    };
+    const restoreClockFromLatestLog = (logs = [], fallbackQuarter = currentQuarter) => {
+      const sourceLogs = Array.isArray(logs) ? logs : [];
+      const latestQuarterEvent = getLatestLogEvent(sourceLogs, (event) => {
+        const parsedQuarter = Number.parseInt(event?.quarter, 10);
+        return Number.isFinite(parsedQuarter) && parsedQuarter > 0;
+      });
+      const resolvedQuarter = latestQuarterEvent ? Number.parseInt(latestQuarterEvent.quarter, 10) || fallbackQuarter || 1 : fallbackQuarter || 1;
+      setCurrentQuarter(resolvedQuarter);
+      const latestClockEvent = getLatestLogEvent(sourceLogs, (event) => {
+        const parsed = parseClockInputToSeconds(event?.clockRemaining);
+        return parsed !== null;
+      });
+      if (latestClockEvent) {
+        const parsed = parseClockInputToSeconds(latestClockEvent.clockRemaining);
+        if (parsed !== null) {
+          setPeriodClockSeconds(parsed);
+          return;
+        }
+      }
+      const hasStartedInLogs = sourceLogs.some((event) => event?.kind === "meta" && event?.metaType === "matchStart");
+      const latestPeriodMeta = getLatestLogEvent(
+        sourceLogs,
+        (event) => event?.kind === "meta" && (event.metaType === "matchStart" || event.metaType === "quarterStart" || event.metaType === "quarterEnd")
+      );
+      const isAwaitingFromLogs = latestPeriodMeta ? latestPeriodMeta.metaType === "matchStart" || latestPeriodMeta.metaType === "quarterEnd" : !hasStartedInLogs;
+      if (isAwaitingFromLogs) {
+        setPeriodClockSeconds(0);
+        return;
+      }
+      setPeriodClockSeconds(getPeriodDurationSeconds(resolvedQuarter));
+    };
+    const handleUndo = () => {
+      if (loggedHistory.length === 0) return;
+      if (undoLockedByQuarterEnd) {
+        showToast("Undo is disabled after ending a quarter.", "info");
+        return;
+      }
+      const latestHistoryEntry = (loggedHistory || []).find((entry) => !entry?.isUndoCompensation);
+      if (!latestHistoryEntry) {
+        showToast("No undoable stat action found.", "info");
+        return;
+      }
+      const latestHistoryLog = gameLog.find((log) => log.id === latestHistoryEntry?.id);
+      if (isProtectedLogEntry(latestHistoryLog, finalizedPeriods)) {
+        const lockReason = String(latestHistoryLog?.lockReason || "").includes("checkpoint10") ? "checkpoint lock (every 10 entries)" : "period-end lock";
+        showToast(`Undo blocked: latest action is protected by ${lockReason}.`, "info");
+        return;
+      }
+      setIsPlayPaused(true);
+      setIsPeriodClockRunning(false);
+      const lastAction = latestHistoryEntry;
+      const remainingHistory = loggedHistory.filter((entry) => entry?.id !== lastAction.id);
+      const compensationEvent = {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        time: getWallClockTime(),
+        text: `UNDO: Reversed ${lastAction.logText || "last stat action"}`,
+        kind: "stat",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        isTeamA: latestHistoryLog?.isTeamA,
+        actionId: lastAction.actionId,
+        countsTeamFoul: lastAction.countsTeamFoul,
+        playerId: lastAction.playerId,
+        statField: lastAction.statField,
+        changeAmount: -1 * Number(lastAction.changeAmount || 0),
+        attachedTrackingStat: lastAction.attachedTrackingStat,
+        trackingDelta: -1 * Number(lastAction.trackingDelta || 0),
+        isUndoCompensation: true,
+        undoOfId: lastAction.id
+      };
+      const nextGameLog = [compensationEvent, ...gameLog].slice(0, MAX_LIVE_LOG_ENTRIES);
+      setLoggedHistory(remainingHistory);
+      setGameLog(nextGameLog);
+      const statSource = lastAction && lastAction.playerId && lastAction.statField ? lastAction : null;
+      if (statSource) {
+        setLiveStats((prev) => {
+          const currentPlayerStats = prev[statSource.playerId] || {};
+          const revertedValue = Math.max(0, (currentPlayerStats[statSource.statField] || 0) - (statSource.changeAmount || 0));
+          const revertedPlayerStats = {
+            ...currentPlayerStats,
+            [statSource.statField]: revertedValue
+          };
+          if (statSource.attachedTrackingStat) {
+            const trackingDelta = Number.isFinite(statSource.trackingDelta) ? statSource.trackingDelta : (statSource.changeAmount || 0) > 0 ? 1 : -1;
+            revertedPlayerStats[statSource.attachedTrackingStat] = Math.max(
+              0,
+              (currentPlayerStats[statSource.attachedTrackingStat] || 0) - trackingDelta
+            );
+          }
+          const updated = {
+            ...prev,
+            [statSource.playerId]: revertedPlayerStats
+          };
+          let totalA = 0;
+          let totalB = 0;
+          const teamAObj = teams.find((t) => t.id === teamAId);
+          const teamBObj = teams.find((t) => t.id === teamBId);
+          if (teamAObj) teamAObj.players.forEach((p) => {
+            totalA += updated[p.id]?.pts || 0;
+          });
+          if (teamBObj) teamBObj.players.forEach((p) => {
+            totalB += updated[p.id]?.pts || 0;
+          });
+          setTeamAScore(totalA);
+          setTeamBScore(totalB);
+          return updated;
+        });
+      } else {
+        const replayed = buildLiveStateFromEvents(liveGameSnapshot, nextGameLog);
+        if (replayed) {
+          setLiveStats(replayed.liveStats);
+          setTeamAScore(replayed.teamAScore);
+          setTeamBScore(replayed.teamBScore);
+          setCurrentQuarter(replayed.currentQuarter || 1);
+          setTeamALineup(replayed.teamALineup);
+          setTeamABench(replayed.teamABench);
+          setTeamBLineup(replayed.teamBLineup);
+          setTeamBBench(replayed.teamBBench);
+          setPlayedPlayers(replayed.playedPlayers);
+        }
+      }
+      restoreClockFromLatestLog(nextGameLog, currentQuarter);
+      if (lastAction.playerId) {
+        triggerPlayerFlash(lastAction.playerId);
+        flashPlayerElements(lastAction.playerId);
+      }
+      showToast("Undo applied. Game paused. Press Resume to continue.", "info");
+    };
+    const handleDeleteLogEntry = (logId) => {
+      if (undoLockedByQuarterEnd) {
+        showToast("Undo is disabled after ending a quarter.", "info");
+        return;
+      }
+      const entry = gameLog.find((log) => log.id === logId);
+      if (!entry) return;
+      const entryIndex = gameLog.findIndex((log) => log.id === logId);
+      const entryQuarter = Number(getEffectiveQuarterFromLogEntry(entry, gameLog));
+      const isCurrentPeriodEntry = entryQuarter === Number(currentQuarter);
+      if (!isCurrentPeriodEntry) {
+        showToast("Delete is only allowed for the current period.", "info");
+        return;
+      }
+      if (isProtectedLogEntry(entry, finalizedPeriods)) {
+        const lockReason = String(entry?.lockReason || "").includes("checkpoint10") ? "checkpoint lock (every 10 entries)" : "period-end lock";
+        showToast(`Delete blocked: this log is protected by ${lockReason}.`, "info");
+        return;
+      }
+      setIsPeriodClockRunning(false);
+      const idsToDelete = /* @__PURE__ */ new Set([String(logId)]);
+      const isFoulStatEntry = entry?.kind === "stat" && String(entry?.statField || "") === "pf";
+      if (isFoulStatEntry && entryIndex >= 0) {
+        let linkedFoulPauseId = "";
+        let bestDistance = Number.POSITIVE_INFINITY;
+        const minIndex = Math.max(0, entryIndex - 3);
+        const maxIndex = Math.min(gameLog.length - 1, entryIndex + 3);
+        for (let idx = minIndex; idx <= maxIndex; idx += 1) {
+          if (idx === entryIndex) continue;
+          const candidate = gameLog[idx];
+          if (!candidate || candidate.kind !== "meta" || candidate.metaType !== "foulPause" || !candidate.id) continue;
+          const candidateQuarter = Number(getEffectiveQuarterFromLogEntry(candidate, gameLog));
+          if (candidateQuarter !== entryQuarter) continue;
+          if (String(candidate.clockRemaining || "") !== String(entry.clockRemaining || "")) continue;
+          if (typeof candidate.isTeamA === "boolean" && typeof entry.isTeamA === "boolean" && candidate.isTeamA !== entry.isTeamA) continue;
+          const distance = Math.abs(idx - entryIndex);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            linkedFoulPauseId = String(candidate.id);
+          }
+        }
+        if (linkedFoulPauseId) {
+          idsToDelete.add(linkedFoulPauseId);
+        }
+      }
+      idsToDelete.forEach((id) => locallyDeletedLiveLogIdsRef.current.add(id));
+      const remainingGameLog = gameLog.filter((log) => !idsToDelete.has(String(log?.id || "")));
+      const remainingHistory = loggedHistory.filter((item) => !idsToDelete.has(String(item?.id || "")));
+      const historyMatch = loggedHistory.find((item) => item.id === logId) || loggedHistory.find((item) => item.logText === entry.text);
+      const statSource = entry.kind === "stat" && entry.playerId && entry.statField ? entry : historyMatch && historyMatch.playerId && historyMatch.statField ? historyMatch : null;
+      if (statSource) {
+        setLiveStats((prev) => {
+          const currentPlayerStats = prev[statSource.playerId] || {};
+          const revertedValue = Math.max(0, (currentPlayerStats[statSource.statField] || 0) - (statSource.changeAmount || 0));
+          const revertedPlayerStats = {
+            ...currentPlayerStats,
+            [statSource.statField]: revertedValue
+          };
+          if (statSource.attachedTrackingStat) {
+            const trackingDelta = Number.isFinite(statSource.trackingDelta) ? statSource.trackingDelta : (statSource.changeAmount || 0) > 0 ? 1 : -1;
+            revertedPlayerStats[statSource.attachedTrackingStat] = Math.max(
+              0,
+              (currentPlayerStats[statSource.attachedTrackingStat] || 0) - trackingDelta
+            );
+          }
+          const updated = {
+            ...prev,
+            [statSource.playerId]: revertedPlayerStats
+          };
+          let totalA = 0;
+          let totalB = 0;
+          const teamAObj = teams.find((t) => t.id === teamAId);
+          const teamBObj = teams.find((t) => t.id === teamBId);
+          if (teamAObj) teamAObj.players.forEach((p) => {
+            totalA += updated[p.id]?.pts || 0;
+          });
+          if (teamBObj) teamBObj.players.forEach((p) => {
+            totalB += updated[p.id]?.pts || 0;
+          });
+          setTeamAScore(totalA);
+          setTeamBScore(totalB);
+          return updated;
+        });
+        setGameLog(remainingGameLog);
+        setLoggedHistory(remainingHistory);
+        restoreClockFromLatestLog(remainingGameLog, currentQuarter);
+        triggerPlayerFlash(statSource.playerId);
+        flashPlayerElements(statSource.playerId);
+        return;
+      }
+      const replayed = buildLiveStateFromEvents(liveGameSnapshot, remainingGameLog);
+      if (!replayed) {
+        setGameLog(remainingGameLog);
+        setLoggedHistory(remainingHistory);
+        restoreClockFromLatestLog(remainingGameLog, currentQuarter);
+        showToast("Removed log entry. Full state replay unavailable for this legacy session.", "info");
+        return;
+      }
+      setGameLog(remainingGameLog);
+      setLoggedHistory(remainingHistory);
+      setLiveStats(replayed.liveStats);
+      setTeamAScore(replayed.teamAScore);
+      setTeamBScore(replayed.teamBScore);
+      setCurrentQuarter(replayed.currentQuarter || 1);
+      setTeamALineup(replayed.teamALineup);
+      setTeamABench(replayed.teamABench);
+      setTeamBLineup(replayed.teamBLineup);
+      setTeamBBench(replayed.teamBBench);
+      setPlayedPlayers(replayed.playedPlayers);
+      restoreClockFromLatestLog(remainingGameLog, replayed.currentQuarter || currentQuarter);
+    };
+    const handleOpenLiveLogEdit = (logId) => {
+      if (!logId) return;
+      const targetEntry = gameLog.find((entry) => entry?.id === logId);
+      if (!targetEntry) return;
+      if (!isEditableStatLogEntry(targetEntry)) {
+        showToast("Only stat log entries can be edited.", "info");
+        return;
+      }
+      if (Number(getEffectiveQuarterFromLogEntry(targetEntry, gameLog)) !== Number(currentQuarter)) {
+        showToast("Edit is only allowed for the current period.", "info");
+        return;
+      }
+      if (isProtectedLogEntry(targetEntry, finalizedPeriods)) {
+        const lockReason = String(targetEntry?.lockReason || "").includes("checkpoint10") ? "checkpoint lock (every 10 entries)" : "period-end lock";
+        showToast(`Edit blocked: this log is protected by ${lockReason}.`, "info");
+        return;
+      }
+      const selectedActionExists = editableLiveStatActions.some((action) => action.id === targetEntry.actionId);
+      const defaultActionId = selectedActionExists ? targetEntry.actionId : editableLiveStatActions[0]?.id || "";
+      if (!defaultActionId) {
+        showToast("No editable stat actions are available.", "info");
+        return;
+      }
+      setEditingLiveLogId(logId);
+      setEditingLiveLogActionId(defaultActionId);
+      setSelectedPlayerId(String(targetEntry.playerId || "").trim());
+    };
+    const handleCloseLiveLogEdit = () => {
+      setEditingLiveLogId(null);
+      setEditingLiveLogActionId("");
+      setSelectedPlayerId("");
+    };
+    const handleApplyLiveLogEdit = () => {
+      if (!liveLogEditTarget) {
+        handleCloseLiveLogEdit();
+        return;
+      }
+      if (Number(getEffectiveQuarterFromLogEntry(liveLogEditTarget, gameLog)) !== Number(currentQuarter)) {
+        showToast("Edit is only allowed for the current period.", "info");
+        handleCloseLiveLogEdit();
+        return;
+      }
+      if (isProtectedLogEntry(liveLogEditTarget, finalizedPeriods)) {
+        const lockReason = String(liveLogEditTarget?.lockReason || "").includes("checkpoint10") ? "checkpoint lock (every 10 entries)" : "period-end lock";
+        showToast(`Edit blocked: this log is protected by ${lockReason}.`, "info");
+        handleCloseLiveLogEdit();
+        return;
+      }
+      const nextAction = editableLiveStatActions.find((action) => action.id === editingLiveLogActionId);
+      if (!nextAction) {
+        showToast("Choose a valid action to apply the edit.", "info");
+        return;
+      }
+      const resolvedPlayerId = String(selectedPlayerId || liveLogEditTarget.playerId || "").trim();
+      const nextPlayerObj = teams.flatMap((team) => team.players || []).find((player) => player.id === resolvedPlayerId) || null;
+      const changeSign = Number(liveLogEditTarget.changeAmount || 0) < 0 ? -1 : 1;
+      const nextChangeAmount = Number(nextAction.val || 0) * changeSign;
+      const nextTrackingDelta = nextAction.trackingStat ? changeSign : 0;
+      const nextCountsTeamFoul = nextAction.stat !== "pf" ? true : nextAction.countsTeamFoul !== false;
+      const teamPrefixMatch = String(liveLogEditTarget.text || "").match(/^\[(HOME|AWAY)\]\s*/);
+      const teamPrefix = teamPrefixMatch ? teamPrefixMatch[0] : "";
+      const editedLogText = `${teamPrefix}\u26A1 ${nextPlayerObj?.name || liveLogEditTarget.playerName || "Player"}: ${nextAction.label}`;
+      const nextGameLog = gameLog.map((entry) => {
+        if (entry.id !== liveLogEditTarget.id) return entry;
+        return {
+          ...entry,
+          playerId: resolvedPlayerId || entry.playerId,
+          playerName: nextPlayerObj?.name || liveLogEditTarget.playerName || entry.playerName,
+          actionId: nextAction.id,
+          statField: nextAction.stat,
+          changeAmount: nextChangeAmount,
+          attachedTrackingStat: nextAction.trackingStat,
+          trackingDelta: nextTrackingDelta,
+          countsTeamFoul: nextCountsTeamFoul,
+          text: editedLogText
+        };
+      });
+      const nextLoggedHistory = loggedHistory.map((entry) => {
+        if (entry.id !== liveLogEditTarget.id) return entry;
+        return {
+          ...entry,
+          playerId: resolvedPlayerId || entry.playerId,
+          playerName: nextPlayerObj?.name || liveLogEditTarget.playerName || entry.playerName,
+          actionId: nextAction.id,
+          statField: nextAction.stat,
+          changeAmount: nextChangeAmount,
+          attachedTrackingStat: nextAction.trackingStat,
+          trackingDelta: nextTrackingDelta,
+          countsTeamFoul: nextCountsTeamFoul,
+          logText: editedLogText
+        };
+      });
+      const replayed = buildLiveStateFromEvents(liveGameSnapshot, nextGameLog);
+      setGameLog(nextGameLog);
+      setLoggedHistory(nextLoggedHistory);
+      if (!replayed) {
+        restoreClockFromLatestLog(nextGameLog, currentQuarter);
+        handleCloseLiveLogEdit();
+        showToast("Log edited. Replay unavailable for this legacy session, so totals may be stale.", "info");
+        return;
+      }
+      setLiveStats(replayed.liveStats);
+      setTeamAScore(replayed.teamAScore);
+      setTeamBScore(replayed.teamBScore);
+      setCurrentQuarter(replayed.currentQuarter || 1);
+      setTeamALineup(replayed.teamALineup);
+      setTeamABench(replayed.teamABench);
+      setTeamBLineup(replayed.teamBLineup);
+      setTeamBBench(replayed.teamBBench);
+      setPlayedPlayers(replayed.playedPlayers);
+      restoreClockFromLatestLog(nextGameLog, replayed.currentQuarter || currentQuarter);
+      if (resolvedPlayerId) {
+        triggerPlayerFlash(resolvedPlayerId);
+        flashPlayerElements(resolvedPlayerId);
+      }
+      handleCloseLiveLogEdit();
+      showToast("Log edited.", "success");
+    };
+    const autoFinalizeEndedPeriodAndStartNextPeriod = () => {
+      markLocalSessionUpdated();
+      clockControlRevisionRef.current = Math.max(
+        Number(clockControlRevisionRef.current || 0),
+        Date.now()
+      );
+      const periodLabel = getPeriodLabel(currentQuarter);
+      const quarterEndLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const checkpointSnapshot = createLiveCheckpointSnapshot(currentQuarter);
+      const frozenQuarterStats = liveQuarterStatsFromLog.find((row) => Number(row?.quarter) === Number(currentQuarter)) || null;
+      const checkpointEvent = {
+        id: `${Date.now() + 1}_checkpoint_${String(currentQuarter).padStart(2, "0")}`,
+        time: getWallClockTime(),
+        text: `Checkpoint ${periodLabel}`,
+        kind: "meta",
+        metaType: "periodCheckpoint",
+        quarter: currentQuarter,
+        clockRemaining: "00:00",
+        hiddenFromLog: true,
+        lockProtected: true,
+        lockReason: "periodCheckpoint",
+        checkpointSnapshot
+      };
+      const quarterEndEvent = {
+        id: quarterEndLogId,
+        time: getWallClockTime(),
+        text: `End ${periodLabel} ${formatScoreTag(teamAScore, teamBScore)}`,
+        kind: "meta",
+        metaType: "quarterEnd",
+        quarter: currentQuarter,
+        clockRemaining: "00:00"
+      };
+      [checkpointEvent, quarterEndEvent].forEach((event) => {
+        processedGameLogIdsRef.current.add(event.id);
+        enqueueLiveEvent(event);
+      });
+      setPendingPeriodActionMode(null);
+      setActiveAction(null);
+      setCorrectionMode(false);
+      setShowLoggingModal(false);
+      setShowSyncClockEditor(false);
+      setIsEditingClockInput(false);
+      setPeriodClockSeconds(0);
+      setIsPeriodClockRunning(false);
+      setLiveGameSnapshot(checkpointSnapshot);
+      setPeriodSnapshots((prev) => {
+        const next = (prev || []).filter((snapshot) => Number(snapshot?.quarter || 0) !== Number(currentQuarter));
+        next.push({
+          quarter: currentQuarter,
+          quarterStats: {
+            teamA: cloneQuarterStats(frozenQuarterStats?.teamA || createEmptyQuarterStats()),
+            teamB: cloneQuarterStats(frozenQuarterStats?.teamB || createEmptyQuarterStats())
+          },
+          liveGameSnapshot: checkpointSnapshot
+        });
+        return next.sort((a, b) => Number(a.quarter || 0) - Number(b.quarter || 0));
+      });
+      if (currentQuarter < 4) {
+        const nextQuarter = currentQuarter + 1;
+        const nextLabel = getPeriodLabel(nextQuarter);
+        const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
+        setCurrentQuarter(nextQuarter);
+        setPeriodClockSeconds(nextQuarterSeconds);
+        setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+        setShowSyncClockEditor(false);
+        setIsEditingClockInput(false);
+        setIsPlayPaused(false);
+        setIsPeriodClockRunning(false);
+        setAwaitingPeriodStart(true);
+        setAwaitingOvertimeDecision(false);
+        setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+        showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, "info");
+        setTimeout(() => saveSessionToServer(), 0);
+        return true;
+      }
+      if (teamAScore === teamBScore) {
+        const nextQuarter = currentQuarter + 1;
+        const nextLabel = getPeriodLabel(nextQuarter);
+        const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
+        setCurrentQuarter(nextQuarter);
+        setPeriodClockSeconds(nextQuarterSeconds);
+        setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+        setShowSyncClockEditor(false);
+        setIsEditingClockInput(false);
+        setIsPlayPaused(false);
+        setIsPeriodClockRunning(false);
+        setAwaitingPeriodStart(true);
+        setAwaitingOvertimeDecision(false);
+        setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+        showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, "info");
+        setTimeout(() => saveSessionToServer(), 0);
+        return true;
+      }
+      setAwaitingOvertimeDecision(true);
+      setAwaitingPeriodStart(false);
+      setIsPlayPaused(false);
+      const nextGameLog = [checkpointEvent, quarterEndEvent, ...gameLog].slice(0, MAX_LIVE_LOG_ENTRIES);
+      setGameLog(nextGameLog);
+      setAwaitingOvertimeDecision(false);
+      handleEndGame({ finalGameLogOverride: nextGameLog });
+      showToast(`${periodLabel} finalized. Match ended and locked.`, "success");
+      return false;
+    };
+    const handleAdvanceQuarter = () => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      autoFinalizeEndedPeriodAndStartNextPeriod();
+    };
+    const getChronologicalEvents = (events = []) => {
+      return [...events || []].sort((a, b) => {
+        const aKey = Number.parseInt(String(a?.id || "").split("_")[0], 10);
+        const bKey = Number.parseInt(String(b?.id || "").split("_")[0], 10);
+        const safeA = Number.isFinite(aKey) ? aKey : 0;
+        const safeB = Number.isFinite(bKey) ? bKey : 0;
+        if (safeA !== safeB) return safeA - safeB;
+        return String(a?.id || "").localeCompare(String(b?.id || ""));
+      });
+    };
+    const remapCurrentQuarterClockHistory = (events = [], targetQuarter, previousSeconds, nextSeconds, options = {}) => {
+      const { forceShift = false } = options || {};
+      const clockDeltaSeconds = nextSeconds - previousSeconds;
+      if (clockDeltaSeconds === 0) return events;
+      const duration = getPeriodDurationSeconds(targetQuarter);
+      const minimumPastClock = Math.min(duration, Math.max(0, nextSeconds + 1));
+      const adjustedById = /* @__PURE__ */ new Map();
+      const quarterEvents = getChronologicalEvents(events).filter((event) => getQuarterFromEvent(event) === targetQuarter).map((event) => {
+        const parsed = parseClockInputToSeconds(event?.clockRemaining);
+        return parsed === null ? null : { event, parsed };
+      }).filter(Boolean);
+      if (quarterEvents.length === 0) return events;
+      const getStableEventJitter = (event) => {
+        const seed = String(event?.id || event?.text || "evt");
+        let acc = 0;
+        for (let i = 0; i < seed.length; i += 1) acc += seed.charCodeAt(i);
+        return acc % 2;
+      };
+      const getNaturalGapSeconds = (event) => {
+        let baseGap = 2;
+        if (event?.kind === "sub") baseGap = 4;
+        if (event?.kind === "meta") {
+          if (["timeout", "officialsTimeout", "manualPause", "foulPause"].includes(event.metaType)) baseGap = 5;
+          if (["quarterStart", "quarterEnd", "onCourtClear", "onCourtAdd"].includes(event.metaType)) baseGap = 4;
+          if (event.metaType === "clockAdjust") baseGap = 3;
+        }
+        if (event?.kind === "stat") {
+          if (event.statField === "pf" || event.actionId === "pf_technical") baseGap = 3;
+          if (event.statField === "pts" && Math.abs(Number(event.changeAmount || 0)) >= 3) baseGap = 3;
+        }
+        return Math.max(1, Math.min(6, baseGap + getStableEventJitter(event)));
+      };
+      let previousClock = duration;
+      let needsRepair = false;
+      for (const entry of quarterEvents) {
+        const candidate = Math.max(0, Math.min(duration, Number(entry.parsed || 0)));
+        const violatesBounds = candidate < minimumPastClock || candidate > duration;
+        const violatesOrder = candidate > previousClock;
+        if (violatesBounds || violatesOrder) {
+          needsRepair = true;
+          break;
+        }
+        previousClock = candidate;
+      }
+      if (!needsRepair && !forceShift) {
+        return events;
+      }
+      previousClock = duration;
+      quarterEvents.forEach((entry) => {
+        const event = entry.event;
+        const original = Math.max(0, Math.min(duration, Number(entry.parsed || 0)));
+        const minimumClockBound = forceShift ? Math.max(0, nextSeconds) : minimumPastClock;
+        let repaired = forceShift ? Math.max(minimumClockBound, Math.min(duration, original + clockDeltaSeconds)) : original;
+        const outOfBounds = repaired < minimumClockBound || repaired > duration;
+        const outOfOrder = repaired > previousClock;
+        if (outOfBounds || outOfOrder) {
+          const desiredGap = getNaturalGapSeconds(event);
+          const upperBound = previousClock;
+          const naturalTarget = Math.max(minimumClockBound, upperBound - desiredGap);
+          repaired = Math.max(minimumClockBound, Math.min(upperBound, naturalTarget));
+        }
+        const rounded = Math.max(minimumClockBound, Math.min(duration, Math.round(repaired)));
+        adjustedById.set(event.id, formatSecondsAsClock(rounded));
+        previousClock = rounded;
+      });
+      return (events || []).map((event) => {
+        if (!event?.id || !adjustedById.has(event.id)) return event;
+        return {
+          ...event,
+          clockRemaining: adjustedById.get(event.id)
+        };
+      });
+    };
+    const deriveQuarterPlayerSecondsFromTimeline = (events = [], targetQuarter, targetClockSeconds) => {
+      const duration = getPeriodDurationSeconds(targetQuarter);
+      const clampClock = (seconds) => Math.max(0, Math.min(duration, Number(seconds || 0)));
+      const baselineSnapshot = liveGameSnapshot || {
+        teamAId,
+        teamBId,
+        currentQuarter: 1,
+        teamALineup: [...teamALineup],
+        teamABench: [...teamABench],
+        teamBLineup: [...teamBLineup],
+        teamBBench: [...teamBBench]
+      };
+      const seededA = sanitizeTeamRotation(
+        baselineSnapshot.teamAId,
+        baselineSnapshot.teamALineup || [],
+        baselineSnapshot.teamABench || [],
+        { fillToFive: false }
+      );
+      const seededB = sanitizeTeamRotation(
+        baselineSnapshot.teamBId,
+        baselineSnapshot.teamBLineup || [],
+        baselineSnapshot.teamBBench || [],
+        { fillToFive: false }
+      );
+      let activeQuarter = Number.parseInt(baselineSnapshot.currentQuarter, 10) || 1;
+      let lineupA = [...seededA.lineup];
+      let benchA = [...seededA.bench];
+      let lineupB = [...seededB.lineup];
+      let benchB = [...seededB.bench];
+      let trackingStarted = activeQuarter === targetQuarter;
+      let lastClock = trackingStarted ? duration : null;
+      const totals = {};
+      const addElapsed = (seconds) => {
+        const delta = Math.max(0, Number(seconds || 0));
+        if (delta <= 0) return;
+        [...lineupA, ...lineupB].forEach((playerId) => {
+          if (!playerId) return;
+          totals[playerId] = (totals[playerId] || 0) + delta;
+        });
+      };
+      getChronologicalEvents(events).forEach((event) => {
+        const eventQuarter = getQuarterFromEvent(event);
+        if (Number.isFinite(eventQuarter) && eventQuarter > 0 && activeQuarter !== eventQuarter) {
+          activeQuarter = eventQuarter;
+          if (activeQuarter === targetQuarter && !trackingStarted) {
+            trackingStarted = true;
+            lastClock = duration;
+          }
+        }
+        if (event?.kind === "meta" && event?.metaType === "quarterStart") {
+          activeQuarter = eventQuarter || activeQuarter;
+          if (activeQuarter === targetQuarter) {
+            trackingStarted = true;
+            const startClock = parseClockInputToSeconds(event?.clockRemaining);
+            lastClock = startClock === null ? duration : clampClock(startClock);
+          }
+        }
+        const parsedClock = parseClockInputToSeconds(event?.clockRemaining);
+        if (trackingStarted && activeQuarter === targetQuarter && parsedClock !== null) {
+          if (lastClock === null) lastClock = duration;
+          const boundedClock = clampClock(parsedClock);
+          addElapsed(lastClock - boundedClock);
+          lastClock = boundedClock;
+        }
+        if (event?.kind === "sub") {
+          if (event.isTeamA) {
+            lineupA = lineupA.map((id) => id === event.outId ? event.inId : id);
+            benchA = benchA.map((id) => id === event.inId ? event.outId : id);
+            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamAId, lineupA, benchA, { fillToFive: true });
+            lineupA = sanitized.lineup;
+            benchA = sanitized.bench;
+          } else {
+            lineupB = lineupB.map((id) => id === event.outId ? event.inId : id);
+            benchB = benchB.map((id) => id === event.inId ? event.outId : id);
+            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamBId, lineupB, benchB, { fillToFive: true });
+            lineupB = sanitized.lineup;
+            benchB = sanitized.bench;
+          }
+        }
+        if (event?.kind === "meta" && event?.metaType === "onCourtClear") {
+          if (event.isTeamA) {
+            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamAId, [], [...benchA, ...lineupA], { fillToFive: false });
+            lineupA = sanitized.lineup;
+            benchA = sanitized.bench;
+          } else if (event.isTeamA === false) {
+            const sanitized = sanitizeTeamRotation(baselineSnapshot.teamBId, [], [...benchB, ...lineupB], { fillToFive: false });
+            lineupB = sanitized.lineup;
+            benchB = sanitized.bench;
+          }
+        }
+        if (event?.kind === "meta" && event?.metaType === "onCourtAdd" && event?.playerId) {
+          if (event.isTeamA) {
+            const sanitized = sanitizeTeamRotation(
+              baselineSnapshot.teamAId,
+              [...lineupA, event.playerId],
+              benchA.filter((id) => id !== event.playerId),
+              { fillToFive: false }
+            );
+            lineupA = sanitized.lineup;
+            benchA = sanitized.bench;
+          } else if (event.isTeamA === false) {
+            const sanitized = sanitizeTeamRotation(
+              baselineSnapshot.teamBId,
+              [...lineupB, event.playerId],
+              benchB.filter((id) => id !== event.playerId),
+              { fillToFive: false }
+            );
+            lineupB = sanitized.lineup;
+            benchB = sanitized.bench;
+          }
+        }
+        if (event?.kind === "meta" && event?.metaType === "onCourtRemove" && event?.playerId) {
+          if (event.isTeamA) {
+            const sanitized = sanitizeTeamRotation(
+              baselineSnapshot.teamAId,
+              lineupA.filter((id) => id !== event.playerId),
+              benchA.includes(event.playerId) ? benchA : [...benchA, event.playerId],
+              { fillToFive: false }
+            );
+            lineupA = sanitized.lineup;
+            benchA = sanitized.bench;
+          } else if (event.isTeamA === false) {
+            const sanitized = sanitizeTeamRotation(
+              baselineSnapshot.teamBId,
+              lineupB.filter((id) => id !== event.playerId),
+              benchB.includes(event.playerId) ? benchB : [...benchB, event.playerId],
+              { fillToFive: false }
+            );
+            lineupB = sanitized.lineup;
+            benchB = sanitized.bench;
+          }
+        }
+      });
+      if (trackingStarted && activeQuarter === targetQuarter) {
+        if (lastClock === null) lastClock = duration;
+        addElapsed(lastClock - clampClock(targetClockSeconds));
+      }
+      return totals;
+    };
+    const deriveTotalPlayerSecondsFromTimeline = (events = [], activeQuarter = currentQuarter, activeClockSeconds = periodClockSeconds) => {
+      const resolvedQuarter = Math.max(1, Number.parseInt(activeQuarter, 10) || 1);
+      const chronological = getChronologicalEvents(events || []);
+      const maxQuarterInLog = chronological.reduce((maxQuarter, event) => {
+        const eventQuarter = getQuarterFromEvent(event);
+        return eventQuarter > maxQuarter ? eventQuarter : maxQuarter;
+      }, resolvedQuarter);
+      const finalQuarter = Math.max(resolvedQuarter, maxQuarterInLog);
+      const totals = {};
+      for (let quarter = 1; quarter <= finalQuarter; quarter += 1) {
+        const targetClockForQuarter = quarter < resolvedQuarter ? 0 : quarter === resolvedQuarter ? Math.max(0, Number(activeClockSeconds || 0)) : getPeriodDurationSeconds(quarter);
+        const quarterTotals = deriveQuarterPlayerSecondsFromTimeline(events, quarter, targetClockForQuarter);
+        Object.entries(quarterTotals || {}).forEach(([playerId, seconds]) => {
+          const safeSeconds = Math.max(0, Number(seconds || 0));
+          if (!playerId || safeSeconds <= 0) return;
+          totals[playerId] = Math.round((totals[playerId] || 0) + safeSeconds);
+        });
+      }
+      return totals;
+    };
+    const handleApplyManualClock = () => {
+      if (!canUseLiveControls) return;
+      if (!canAdminControlClock) {
+        showToast("Only admin can sync clock.", "info");
+        return;
+      }
+      if (!isGameLive) return;
+      const parsed = parseClockInputToSeconds(manualClockInput);
+      if (parsed === null) {
+        showToast("Invalid clock format. Use MM:SS or total seconds.", "error");
+        return;
+      }
+      const maxSeconds = getPeriodDurationSeconds(currentQuarter);
+      const nextSeconds = Math.max(0, Math.min(parsed, maxSeconds));
+      const nextLabel = formatSecondsAsClock(nextSeconds);
+      const adjustedExistingLog = remapCurrentQuarterClockHistory(gameLog, currentQuarter, periodClockSeconds, nextSeconds);
+      markLocalSessionUpdated();
+      clockControlRevisionRef.current = Math.max(
+        Number(clockControlRevisionRef.current || 0),
+        Date.now()
+      );
+      const recomputedPlayerSeconds = deriveTotalPlayerSecondsFromTimeline(adjustedExistingLog, currentQuarter, nextSeconds);
+      setLivePlayerSeconds(recomputedPlayerSeconds);
+      setPeriodClockSeconds(nextSeconds);
+      setManualClockInput(nextLabel);
+      setIsEditingClockInput(false);
+      setShowSyncClockEditor(false);
+      setIsPlayPaused(true);
+      setIsPeriodClockRunning(false);
+      if (nextSeconds > 1 && (isAwaitingPeriodStart || awaitingOvertimeDecision)) {
+        setAwaitingPeriodStart(false);
+        setAwaitingOvertimeDecision(false);
+      }
+      const pauseAlreadyActiveInTimeline = isTimeoutCurrentlyActive(adjustedExistingLog);
+      if (pauseAlreadyActiveInTimeline) {
+        setGameLog(adjustedExistingLog.slice(0, MAX_LIVE_LOG_ENTRIES));
+      } else {
+        const manualPauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        setGameLog([{
+          id: manualPauseLogId,
+          time: getWallClockTime(),
+          text: "Manual pause (clock sync)",
+          kind: "meta",
+          metaType: "manualPause",
+          quarter: currentQuarter,
+          clockRemaining: nextLabel
+        }, ...adjustedExistingLog].slice(0, MAX_LIVE_LOG_ENTRIES));
+      }
+      if (nextSeconds > 1 && (isAwaitingPeriodStart || awaitingOvertimeDecision)) {
+        showToast(`Clock updated to ${nextLabel}. You can now press Resume ${getPeriodLabel(currentQuarter)}.`, "success");
+      } else {
+        showToast(`Clock updated to ${nextLabel}. Game paused.`, "success");
+      }
+    };
+    const handleStartNextQuarter = () => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!isAwaitingPeriodStart) return;
+      const nextQuarter = nextPeriodToStart;
+      const nextLabel = getPeriodLabel(nextQuarter);
+      const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
+      const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      markLocalSessionUpdated();
+      setCurrentQuarter(nextQuarter);
+      setPeriodClockSeconds(nextQuarterSeconds);
+      setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+      setShowSyncClockEditor(false);
+      setIsEditingClockInput(false);
+      setPendingPeriodActionMode("pauseGame");
+      armLocalResumeStabilityWindow();
+      suppressPeriodAutoStopRef.current = true;
+      setIsPlayPaused(false);
+      suppressTimeoutAutoStopRef.current = true;
+      setIsPeriodClockRunning(true);
+      setAwaitingPeriodStart(false);
+      setAwaitingOvertimeDecision(false);
+      setGameLog((prev) => [{
+        id: quarterLogId,
+        time: getWallClockTime(),
+        text: `Start ${nextLabel}`,
+        kind: "meta",
+        metaType: "quarterStart",
+        quarter: nextQuarter,
+        clockRemaining: formatSecondsAsClock(nextQuarterSeconds)
+      }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      showToast(`${nextLabel} started.`, "success");
+    };
+    const handleStartOvertime = () => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (currentQuarter < 4) return;
+      if (teamAScore !== teamBScore) {
+        showToast(`Overtime is only available when scores are tied after ${getPeriodLabel(currentQuarter)}.`, "info");
+        return;
+      }
+      const nextQuarter = currentQuarter + 1;
+      const nextLabel = getPeriodLabel(nextQuarter);
+      const nextQuarterSeconds = getPeriodDurationSeconds(nextQuarter);
+      const quarterLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      markLocalSessionUpdated();
+      setCurrentQuarter(nextQuarter);
+      setPeriodClockSeconds(nextQuarterSeconds);
+      setManualClockInput(formatSecondsAsClock(nextQuarterSeconds));
+      setShowSyncClockEditor(false);
+      setIsEditingClockInput(false);
+      setPendingPeriodActionMode("pauseGame");
+      armLocalResumeStabilityWindow();
+      suppressPeriodAutoStopRef.current = true;
+      setIsPlayPaused(false);
+      suppressTimeoutAutoStopRef.current = true;
+      setIsPeriodClockRunning(true);
+      setAwaitingPeriodStart(false);
+      setAwaitingOvertimeDecision(false);
+      setGameLog((prev) => [{
+        id: quarterLogId,
+        time: getWallClockTime(),
+        text: `Start ${nextLabel}`,
+        kind: "meta",
+        metaType: "quarterStart",
+        quarter: nextQuarter,
+        clockRemaining: formatSecondsAsClock(nextQuarterSeconds)
+      }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      showToast(`Overtime started: ${nextLabel}.`, "success");
+    };
+    const triggerSubModal = (playerId, isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!ensureTeamOperationAccess(isTeamA, "manage substitutions for this team")) return;
+      const playerObj = teams.flatMap((t) => t.players).find((p) => p.id === playerId);
+      if (!playerObj) return;
+      const benchIds = isTeamA ? teamABench : teamBBench;
+      const eligibleBenchIds = benchIds.filter((id) => !dnpPlayers.includes(id));
+      if (eligibleBenchIds.length === 0) {
+        showToast("No eligible bench players available (DNP excluded).", "info");
+        return;
+      }
+      setSubTargetPlayer({ id: playerId, name: playerObj.name, number: playerObj.number, team: isTeamA ? "A" : "B" });
+      setShowSubstitutionModal(true);
+    };
+    const handleCancelSubstitutionModal = () => {
+      setShowSubstitutionModal(false);
+      setSubTargetPlayer(null);
+    };
+    const executeSubstitution = (outId, inId, isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!ensureTeamOperationAccess(isTeamA, "manage substitutions for this team")) return;
+      if (dnpPlayers.includes(inId)) {
+        showToast("Player is marked DNP and cannot be substituted in.", "info");
+        return;
+      }
+      const teamObj = isTeamA ? teams.find((t) => t.id === teamAId) : teams.find((t) => t.id === teamBId);
+      const outPlayer = teamObj?.players.find((p) => p.id === outId);
+      const inPlayer = teamObj?.players.find((p) => p.id === inId);
+      if ((liveStats[inId]?.pf || 0) >= 5) {
+        const fouledOutPlayer = teamObj?.players.find((p) => p.id === inId);
+        if (fouledOutPlayer) {
+          showToast(`${fouledOutPlayer.name} cannot return with 5 fouls.`, "info");
+        }
+        return;
+      }
+      const currentLineup = isTeamA ? teamALineup : teamBLineup;
+      const currentBench = isTeamA ? teamABench : teamBBench;
+      if (!currentLineup.includes(outId)) {
+        showToast("Substitution failed: player to sub out is not on court.", "error");
+        return;
+      }
+      let nextLineup = currentLineup.map((id) => id === outId ? inId : id);
+      let nextBench = currentBench.map((id) => id === inId ? outId : id);
+      if (!nextBench.includes(outId)) {
+        nextBench = [...nextBench, outId];
+      }
+      nextBench = nextBench.filter((id) => id !== inId);
+      const sanitized = sanitizeTeamRotation(isTeamA ? teamAId : teamBId, nextLineup, nextBench, { fillToFive: true });
+      if (isTeamA) {
+        setTeamALineup(sanitized.lineup);
+        setTeamABench(sanitized.bench);
+      } else {
+        setTeamBLineup(sanitized.lineup);
+        setTeamBBench(sanitized.bench);
+      }
+      if (!playedPlayers.includes(inId)) {
+        setPlayedPlayers((prev) => [...prev, inId]);
+      }
+      if (dnpPlayers.includes(inId)) {
+        lastLocalDnpUpdatedAtRef.current = Date.now();
+        setDnpPlayers((prev) => prev.filter((id) => id !== inId));
+      }
+      triggerPlayerFlash(outId);
+      triggerPlayerFlash(inId);
+      triggerSubGlow(outId);
+      triggerSubGlow(inId);
+      flashPlayerElements(outId);
+      flashPlayerElements(inId);
+      const subLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const subRevision = getLineupRevisionFromEventId(subLogId);
+      if (subRevision > 0) {
+        setLineupRevision((prev) => {
+          const next = Math.max(prev, subRevision);
+          lineupRevisionRef.current = next;
+          return next;
+        });
+      }
+      triggerSubLogGlow(subLogId);
+      setGameLog((prev) => [{
+        id: subLogId,
+        time: getWallClockTime(),
+        text: `SUB: ${outPlayer ? `${outPlayer.name} (#${outPlayer.number})` : outId} -> ${inPlayer ? `${inPlayer.name} (#${inPlayer.number})` : inId}`,
+        kind: "sub",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        outId,
+        inId,
+        isTeamA
+      }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      setShowSubstitutionModal(false);
+      setSubTargetPlayer(null);
+      showToast("Substitution completed.", "success");
+    };
+    const handleClearOnCourtPlayers = (isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!ensureTeamOperationAccess(isTeamA, "clear on-court players for this team")) return;
+      const teamId = isTeamA ? teamAId : teamBId;
+      const currentLineup = isTeamA ? teamALineup : teamBLineup;
+      const currentBench = isTeamA ? teamABench : teamBBench;
+      if (!teamId || currentLineup.length === 0) return;
+      const sanitized = sanitizeTeamRotation(teamId, [], [...currentBench, ...currentLineup], { fillToFive: false });
+      if (isTeamA) {
+        setTeamALineup(sanitized.lineup);
+        setTeamABench(sanitized.bench);
+        setShowHomeBenchAdder(true);
+      } else {
+        setTeamBLineup(sanitized.lineup);
+        setTeamBBench(sanitized.bench);
+        setShowAwayBenchAdder(true);
+      }
+      const clearLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const clearEvent = {
+        id: clearLogId,
+        time: getWallClockTime(),
+        text: `Cleared on-court players (${isTeamA ? "HOME" : "AWAY"})`,
+        kind: "meta",
+        metaType: "onCourtClear",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        isTeamA
+      };
+      const clearRevision = getLineupRevisionFromEventId(clearLogId);
+      if (clearRevision > 0) {
+        setLineupRevision((prev) => {
+          const next = Math.max(prev, clearRevision);
+          lineupRevisionRef.current = next;
+          return next;
+        });
+      }
+      processedGameLogIdsRef.current.add(clearEvent.id);
+      enqueueLiveEvent(clearEvent);
+      setGameLog((prev) => [clearEvent, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      showToast(`On-court cleared for ${isTeamA ? "home" : "away"} team.`, "info");
+    };
+    const handleToggleBenchAdder = (isTeamA) => {
+      if (!canUseLiveControls) return;
+      const lineup = isTeamA ? teamALineup : teamBLineup;
+      if (lineup.length >= 5) {
+        showToast("On-court already has 5 players.", "info");
+        return;
+      }
+      if (isTeamA) {
+        setShowHomeBenchAdder((prev) => !prev);
+      } else {
+        setShowAwayBenchAdder((prev) => !prev);
+      }
+    };
+    const handleOpenAddFromBenchModal = (isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!ensureTeamOperationAccess(isTeamA, "add bench players for this team")) return;
+      const teamId = isTeamA ? teamAId : teamBId;
+      const teamObj = teams.find((t) => t.id === teamId);
+      const lineup = isTeamA ? teamALineup : teamBLineup;
+      const bench = isTeamA ? teamABench : teamBBench;
+      const rosterIds = (teamObj?.players || []).map((p) => p.id);
+      const fallbackCandidates = rosterIds.filter((id) => !lineup.includes(id) && !dnpPlayers.includes(id));
+      const addCandidates = (bench.length > 0 ? bench : fallbackCandidates).filter((id) => !dnpPlayers.includes(id));
+      if (lineup.length >= 5) {
+        showToast("On-court already has 5 players.", "info");
+        return;
+      }
+      if (!addCandidates.length) {
+        showToast("No bench players available to add.", "info");
+        return;
+      }
+      setAddFromBenchTeam(isTeamA ? "A" : "B");
+      setAddFromBenchSelection([]);
+      setShowAddFromBenchModal(true);
+    };
+    const handleCancelAddFromBenchModal = () => {
+      setShowAddFromBenchModal(false);
+      setAddFromBenchTeam(null);
+      setAddFromBenchSelection([]);
+    };
+    const handleAddOnCourtPlayer = (playerId, isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!ensureTeamOperationAccess(isTeamA, "add players for this team")) return;
+      if (dnpPlayers.includes(playerId)) {
+        showToast("Player is marked DNP and cannot be added.", "info");
+        return;
+      }
+      const teamId = isTeamA ? teamAId : teamBId;
+      const teamObj = teams.find((t) => t.id === teamId);
+      const playerObj = teamObj?.players.find((p) => p.id === playerId);
+      const currentLineup = isTeamA ? teamALineup : teamBLineup;
+      const currentBench = isTeamA ? teamABench : teamBBench;
+      if (!teamId || !playerObj) return;
+      if (currentLineup.includes(playerId)) return;
+      if (currentLineup.length >= 5) {
+        showToast("On-court limit reached (5 players).", "info");
+        return;
+      }
+      if ((liveStats[playerId]?.pf || 0) >= 5) {
+        showToast(`${playerObj.name} cannot return with 5 fouls.`, "info");
+        return;
+      }
+      const sanitized = sanitizeTeamRotation(
+        teamId,
+        [...currentLineup, playerId],
+        currentBench.filter((id) => id !== playerId),
+        { fillToFive: false }
+      );
+      if (isTeamA) {
+        setTeamALineup(sanitized.lineup);
+        setTeamABench(sanitized.bench);
+        if (sanitized.lineup.length >= 5) {
+          setShowHomeBenchAdder(false);
+        }
+      } else {
+        setTeamBLineup(sanitized.lineup);
+        setTeamBBench(sanitized.bench);
+        if (sanitized.lineup.length >= 5) {
+          setShowAwayBenchAdder(false);
+        }
+      }
+      if (!playedPlayers.includes(playerId)) {
+        setPlayedPlayers((prev) => [...prev, playerId]);
+      }
+      if (dnpPlayers.includes(playerId)) {
+        lastLocalDnpUpdatedAtRef.current = Date.now();
+        setDnpPlayers((prev) => prev.filter((id) => id !== playerId));
+      }
+      triggerPlayerFlash(playerId);
+      flashPlayerElements(playerId);
+      const addLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const addEvent = {
+        id: addLogId,
+        time: getWallClockTime(),
+        text: `Added on-court: ${playerObj.name} (#${playerObj.number})`,
+        kind: "meta",
+        metaType: "onCourtAdd",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        isTeamA,
+        playerId
+      };
+      const addRevision = getLineupRevisionFromEventId(addLogId);
+      if (addRevision > 0) {
+        setLineupRevision((prev) => {
+          const next = Math.max(prev, addRevision);
+          lineupRevisionRef.current = next;
+          return next;
+        });
+      }
+      processedGameLogIdsRef.current.add(addEvent.id);
+      enqueueLiveEvent(addEvent);
+      setGameLog((prev) => [addEvent, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      showToast(`${playerObj.name} added on-court.`, "success");
+    };
+    const handleAddMultipleOnCourtPlayers = (playerIds, isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!ensureTeamOperationAccess(isTeamA, "add players for this team")) return;
+      const teamId = isTeamA ? teamAId : teamBId;
+      const teamObj = teams.find((t) => t.id === teamId);
+      const currentLineup = isTeamA ? teamALineup : teamBLineup;
+      const currentBench = isTeamA ? teamABench : teamBBench;
+      if (!teamId || !teamObj) return;
+      const availableSlots = Math.max(0, 5 - currentLineup.length);
+      if (availableSlots <= 0) {
+        showToast("On-court already has 5 players.", "info");
+        return;
+      }
+      const uniqueRequested = Array.from(new Set(playerIds || []));
+      const validCandidates = uniqueRequested.filter((playerId) => {
+        if (currentLineup.includes(playerId)) return false;
+        if (dnpPlayers.includes(playerId)) return false;
+        const playerObj = teamObj.players.find((p) => p.id === playerId);
+        if (!playerObj) return false;
+        return (liveStats[playerId]?.pf || 0) < 5;
+      });
+      const selectedToAdd = validCandidates.slice(0, availableSlots);
+      if (selectedToAdd.length === 0) {
+        showToast("No eligible players selected to add.", "info");
+        return;
+      }
+      const sanitized = sanitizeTeamRotation(
+        teamId,
+        [...currentLineup, ...selectedToAdd],
+        currentBench.filter((id) => !selectedToAdd.includes(id)),
+        { fillToFive: false }
+      );
+      if (isTeamA) {
+        setTeamALineup(sanitized.lineup);
+        setTeamABench(sanitized.bench);
+        if (sanitized.lineup.length >= 5) {
+          setShowHomeBenchAdder(false);
+        }
+      } else {
+        setTeamBLineup(sanitized.lineup);
+        setTeamBBench(sanitized.bench);
+        if (sanitized.lineup.length >= 5) {
+          setShowAwayBenchAdder(false);
+        }
+      }
+      setPlayedPlayers((prev) => {
+        const next = new Set(prev);
+        selectedToAdd.forEach((id) => next.add(id));
+        return Array.from(next);
+      });
+      lastLocalDnpUpdatedAtRef.current = Date.now();
+      setDnpPlayers((prev) => prev.filter((id) => !selectedToAdd.includes(id)));
+      selectedToAdd.forEach((playerId) => {
+        triggerPlayerFlash(playerId);
+        flashPlayerElements(playerId);
+      });
+      const addLogs = selectedToAdd.map((playerId) => {
+        const playerObj = teamObj.players.find((p) => p.id === playerId);
+        return {
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          time: getWallClockTime(),
+          text: `Added on-court: ${playerObj ? `${playerObj.name} (#${playerObj.number})` : playerId}`,
+          kind: "meta",
+          metaType: "onCourtAdd",
+          quarter: currentQuarter,
+          clockRemaining: formatSecondsAsClock(periodClockSeconds),
+          isTeamA,
+          playerId
+        };
+      });
+      addLogs.forEach((event) => {
+        processedGameLogIdsRef.current.add(event.id);
+        enqueueLiveEvent(event);
+      });
+      const batchMaxRevision = addLogs.reduce((maxRevision, event) => {
+        const rev = getLineupRevisionFromEventId(event.id);
+        return rev > maxRevision ? rev : maxRevision;
+      }, 0);
+      if (batchMaxRevision > 0) {
+        setLineupRevision((prev) => {
+          const next = Math.max(prev, batchMaxRevision);
+          lineupRevisionRef.current = next;
+          return next;
+        });
+      }
+      setGameLog((prev) => [...addLogs, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+      setAddFromBenchSelection([]);
+      setShowAddFromBenchModal(false);
+      setAddFromBenchTeam(null);
+      showToast(`${selectedToAdd.length} player${selectedToAdd.length > 1 ? "s" : ""} added on-court.`, "success");
+    };
+    const handleWaveSubstitution = (isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!ensureTeamOperationAccess(isTeamA, "run wave substitution for this team")) return;
+      const teamId = isTeamA ? teamAId : teamBId;
+      const teamObj = teams.find((t) => t.id === teamId);
+      const currentLineup = isTeamA ? teamALineup : teamBLineup;
+      const currentBench = isTeamA ? teamABench : teamBBench;
+      if (!teamId || !teamObj) return;
+      const rosterIds = (teamObj.players || []).map((p) => p.id);
+      const eligibleSet = new Set(
+        rosterIds.filter((id) => !dnpPlayers.includes(id) && (liveStats[id]?.pf || 0) < 5)
+      );
+      const eligibleRosterCount = eligibleSet.size;
+      const allowRepeaters = eligibleRosterCount < 10;
+      const poolFromBench = Array.from(/* @__PURE__ */ new Set([
+        ...currentBench,
+        ...rosterIds.filter((id) => !currentLineup.includes(id) && !currentBench.includes(id))
+      ])).filter((id) => eligibleSet.has(id));
+      const prioritizeLowMinutesInEarlyPeriods = Number(currentQuarter || 1) <= 2;
+      const sortedByMinutesAsc = (ids) => [...ids].sort((a, b) => {
+        const aSeconds = Number(livePlayerSeconds[a] || 0);
+        const bSeconds = Number(livePlayerSeconds[b] || 0);
+        if (prioritizeLowMinutesInEarlyPeriods) {
+          const aHasMinutes = aSeconds > 0 || playedPlayers.includes(a);
+          const bHasMinutes = bSeconds > 0 || playedPlayers.includes(b);
+          if (aHasMinutes !== bHasMinutes) return aHasMinutes ? 1 : -1;
+        }
+        const secDiff = aSeconds - bSeconds;
+        if (secDiff !== 0) return secDiff;
+        const aNumber = teamObj.players.find((p) => p.id === a)?.number || "";
+        const bNumber = teamObj.players.find((p) => p.id === b)?.number || "";
+        return String(aNumber).localeCompare(String(bNumber));
+      });
+      let targetLineup = sortedByMinutesAsc(poolFromBench).slice(0, 5);
+      const neededRepeaters = Math.max(0, 5 - targetLineup.length);
+      if (neededRepeaters > 0 && allowRepeaters) {
+        const repeaterPool = sortedByMinutesAsc(
+          currentLineup.filter((id) => eligibleSet.has(id) && !targetLineup.includes(id))
+        );
+        targetLineup = [...targetLineup, ...repeaterPool.slice(0, neededRepeaters)];
+      }
+      if (neededRepeaters > 0 && !allowRepeaters) {
+        showToast("Wave Sub requires a full second unit when 10+ eligible players are available. No repeats allowed.", "info");
+        return;
+      }
+      if (targetLineup.length === 0) {
+        showToast("No eligible players available for wave substitution.", "info");
+        return;
+      }
+      const nextBenchSeed = Array.from(/* @__PURE__ */ new Set([...currentBench, ...currentLineup, ...rosterIds])).filter((id) => !targetLineup.includes(id));
+      const sanitized = sanitizeTeamRotation(teamId, targetLineup, nextBenchSeed, { fillToFive: false });
+      const sameLineup = sanitized.lineup.length === currentLineup.length && sanitized.lineup.every((id) => currentLineup.includes(id));
+      if (sameLineup) {
+        showToast("Wave substitution has no changes to apply.", "info");
+        return;
+      }
+      markLocalSessionUpdated();
+      const immediateWaveRevision = Math.max(
+        Number(lineupRevisionRef.current || 0),
+        Date.now() * 1e3
+      );
+      lineupRevisionRef.current = immediateWaveRevision;
+      setLineupRevision((prev) => Math.max(prev, immediateWaveRevision));
+      if (isTeamA) {
+        setTeamALineup(sanitized.lineup);
+        setTeamABench(sanitized.bench);
+      } else {
+        setTeamBLineup(sanitized.lineup);
+        setTeamBBench(sanitized.bench);
+      }
+      const playersIn = sanitized.lineup.filter((id) => !currentLineup.includes(id));
+      const playersOut = currentLineup.filter((id) => !sanitized.lineup.includes(id));
+      const repeatedCount = sanitized.lineup.filter((id) => currentLineup.includes(id)).length;
+      if (playersIn.length > 0) {
+        setPlayedPlayers((prev) => {
+          const next = new Set(prev);
+          playersIn.forEach((id) => next.add(id));
+          return Array.from(next);
+        });
+      }
+      if (dnpPlayers.some((id) => playersIn.includes(id))) {
+        lastLocalDnpUpdatedAtRef.current = Date.now();
+        setDnpPlayers((prev) => prev.filter((id) => !playersIn.includes(id)));
+      }
+      [...playersOut, ...playersIn].forEach((id) => {
+        triggerPlayerFlash(id);
+        flashPlayerElements(id);
+      });
+      const baseEventId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const clearEvent = {
+        id: `${baseEventId}_clr`,
+        time: getWallClockTime(),
+        text: `Wave substitution (${isTeamA ? "HOME" : "AWAY"})`,
+        kind: "meta",
+        metaType: "onCourtClear",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        isTeamA
+      };
+      const addEvents = sanitized.lineup.map((playerId, idx) => {
+        const playerObj = teamObj.players.find((p) => p.id === playerId);
+        return {
+          id: `${baseEventId}_add_${idx}`,
+          time: getWallClockTime(),
+          text: `Added on-court: ${playerObj ? `${playerObj.name} (#${playerObj.number})` : playerId}`,
+          kind: "meta",
+          metaType: "onCourtAdd",
+          quarter: currentQuarter,
+          clockRemaining: formatSecondsAsClock(periodClockSeconds),
+          isTeamA,
+          playerId
+        };
+      });
+      const events = [clearEvent, ...addEvents];
+      events.forEach((event) => {
+        processedGameLogIdsRef.current.add(event.id);
+        enqueueLiveEvent(event);
+      });
+      const waveMaxRevision = events.reduce((maxRevision, event) => {
+        const rev = getLineupRevisionFromEventId(event.id);
+        return rev > maxRevision ? rev : maxRevision;
+      }, 0);
+      if (waveMaxRevision > 0) {
+        setLineupRevision((prev) => {
+          const next = Math.max(prev, waveMaxRevision);
+          lineupRevisionRef.current = next;
+          return next;
+        });
+      }
+      setGameLog((prev) => [...events, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+      const rosterHint = sanitized.lineup.length < 5 ? ` (${sanitized.lineup.length}/5 available)` : "";
+      const repeatHint = repeatedCount > 0 ? ` ${repeatedCount} repeater${repeatedCount > 1 ? "s" : ""} kept.` : "";
+      showToast(`Wave substitution applied.${repeatHint}${rosterHint}`, "success");
+    };
+    const openClearOnCourtConfirm = (isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!ensureTeamOperationAccess(isTeamA, "clear on-court players for this team")) return;
+      const teamLabel = isTeamA ? liveHomeTeam?.name || "Home" : liveAwayTeam?.name || "Away";
+      setConfirmDialog({
+        title: `Clear ${teamLabel} On-Court?`,
+        text: "This removes all current on-court players for this team so you can rebuild the lineup.",
+        cancelLabel: "Cancel",
+        confirmLabel: "Clear On-Court",
+        onConfirm: () => {
+          setConfirmDialog(null);
+          handleClearOnCourtPlayers(isTeamA);
+        }
+      });
+    };
+    const openWaveSubConfirm = (isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!ensureTeamOperationAccess(isTeamA, "run wave substitution for this team")) return;
+      const teamLabel = isTeamA ? liveHomeTeam?.name || "Home" : liveAwayTeam?.name || "Away";
+      setConfirmDialog({
+        title: `${teamLabel} Wave Sub?`,
+        text: "Apply one-tap wave substitution for this team now?",
+        cancelLabel: "Cancel",
+        confirmLabel: "Run Wave Sub",
+        onConfirm: () => {
+          setConfirmDialog(null);
+          handleWaveSubstitution(isTeamA);
+        }
+      });
+    };
+    const handleEndGame = async (options = {}) => {
+      if (!canUseLiveControls) return;
+      if (!teamAId || !teamBId) return;
+      if (isEndingGame) return;
+      setIsEndingGame(true);
+      try {
+        const previousTeamsSnapshot = teams;
+        const previousGamesSnapshot = games;
+        setPendingPeriodActionMode(null);
+        const teamAObj = teams.find((t) => t.id === teamAId);
+        const teamBObj = teams.find((t) => t.id === teamBId);
+        if (!teamAObj || !teamBObj) return;
+        const finalizedSessionId = String(liveSessionInstanceIdRef.current || liveSessionInstanceId || "").trim();
+        const gameId = finalizedSessionId ? `game_${finalizedSessionId}` : `game_${Date.now()}`;
+        const gameDate = `${(/* @__PURE__ */ new Date()).toLocaleDateString()} ${(/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+        const sourceGameLog = Array.isArray(options.finalGameLogOverride) ? options.finalGameLogOverride : gameLog;
+        const shouldFinalizeRemainingClock = hasMatchStarted && hasCurrentQuarterStarted && isPeriodClockRunning && periodClockSeconds > 0;
+        let finalizedGameLog = [...sourceGameLog];
+        let finalizedClockSeconds = periodClockSeconds;
+        if (shouldFinalizeRemainingClock) {
+          finalizedGameLog = remapCurrentQuarterClockHistory(sourceGameLog, currentQuarter, periodClockSeconds, 0, { forceShift: true });
+          finalizedClockSeconds = 0;
+        }
+        const finalizedLivePlayerSeconds = deriveTotalPlayerSecondsFromTimeline(
+          finalizedGameLog,
+          currentQuarter,
+          finalizedClockSeconds
+        );
+        const participantStats = {};
+        const updatedTeams = teams.map((team) => {
+          if (team.id !== teamAId && team.id !== teamBId) return team;
+          const updatedPlayers = team.players.map((player) => {
+            const statsLive = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+            const hasStatLine = Object.values(statsLive).some((val) => Number(val || 0) > 0);
+            const didParticipate = !dnpPlayers.includes(player.id) && (playedPlayers.includes(player.id) || hasStatLine);
+            if (!didParticipate) return player;
+            participantStats[player.id] = {
+              ...statsLive,
+              min: formatSecondsAsMinutes(finalizedLivePlayerSeconds[player.id] || 0)
+            };
+            return {
+              ...player,
+              gamesPlayed: (player.gamesPlayed || 0) + 1,
+              totalStats: {
+                pts: (player.totalStats.pts || 0) + (statsLive.pts || 0),
+                ast: (player.totalStats.ast || 0) + (statsLive.ast || 0),
+                reb: (player.totalStats.reb || 0) + (statsLive.reb || 0),
+                stl: (player.totalStats.stl || 0) + (statsLive.stl || 0),
+                blk: (player.totalStats.blk || 0) + (statsLive.blk || 0),
+                to: (player.totalStats.to || 0) + (statsLive.to || 0),
+                pf: (player.totalStats.pf || 0) + (statsLive.pf || 0),
+                fg2m: (player.totalStats.fg2m || 0) + (statsLive.fg2m || 0),
+                fg3m: (player.totalStats.fg3m || 0) + (statsLive.fg3m || 0),
+                fg2m_miss: (player.totalStats.fg2m_miss || 0) + (statsLive.fg2m_miss || 0),
+                fg3m_miss: (player.totalStats.fg3m_miss || 0) + (statsLive.fg3m_miss || 0),
+                ftm: (player.totalStats.ftm || 0) + (statsLive.ftm || 0),
+                ft_miss: (player.totalStats.ft_miss || 0) + (statsLive.ft_miss || 0)
+              }
+            };
+          });
+          return { ...team, players: updatedPlayers };
+        });
+        const newGame = {
+          id: gameId,
+          date: gameDate,
+          teamAId,
+          teamBId,
+          teamAName: teamAObj.name,
+          teamBName: teamBObj.name,
+          teamAScore,
+          teamBScore,
+          underReview: false,
+          playerStats: participantStats,
+          dnpPlayers: [...dnpPlayers],
+          periodSnapshots: [...periodSnapshots],
+          gameLog: [...finalizedGameLog]
+        };
+        const saveResult = await saveNewGameState(newGame, updatedTeams);
+        if (!saveResult?.savedLocally) {
+          showToast("Could not save the completed game. Match is still live, please retry End Game.", "error");
+          return;
+        }
+        if (navigator.onLine !== false && !saveResult?.persistedToServer) {
+          setTeams(previousTeamsSnapshot);
+          setGames(previousGamesSnapshot);
+          writeCachedAppState(
+            normalizeTeamsForStorage(previousTeamsSnapshot),
+            previousGamesSnapshot,
+            statActions,
+            { dirty: true }
+          );
+          showToast("Could not persist finalized game to server yet. Match remains live, please retry End Game.", "error");
+          return;
+        }
+        const didClearLiveSession = await clearLiveSessionEverywhere({ keepTeamSelection: false, terminationStatus: "ended" });
+        setActiveTab("history");
+        setSelectedHistoryGameId(newGame.id);
+        if (saveResult?.persistedToServer && didClearLiveSession) {
+          showToast("Live statistics committed to system database successfully!", "success");
+        } else if (saveResult?.savedLocally && navigator.onLine === false) {
+          showToast("Game saved locally. Server sync and live-session cleanup will resume when internet returns.", "success");
+        } else if (saveResult?.savedLocally && !saveResult?.persistedToServer) {
+          showToast("Game saved locally. Server sync is pending and will retry automatically.", "success");
+        } else {
+          showToast("Game was saved, but active session clear is still pending. Please retry discard/end on active devices.", "error");
+        }
+      } finally {
+        setIsEndingGame(false);
+      }
+    };
+    const openFinalizePeriodConfirm = () => {
+      if (!canAdminControlClock) {
+        showToast("Only admin can end and lock scores.", "info");
+        return;
+      }
+      const periodLabel = getPeriodLabel(currentQuarter);
+      setConfirmDialog({
+        title: `Finalize ${periodLabel}?`,
+        text: `You can continue backfilling missed stats, or finalize ${periodLabel} now and move on.`,
+        cancelLabel: "Continue Backfill",
+        confirmLabel: "Finalize Period",
+        onConfirm: () => {
+          setConfirmDialog(null);
+          handleAdvanceQuarter();
+        }
+      });
+    };
+    const openEndGameConfirm = () => {
+      if (!canAdminControlClock) {
+        showToast("Only admin can end and lock scores.", "info");
+        return;
+      }
+      if (missingRegulationQuarters.length > 0) {
+        const missingLabel = missingRegulationQuarters.map((q) => `Q${q}`).join(", ");
+        setConfirmDialog({
+          title: "Finalize With Missing Quarter Logs?",
+          text: `No play-by-play evidence found for ${missingLabel}. Finalizing now will lock an incomplete timeline. If you intentionally started tracking late, you may continue.`,
+          confirmLabel: "Finalize Anyway",
+          onConfirm: () => {
+            handleEndGame();
+            setConfirmDialog(null);
+          }
+        });
+        return;
+      }
+      setConfirmDialog({
+        title: "End Match?",
+        text: "Lock boxscores permanently.",
+        onConfirm: () => {
+          handleEndGame();
+          setConfirmDialog(null);
+        }
+      });
+    };
+    const handlePeriodAction = () => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if ((periodActionMode === "pauseGame" || periodActionMode === "endPeriod" || periodActionMode === "endGame") && !canAdminControlClock) {
+        showToast("Only admin can pause game or end/lock scores.", "info");
+        return;
+      }
+      if (periodActionMode === "startMatch") {
+        clearTransientLiveActionState();
+        handleStartMatch();
+        return;
+      }
+      if (periodActionMode === "startPeriod") {
+        clearTransientLiveActionState();
+        setIsPlayPaused(false);
+        handleStartNextQuarter();
+        return;
+      }
+      if (periodActionMode === "startOvertime" || periodActionMode === "pauseGame" || periodActionMode === "endGame") {
+        if (periodActionMode === "startOvertime") {
+          clearTransientLiveActionState();
+          setIsPlayPaused(false);
+          handleStartOvertime();
+        } else if (periodActionMode === "endGame") {
+          handleEndGame();
+        } else {
+          handlePauseGame();
+        }
+        return;
+      }
+      if (periodActionMode === "resume") {
+        clearTransientLiveActionState();
+        markLocalSessionUpdated();
+        const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        setPendingPeriodActionMode("pauseGame");
+        setAwaitingPeriodStart(false);
+        setAwaitingOvertimeDecision(false);
+        armLocalResumeStabilityWindow();
+        setIsPlayPaused(false);
+        if (periodClockSeconds > 0) {
+          suppressPeriodAutoStopRef.current = true;
+          suppressTimeoutAutoStopRef.current = true;
+          setIsPeriodClockRunning(true);
+        }
+        setGameLog((prev) => [{
+          id: resumeLogId,
+          time: getWallClockTime(),
+          text: `Play resumed (${getPeriodLabel(currentQuarter)})`,
+          kind: "meta",
+          metaType: "playResume",
+          quarter: currentQuarter,
+          clockRemaining: formatSecondsAsClock(periodClockSeconds)
+        }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+        showToast("Play resumed.", "success");
+        return;
+      }
+      if (periodActionMode === "endPeriod") {
+        openFinalizePeriodConfirm();
+        return;
+      }
+      handleAdvanceQuarter();
+    };
+    const handleLogTimeout = (isTeamA) => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!ensureTeamOperationAccess(isTeamA, "call timeout for this team")) return;
+      if (!hasMatchStarted) {
+        showToast("Press Start Match before calling timeout.", "info");
+        return;
+      }
+      if (isAwaitingPeriodStart) {
+        showToast(`Press Start ${nextPeriodStartLabel} before calling timeout.`, "info");
+        return;
+      }
+      if (isTeamTimeoutPauseActive) {
+        showToast("Timeout already active. Press Resume Play to continue.", "info");
+        return;
+      }
+      const usage = computeTimeoutUsage(getCurrentGameLogSegment(gameLog), currentQuarter);
+      const limit = currentQuarter > 4 ? 1 : currentQuarter <= 2 ? 2 : 3;
+      const teamUsage = isTeamA ? usage.teamA : usage.teamB;
+      const used = currentQuarter > 4 ? teamUsage.currentOvertime : currentQuarter <= 2 ? teamUsage.firstHalf : teamUsage.secondHalf;
+      if (used >= limit) {
+        const teamLabel = isTeamA ? "Home" : "Away";
+        const scopeLabel = currentQuarter > 4 ? getPeriodLabel(currentQuarter) : currentQuarter <= 2 ? "1st half" : "2nd half";
+        showToast(`${teamLabel} has used all ${limit} timeout${limit > 1 ? "s" : ""} for the ${scopeLabel}.`, "info");
+        return;
+      }
+      const teamObj = teams.find((t) => t.id === (isTeamA ? teamAId : teamBId));
+      const timeoutLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const teamName = teamObj?.name || (isTeamA ? "HOME" : "AWAY");
+      markLocalSessionUpdated();
+      setIsPlayPaused(true);
+      setIsPeriodClockRunning(false);
+      setGameLog((prev) => [{
+        id: timeoutLogId,
+        time: getWallClockTime(),
+        text: `TIMEOUT: ${teamName}`,
+        kind: "meta",
+        metaType: "timeout",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        isTeamA
+      }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      showToast(`Timeout called: ${teamName}`, "info");
+    };
+    const handlePauseGame = () => {
+      if (!canUseLiveControls) return;
+      if (!canAdminControlClock) {
+        showToast("Only admin can pause game.", "info");
+        return;
+      }
+      if (!isGameLive) return;
+      if (!hasMatchStarted) {
+        showToast("Press Start Match before pausing game.", "info");
+        return;
+      }
+      if (isAwaitingPeriodStart) {
+        showToast(`Press Start ${nextPeriodStartLabel} before pausing game.`, "info");
+        return;
+      }
+      if (timeoutIsActive) {
+        showToast("Game is already paused. Press Resume Play to continue.", "info");
+        return;
+      }
+      const pauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      markLocalSessionUpdated();
+      setIsPlayPaused(true);
+      setIsPeriodClockRunning(false);
+      setGameLog((prev) => [{
+        id: pauseLogId,
+        time: getWallClockTime(),
+        text: "Manual pause",
+        kind: "meta",
+        metaType: "manualPause",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds)
+      }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      showToast("Game paused.", "info");
+    };
+    const handleOfficialsTimeout = () => {
+      if (!canUseLiveControls) return;
+      if (!isGameLive) return;
+      if (!hasMatchStarted) {
+        showToast("Press Start Match before calling officials timeout.", "info");
+        return;
+      }
+      if (isAwaitingPeriodStart && !hasCurrentQuarterStarted) {
+        showToast(`Press Start ${nextPeriodStartLabel} before calling officials timeout.`, "info");
+        return;
+      }
+      if (timeoutIsActive && !canCallOfficialsWhilePaused) {
+        showToast("Clock already paused. Press Resume Play to continue.", "info");
+        return;
+      }
+      setReasonInput({
+        type: "officialsTimeout",
+        selectedReason: "",
+        customReason: ""
+      });
+    };
+    const commitOfficialsTimeoutWithReason = (reason = "") => {
+      const reasonText = (reason || "").trim();
+      const officialsLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      markLocalSessionUpdated();
+      setIsPlayPaused(true);
+      setIsPeriodClockRunning(false);
+      const displayText = reasonText ? `Officials Timeout: ${reasonText}` : "Officials Timeout";
+      setGameLog((prev) => [{
+        id: officialsLogId,
+        time: getWallClockTime(),
+        text: displayText,
+        kind: "meta",
+        metaType: "officialsTimeout",
+        quarter: currentQuarter,
+        clockRemaining: formatSecondsAsClock(periodClockSeconds),
+        ...reasonText && { reason: reasonText }
+      }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
+      showToast("Officials timeout called.", "info");
+      setReasonInput(null);
+    };
+    const commitTechnicalFoulWithReason = (reason = "", playerId, isTeamA) => {
+      const reasonText = (reason || "").trim();
+      pendingTechnicalFoulReasonRef.current = reasonText;
+      setReasonInput(null);
+      handlePlayerClick(playerId, isTeamA);
+    };
+    const PLAYER_STAT_FIELDS = ["pts", "ast", "reb", "stl", "blk", "to", "pf", "fg2m", "fg3m", "fg2m_miss", "fg3m_miss", "ftm", "ft_miss"];
+    const createEmptyPlayerTotals = () => ({
+      pts: 0,
+      ast: 0,
+      reb: 0,
+      stl: 0,
+      blk: 0,
+      to: 0,
+      pf: 0,
+      fg2m: 0,
+      fg3m: 0,
+      fg2m_miss: 0,
+      fg3m_miss: 0,
+      ftm: 0,
+      ft_miss: 0
+    });
+    const handleToggleHistoricDnp = async (gameId, playerId) => {
+      if (!isLoggedIn) return;
+      const targetGame = games.find((game) => game.id === gameId);
+      if (!targetGame) return;
+      const hasSavedRow = Boolean(targetGame.playerStats?.[playerId]);
+      if (!hasSavedRow) return;
+      const statLine = targetGame.playerStats?.[playerId] || {};
+      const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(statLine[field] || 0) > 0);
+      const currentlyDnp = Array.isArray(targetGame.dnpPlayers) && targetGame.dnpPlayers.includes(playerId);
+      if (!currentlyDnp && hasTrackedStats) {
+        showToast("Cannot mark DNP for a player with recorded stats in this game.", "info");
+        return;
+      }
+      const applyToggle = async () => {
+        const updatedGames = games.map((game) => {
+          if (game.id !== gameId) return game;
+          const nextDnpSet = new Set(Array.isArray(game.dnpPlayers) ? game.dnpPlayers : []);
+          if (nextDnpSet.has(playerId)) {
+            nextDnpSet.delete(playerId);
+          } else {
+            nextDnpSet.add(playerId);
+          }
+          return {
+            ...game,
+            dnpPlayers: Array.from(nextDnpSet)
+          };
+        });
+        const gamesPlayedDelta = currentlyDnp ? 1 : -1;
+        const updatedTeams = teams.map((team) => ({
+          ...team,
+          players: team.players.map((player) => {
+            if (player.id !== playerId) return player;
+            return { ...player, gamesPlayed: Math.max(0, (player.gamesPlayed || 0) + gamesPlayedDelta) };
+          })
+        }));
+        setGames(updatedGames);
+        setTeams(updatedTeams);
+        await saveFullState(updatedTeams, updatedGames);
+        showToast(currentlyDnp ? "Player set back to Counted for this game." : "Player marked DNP for this game.", "success");
+      };
+      if (!currentlyDnp) {
+        const shouldSetDnp = window.confirm("Finalize DNP Status?\n\nMark this player as DNP for this game and exclude this game from their games played?");
+        if (!shouldSetDnp) return;
+      }
+      await applyToggle();
+    };
+    const handleSaveHistoricEdit = async (e) => {
+      e.preventDefault();
+      if (!editingGame) return;
+      let newTeamAScore = 0;
+      let newTeamBScore = 0;
+      const teamAObj = teams.find((t) => t.id === editingGame.teamAId);
+      const teamBObj = teams.find((t) => t.id === editingGame.teamBId);
+      if (teamAObj) {
+        teamAObj.players.forEach((p) => {
+          newTeamAScore += parseInt(editStatsTemp[p.id]?.pts || 0, 10);
+        });
+      }
+      if (teamBObj) {
+        teamBObj.players.forEach((p) => {
+          newTeamBScore += parseInt(editStatsTemp[p.id]?.pts || 0, 10);
+        });
+      }
+      const updatedTeams = teams.map((t) => {
+        if (t.id !== editingGame.teamAId && t.id !== editingGame.teamBId) return t;
+        const updatedPlayers = t.players.map((p) => {
+          const oldPStats = editingGame.playerStats[p.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+          const newPStats = editStatsTemp[p.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+          const delta = (field) => parseInt(newPStats[field] || 0, 10) - parseInt(oldPStats[field] || 0, 10);
+          return {
+            ...p,
+            totalStats: {
+              pts: Math.max(0, (p.totalStats.pts || 0) + delta("pts")),
+              ast: Math.max(0, (p.totalStats.ast || 0) + delta("ast")),
+              reb: Math.max(0, (p.totalStats.reb || 0) + delta("reb")),
+              stl: Math.max(0, (p.totalStats.stl || 0) + delta("stl")),
+              blk: Math.max(0, (p.totalStats.blk || 0) + delta("blk")),
+              to: Math.max(0, (p.totalStats.to || 0) + delta("to")),
+              pf: Math.max(0, (p.totalStats.pf || 0) + delta("pf")),
+              fg2m: Math.max(0, (p.totalStats.fg2m || 0) + delta("fg2m")),
+              fg3m: Math.max(0, (p.totalStats.fg3m || 0) + delta("fg3m")),
+              fg2m_miss: Math.max(0, (p.totalStats.fg2m_miss || 0) + delta("fg2m_miss")),
+              fg3m_miss: Math.max(0, (p.totalStats.fg3m_miss || 0) + delta("fg3m_miss")),
+              ftm: Math.max(0, (p.totalStats.ftm || 0) + delta("ftm")),
+              ft_miss: Math.max(0, (p.totalStats.ft_miss || 0) + delta("ft_miss"))
+            }
+          };
+        });
+        return { ...t, players: updatedPlayers };
+      });
+      const updatedGames = games.map((g) => {
+        if (g.id === editingGame.id) {
+          return {
+            ...g,
+            date: editingGameDate || g.date,
+            teamAScore: newTeamAScore,
+            teamBScore: newTeamBScore,
+            playerStats: editStatsTemp
+          };
+        }
+        return g;
+      });
+      setGames(updatedGames);
+      setTeams(updatedTeams);
+      await saveFullState(updatedTeams, updatedGames);
+      setEditingGame(null);
+      setExpandedEditPlayerId(null);
+      showToast("Box score updated and career averages recalculated!", "success");
+    };
+    const handleDiscardLiveMatch = () => {
+      if (!canAdminControlClock) {
+        showToast("Only admin can discard a match.", "info");
+        return;
+      }
+      setConfirmDialog({
+        title: "Cancel Match?",
+        text: "This deletes all active progress for this session. No logs will be saved to disk.",
+        onConfirm: async () => {
+          const deletedFromDatabase = await clearLiveSessionEverywhere({ keepTeamSelection: false });
+          setConfirmDialog(null);
+          if (deletedFromDatabase) {
+            showToast("Match discarded and active game deleted from database.", "success");
+          } else {
+            showToast("Match discarded locally. Database cleanup is queued and will sync when online.", "info");
+          }
+        }
+      });
+    };
+    const handleDeleteTeam = (teamId) => {
+      setConfirmDialog({
+        title: "Delete Team?",
+        text: "Are you sure you want to delete this team? This will remove all its players and cannot be undone.",
+        onConfirm: async () => {
+          const updatedTeams = teams.filter((t) => t.id !== teamId);
+          setTeams(updatedTeams);
+          await saveTeamState(updatedTeams);
+          setConfirmDialog(null);
+          showToast("Team deleted successfully.", "success");
+        }
+      });
+    };
+    const handleDeletePlayer = (teamId, playerId) => {
+      setConfirmDialog({
+        title: "Delete Player?",
+        text: "Are you sure you want to remove this player from the team roster?",
+        onConfirm: async () => {
+          const updatedTeams = teams.map((t) => {
+            if (t.id === teamId) {
+              return {
+                ...t,
+                players: t.players.filter((p) => p.id !== playerId)
+              };
+            }
+            return t;
+          });
+          await saveTeamState(updatedTeams);
+          setConfirmDialog(null);
+          showToast("Player removed from roster.", "success");
+        }
+      });
+    };
+    const handleDeleteGame = (gameId) => {
+      setConfirmDialog({
+        title: "Delete Game Record?",
+        text: "This will permanently delete this game record and subtract its stats from all players' career averages. This cannot be undone.",
+        onConfirm: async () => {
+          const gameToDelete = games.find((g) => g.id === gameId);
+          if (!gameToDelete) return;
+          const previousGamesSnapshot = games;
+          const previousTeamsSnapshot = teams;
+          const updatedTeams = teams.map((team) => {
+            if (team.id !== gameToDelete.teamAId && team.id !== gameToDelete.teamBId) return team;
+            const updatedPlayers = team.players.map((player) => {
+              const pstats = gameToDelete.playerStats[player.id];
+              if (!pstats) return player;
+              const explicitDnp = Array.isArray(gameToDelete.dnpPlayers) && gameToDelete.dnpPlayers.includes(player.id);
+              if (explicitDnp) return player;
+              return {
+                ...player,
+                gamesPlayed: Math.max(0, (player.gamesPlayed || 0) - 1),
+                totalStats: {
+                  pts: Math.max(0, (player.totalStats.pts || 0) - (pstats.pts || 0)),
+                  ast: Math.max(0, (player.totalStats.ast || 0) - (pstats.ast || 0)),
+                  reb: Math.max(0, (player.totalStats.reb || 0) - (pstats.reb || 0)),
+                  stl: Math.max(0, (player.totalStats.stl || 0) - (pstats.stl || 0)),
+                  blk: Math.max(0, (player.totalStats.blk || 0) - (pstats.blk || 0)),
+                  to: Math.max(0, (player.totalStats.to || 0) - (pstats.to || 0)),
+                  pf: Math.max(0, (player.totalStats.pf || 0) - (pstats.pf || 0)),
+                  fg2m: Math.max(0, (player.totalStats.fg2m || 0) - (pstats.fg2m || 0)),
+                  fg3m: Math.max(0, (player.totalStats.fg3m || 0) - (pstats.fg3m || 0)),
+                  fg2m_miss: Math.max(0, (player.totalStats.fg2m_miss || 0) - (pstats.fg2m_miss || 0)),
+                  fg3m_miss: Math.max(0, (player.totalStats.fg3m_miss || 0) - (pstats.fg3m_miss || 0)),
+                  ftm: Math.max(0, (player.totalStats.ftm || 0) - (pstats.ftm || 0)),
+                  ft_miss: Math.max(0, (player.totalStats.ft_miss || 0) - (pstats.ft_miss || 0))
+                }
+              };
+            });
+            return { ...team, players: updatedPlayers };
+          });
+          const updatedGames = games.filter((g) => g.id !== gameId);
+          const normalizedUpdatedTeams = normalizeTeamsForStorage(updatedTeams);
+          locallyDeletedGameIdsRef.current.add(String(gameId || ""));
+          setGames(updatedGames);
+          setTeams(normalizedUpdatedTeams);
+          writeCachedAppState(normalizedUpdatedTeams, updatedGames, statActions, { dirty: true });
+          const isOnline = navigator.onLine !== false;
+          if (isOnline) {
+            try {
+              await apiRequest(`/api/games/${encodeURIComponent(String(gameId || ""))}`, {
+                method: "DELETE"
+              });
+            } catch (error) {
+              locallyDeletedGameIdsRef.current.delete(String(gameId || ""));
+              setGames(previousGamesSnapshot);
+              setTeams(previousTeamsSnapshot);
+              writeCachedAppState(
+                normalizeTeamsForStorage(previousTeamsSnapshot),
+                previousGamesSnapshot,
+                statActions,
+                { dirty: false }
+              );
+              setConfirmDialog(null);
+              showToast("Failed to delete game record. No changes were saved.", "error");
+              return;
+            }
+            try {
+              const statePayload = await apiRequest("/api/state", {
+                cache: "no-store"
+              });
+              const authoritativeTeams = Array.isArray(statePayload?.teams) ? normalizeTeamsForStorage(statePayload.teams) : normalizedUpdatedTeams;
+              const authoritativeGames = Array.isArray(statePayload?.games) ? statePayload.games : updatedGames;
+              delete pendingYoutubeSaveRef.current[String(gameId || "")];
+              setTeams(authoritativeTeams);
+              setGames(authoritativeGames);
+              writeCachedAppState(authoritativeTeams, authoritativeGames, statActions, { dirty: false });
+              removeGameFromCachedAppState(gameId, authoritativeTeams);
+            } catch (_) {
+              delete pendingYoutubeSaveRef.current[String(gameId || "")];
+              writeCachedAppState(normalizedUpdatedTeams, updatedGames, statActions, { dirty: false });
+              removeGameFromCachedAppState(gameId, normalizedUpdatedTeams);
+            }
+          } else {
+            await saveFullState(normalizedUpdatedTeams, updatedGames);
+            delete pendingYoutubeSaveRef.current[String(gameId || "")];
+            removeGameFromCachedAppState(gameId, normalizedUpdatedTeams);
+          }
+          setActiveTab("history");
+          setSelectedHistoryGameId(null);
+          setPendingSharedGameId(null);
+          setPendingSharedHistoryDetailTab("");
+          suppressNextNavHistoryPushRef.current = true;
+          syncHistoryShareUrl(null, "replace");
+          setConfirmDialog(null);
+          showToast("Game record deleted and career averages recalculated!", "success");
+        }
+      });
+    };
+    const handleCreateTeam = (e) => {
+      e.preventDefault();
+      if (!newTeamName.trim()) return;
+      const newTeam = { id: `team_${Date.now()}`, name: newTeamName.trim(), color: newTeamColor, players: [] };
+      saveTeamState([...teams, newTeam]);
+      setNewTeamName("");
+      setShowNewTeamModal(false);
+    };
+    const handleCreatePlayer = (e) => {
+      e.preventDefault();
+      if (!canEditPlayers) return;
+      if (!newPlayerName.trim() || !newPlayerNumber.trim() || !selectedTeamIdForPlayer) return;
+      const newPlayer = {
+        id: `player_${Date.now()}`,
+        name: newPlayerName.trim(),
+        number: newPlayerNumber.trim(),
+        positions: [],
+        height: newPlayerHeight.trim(),
+        pictureUrl: "",
+        birthday: "",
+        email: "",
+        social: "",
+        contact: "",
+        writeup: "",
+        gamesPlayed: 0,
+        totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+      };
+      const updatedTeams = teams.map((t) => t.id === selectedTeamIdForPlayer ? { ...t, players: [...t.players, newPlayer] } : t);
+      saveTeamState(updatedTeams);
+      setNewPlayerName("");
+      setNewPlayerNumber("");
+      setNewPlayerHeight("");
+      setShowNewPlayerModal(false);
+    };
+    const handleStartAdvancedEditPlayer = (teamId, player) => {
+      if (!canEditPlayers) return;
+      setAdvancedEditingPlayer({
+        teamId,
+        playerId: player.id,
+        name: player.name,
+        number: player.number,
+        positions: normalizePlayerPositions(player),
+        height: player.height || "",
+        pictureUrl: player.pictureUrl || "",
+        birthday: player.birthday || "",
+        email: player.email || "",
+        social: player.social || "",
+        contact: player.contact || "",
+        writeup: player.writeup || ""
+      });
+    };
+    const handleSaveAdvancedPlayerProfile = async (e) => {
+      e.preventDefault();
+      if (!advancedEditingPlayer) return;
+      const profileUpdates = {
+        positions: normalizePlayerPositions(advancedEditingPlayer),
+        height: (advancedEditingPlayer.height || "").trim(),
+        pictureUrl: (advancedEditingPlayer.pictureUrl || "").trim(),
+        birthday: (advancedEditingPlayer.birthday || "").trim(),
+        email: (advancedEditingPlayer.email || "").trim(),
+        social: (advancedEditingPlayer.social || "").trim(),
+        contact: (advancedEditingPlayer.contact || "").trim(),
+        writeup: (advancedEditingPlayer.writeup || "").trim()
+      };
+      const updatedTeams = teams.map((team) => {
+        if (team.id !== advancedEditingPlayer.teamId) return team;
+        return {
+          ...team,
+          players: team.players.map((player) => player.id === advancedEditingPlayer.playerId ? {
+            ...player,
+            ...profileUpdates
+          } : player)
+        };
+      });
+      if (navigator.onLine !== false) {
+        try {
+          const payload = await apiRequest(`/api/players/${encodeURIComponent(advancedEditingPlayer.playerId)}/profile`, {
+            method: "PUT",
+            body: JSON.stringify({
+              teamId: advancedEditingPlayer.teamId,
+              player: profileUpdates
+            })
+          });
+          const persistedPlayer = payload?.player && typeof payload.player === "object" ? payload.player : null;
+          const mergedTeams = persistedPlayer ? updatedTeams.map((team) => team.id !== advancedEditingPlayer.teamId ? team : {
+            ...team,
+            players: team.players.map((player) => player.id !== advancedEditingPlayer.playerId ? player : {
+              ...player,
+              ...profileUpdates,
+              pictureUrl: String(persistedPlayer.pictureUrl || profileUpdates.pictureUrl || "")
+            })
+          }) : updatedTeams;
+          setTeams(mergedTeams);
+          writeCachedAppState(normalizeTeamsForStorage(mergedTeams), games, statActions, { dirty: false });
+          setAdvancedEditingPlayer(null);
+          showToast("Advanced player profile updated.", "success");
+          return;
+        } catch (_) {
+        }
+      }
+      const saved = await saveTeamState(updatedTeams);
+      if (!saved) {
+        showToast("Failed to save player profile.", "error");
+        return;
+      }
+      setAdvancedEditingPlayer(null);
+      showToast("Advanced player profile updated.", "success");
+    };
+    const handleStartEditPlayer = (teamId, player) => {
+      if (!canEditPlayers) return;
+      setEditingPlayer({
+        teamId,
+        playerId: player.id,
+        name: player.name,
+        number: player.number
+      });
+    };
+    const handleCancelEditPlayer = () => {
+      setEditingPlayer(null);
+    };
+    const handleSaveEditPlayer = async () => {
+      if (!editingPlayer) return;
+      const nextName = editingPlayer.name.trim();
+      const nextNumber = String(editingPlayer.number).trim();
+      if (!nextName || !nextNumber) {
+        showToast("Player name and number are required.", "error");
+        return;
+      }
+      const updatedTeams = teams.map((team) => {
+        if (team.id !== editingPlayer.teamId) return team;
+        return {
+          ...team,
+          players: team.players.map((player) => player.id === editingPlayer.playerId ? { ...player, name: nextName, number: nextNumber } : player)
+        };
+      });
+      if (navigator.onLine !== false) {
+        try {
+          await apiRequest(`/api/players/${encodeURIComponent(editingPlayer.playerId)}/profile`, {
+            method: "PUT",
+            body: JSON.stringify({
+              teamId: editingPlayer.teamId,
+              player: {
+                name: nextName,
+                number: nextNumber
+              }
+            })
+          });
+          setTeams(updatedTeams);
+          writeCachedAppState(normalizeTeamsForStorage(updatedTeams), games, statActions, { dirty: false });
+          setEditingPlayer(null);
+          showToast("Player updated.", "success");
+          return;
+        } catch (_) {
+        }
+      }
+      const saved = await saveTeamState(updatedTeams);
+      if (!saved) {
+        showToast("Failed to save player.", "error");
+        return;
+      }
+      setEditingPlayer(null);
+      showToast("Player updated.", "success");
+    };
+    const computeShootingPercentages = (stats, options = {}) => {
+      const showNAWhenNoAttempts = Boolean(options?.showNAWhenNoAttempts);
+      const totalMade = (stats.fg2m || 0) + (stats.fg3m || 0);
+      const totalAttempts = totalMade + (stats.fg2m_miss || 0) + (stats.fg3m_miss || 0);
+      const total3PtAttempts = (stats.fg3m || 0) + (stats.fg3m_miss || 0);
+      const ftAttempts = (stats.ftm || 0) + (stats.ft_miss || 0);
+      return {
+        fgPct: totalAttempts === 0 ? showNAWhenNoAttempts ? "\u2014" : "0%" : `${Math.round(totalMade / totalAttempts * 100)}%`,
+        fg3Pct: total3PtAttempts === 0 ? showNAWhenNoAttempts ? "\u2014" : "0%" : `${Math.round((stats.fg3m || 0) / total3PtAttempts * 100)}%`,
+        ftPct: ftAttempts === 0 ? showNAWhenNoAttempts ? "\u2014" : "0%" : `${Math.round((stats.ftm || 0) / ftAttempts * 100)}%`,
+        fgMadeAtt: formatMadeAttempts(totalMade, totalAttempts),
+        fg3MadeAtt: formatMadeAttempts(stats.fg3m, total3PtAttempts),
+        ftm: stats.ftm || 0,
+        fta: ftAttempts
+      };
+    };
+    const createDerivedLeaderboardTotals = () => ({
+      pts: 0,
+      ast: 0,
+      reb: 0,
+      stl: 0,
+      blk: 0,
+      to: 0,
+      pf: 0,
+      fg2m: 0,
+      fg3m: 0,
+      fg2m_miss: 0,
+      fg3m_miss: 0,
+      ftm: 0,
+      ft_miss: 0
+    });
+    const getArchivedPlayerAggregate = (teamId, playerId) => {
+      const normalizedTeamId = String(teamId || "").trim();
+      const normalizedPlayerId = String(playerId || "").trim();
+      const totalStats = createDerivedLeaderboardTotals();
+      let gamesPlayed = 0;
+      (games || []).forEach((game) => {
+        if (!game || game.teamAId !== normalizedTeamId && game.teamBId !== normalizedTeamId) return;
+        if (Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(normalizedPlayerId)) return;
+        const statLine = game?.playerStats?.[normalizedPlayerId];
+        if (!statLine) return;
+        gamesPlayed += 1;
+        totalStats.pts += Number(statLine.pts || 0);
+        totalStats.ast += Number(statLine.ast || 0);
+        totalStats.reb += Number(statLine.reb || 0);
+        totalStats.stl += Number(statLine.stl || 0);
+        totalStats.blk += Number(statLine.blk || 0);
+        totalStats.to += Number(statLine.to || 0);
+        totalStats.pf += Number(statLine.pf || 0);
+        totalStats.fg2m += Number(statLine.fg2m || 0);
+        totalStats.fg3m += Number(statLine.fg3m || 0);
+        totalStats.fg2m_miss += Number(statLine.fg2m_miss || 0);
+        totalStats.fg3m_miss += Number(statLine.fg3m_miss || 0);
+        totalStats.ftm += Number(statLine.ftm || 0);
+        totalStats.ft_miss += Number(statLine.ft_miss || 0);
+      });
+      return { gamesPlayed, totalStats };
+    };
+    const getAverages = (player) => {
+      const gp = player.gamesPlayed || 0;
+      const stats = player.totalStats || {};
+      if (gp === 0) return { pts: "0.0", ast: "0.0", reb: "0.0", stl: "0.0", blk: "0.0", to: "0.0", pf: "0.0", fgPct: "0%", fg3Pct: "0%", ftPct: "0%", spg: "0.0", bpg: "0.0" };
+      const pctSummary = computeShootingPercentages(stats);
+      return {
+        pts: ((stats.pts || 0) / gp).toFixed(1),
+        ast: ((stats.ast || 0) / gp).toFixed(1),
+        reb: ((stats.reb || 0) / gp).toFixed(1),
+        stl: ((stats.stl || 0) / gp).toFixed(1),
+        blk: ((stats.blk || 0) / gp).toFixed(1),
+        to: ((stats.to || 0) / gp).toFixed(1),
+        pf: ((stats.pf || 0) / gp).toFixed(1),
+        fg3m: ((stats.fg3m || 0) / gp).toFixed(1),
+        ftm: ((stats.ftm || 0) / gp).toFixed(1),
+        fgPct: pctSummary.fgPct,
+        fg3Pct: pctSummary.fg3Pct,
+        ftPct: pctSummary.ftPct,
+        spg: ((stats.stl || 0) / gp).toFixed(1),
+        bpg: ((stats.blk || 0) / gp).toFixed(1)
+      };
+    };
+    const getGameRecencyValue = (game) => {
+      const idValue = Number(String(game?.id || "").replace(/\D+/g, "")) || 0;
+      if (idValue > 0) return idValue;
+      const dateValue = Date.parse(game?.date || "");
+      return Number.isFinite(dateValue) ? dateValue : 0;
+    };
+    const getPlayerLatestGameSummary = (teamId, playerId) => {
+      if (!teamId || !playerId) return null;
+      const latestGame = [...games].filter((g) => g.teamAId === teamId || g.teamBId === teamId).sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a))[0];
+      if (!latestGame) return null;
+      const isHome = latestGame.teamAId === teamId;
+      const opponentName = isHome ? latestGame.teamBName : latestGame.teamAName;
+      const teamScore = isHome ? latestGame.teamAScore : latestGame.teamBScore;
+      const opponentScore = isHome ? latestGame.teamBScore : latestGame.teamAScore;
+      const explicitDnp = Array.isArray(latestGame.dnpPlayers) && latestGame.dnpPlayers.includes(playerId);
+      const playerStats = latestGame.playerStats?.[playerId] || null;
+      const didPlay = !!playerStats && !explicitDnp;
+      return {
+        gameId: latestGame.id,
+        date: latestGame.date,
+        opponentName,
+        teamScore,
+        opponentScore,
+        didPlay,
+        explicitDnp,
+        stats: playerStats
+      };
+    };
+    const getPlayerRecentGamesSummaries = (teamId, playerId, limit = null, statsByGame = null) => {
+      if (!teamId || !playerId) return [];
+      const teamGames = games.filter((g) => g.teamAId === teamId || g.teamBId === teamId).sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a));
+      const visibleGames = Number.isFinite(limit) && Number(limit) > 0 ? teamGames.slice(0, Number(limit)) : teamGames;
+      return visibleGames.map((game) => {
+        const isHome = game.teamAId === teamId;
+        const opponentName = isHome ? game.teamBName : game.teamAName;
+        const teamScore = isHome ? game.teamAScore : game.teamBScore;
+        const opponentScore = isHome ? game.teamBScore : game.teamAScore;
+        const explicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(playerId);
+        const playerStats = statsByGame ? statsByGame[game.id] || null : game.playerStats?.[playerId] || null;
+        const didPlay = !!playerStats && !explicitDnp;
+        return {
+          gameId: game.id,
+          date: game.date,
+          opponentName,
+          teamScore,
+          opponentScore,
+          didPlay,
+          explicitDnp,
+          stats: playerStats
+        };
+      });
+    };
+    const selectedRosterTeam = selectedRosterPlayer ? teams.find((team) => team.id === selectedRosterPlayer.teamId) : null;
+    const selectedRosterAthlete = selectedRosterTeam ? selectedRosterTeam.players.find((player) => player.id === selectedRosterPlayer.playerId) : null;
+    const selectedRosterAthleteAverages = selectedRosterAthlete ? getAverages(selectedRosterAthlete) : null;
+    const selectedRosterAthleteRecentGames = selectedRosterPlayer ? getPlayerRecentGamesSummaries(selectedRosterPlayer.teamId, selectedRosterPlayer.playerId, null, selectedPlayerGameStats) : null;
+    const getPlayerPerStyleScore = (stats = {}) => {
+      const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
+      const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+      const ftMade = Number(stats.ftm || 0);
+      const ftAtt = ftMade + Number(stats.ft_miss || 0);
+      return Number(stats.pts || 0) + 0.4 * fgMade - 0.7 * fgAtt - 0.4 * (ftAtt - ftMade) + 0.7 * Number(stats.reb || 0) + Number(stats.stl || 0) + 0.7 * Number(stats.ast || 0) + 0.7 * Number(stats.blk || 0) - 0.4 * Number(stats.pf || 0) - Number(stats.to || 0);
+    };
+    const getPlayerSeasonPerStyleScore = (player) => {
+      const gp = Number(player?.gamesPlayed || 0);
+      if (gp <= 0) return 0;
+      const stats = player?.totalStats || {};
+      return getPlayerPerStyleScore({
+        pts: Number(stats.pts || 0) / gp,
+        fg2m: Number(stats.fg2m || 0) / gp,
+        fg3m: Number(stats.fg3m || 0) / gp,
+        fg2m_miss: Number(stats.fg2m_miss || 0) / gp,
+        fg3m_miss: Number(stats.fg3m_miss || 0) / gp,
+        ftm: Number(stats.ftm || 0) / gp,
+        ft_miss: Number(stats.ft_miss || 0) / gp,
+        reb: Number(stats.reb || 0) / gp,
+        stl: Number(stats.stl || 0) / gp,
+        ast: Number(stats.ast || 0) / gp,
+        blk: Number(stats.blk || 0) / gp,
+        pf: Number(stats.pf || 0) / gp,
+        to: Number(stats.to || 0) / gp
+      });
+    };
+    const leaguePlayerPool = teams.flatMap((t) => t.players.map((p) => {
+      const playerForLeaders = {
+        ...p,
+        team: t.name,
+        teamId: t.id,
+        perStyleScore: getPlayerSeasonPerStyleScore(p)
+      };
+      return {
+        ...playerForLeaders,
+        avg: getAverages(playerForLeaders)
+      };
+    }));
+    const leagueMvpCandidates = leaguePlayerPool.filter((player) => Number(player.gamesPlayed || 0) > 0).slice().sort((a, b) => {
+      const scoreDelta = Number(b.perStyleScore || 0) - Number(a.perStyleScore || 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const gpDelta = Number(b.gamesPlayed || 0) - Number(a.gamesPlayed || 0);
+      if (gpDelta !== 0) return gpDelta;
+      const ptsDelta = Number(b.totalStats?.pts || 0) - Number(a.totalStats?.pts || 0);
+      if (ptsDelta !== 0) return ptsDelta;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    }).slice(0, 10);
+    const buildMythicalTeam = (playerPool, excludedIds = /* @__PURE__ */ new Set()) => {
+      const slotOrder = PLAYER_POSITIONS.slice();
+      const slotGroups = slotOrder.map((slot) => ({
+        slot,
+        candidates: playerPool.filter((player) => Number(player.gamesPlayed || 0) > 0 && !excludedIds.has(player.id) && normalizePlayerPositions(player).includes(slot)).slice().sort((a, b) => {
+          const scoreDelta = Number(b.perStyleScore || 0) - Number(a.perStyleScore || 0);
+          if (scoreDelta !== 0) return scoreDelta;
+          const gpDelta = Number(b.gamesPlayed || 0) - Number(a.gamesPlayed || 0);
+          if (gpDelta !== 0) return gpDelta;
+          const ptsDelta = Number(b.totalStats?.pts || 0) - Number(a.totalStats?.pts || 0);
+          if (ptsDelta !== 0) return ptsDelta;
+          return String(a.name || "").localeCompare(String(b.name || ""));
+        })
+      })).filter((group) => group.candidates.length > 0).sort((left, right) => {
+        const scarcity = left.candidates.length - right.candidates.length;
+        if (scarcity !== 0) return scarcity;
+        return slotOrder.indexOf(left.slot) - slotOrder.indexOf(right.slot);
+      });
+      if (!slotGroups.length) return [];
+      let bestAssignment = null;
+      let bestScore = Number.NEGATIVE_INFINITY;
+      let bestTiebreak = Number.NEGATIVE_INFINITY;
+      const usedPlayerIds = /* @__PURE__ */ new Set();
+      const currentAssignment = [];
+      const optimisticBound = (startIndex) => slotGroups.slice(startIndex).reduce((sum, group) => sum + Number(group.candidates[0]?.perStyleScore || 0), 0);
+      const recurse = (slotIndex, scoreTotal, tiebreakTotal) => {
+        if (slotIndex >= slotGroups.length) {
+          if (scoreTotal > bestScore || scoreTotal === bestScore && tiebreakTotal > bestTiebreak) {
+            bestScore = scoreTotal;
+            bestTiebreak = tiebreakTotal;
+            bestAssignment = currentAssignment.slice();
+          }
+          return;
+        }
+        if (scoreTotal + optimisticBound(slotIndex) < bestScore) return;
+        const { slot, candidates } = slotGroups[slotIndex];
+        for (const candidate of candidates) {
+          if (usedPlayerIds.has(candidate.id)) continue;
+          usedPlayerIds.add(candidate.id);
+          currentAssignment.push({ slot, player: candidate });
+          recurse(
+            slotIndex + 1,
+            scoreTotal + Number(candidate.perStyleScore || 0),
+            tiebreakTotal + Number(candidate.gamesPlayed || 0) * 1e3 + Number(candidate.totalStats?.pts || 0)
+          );
+          currentAssignment.pop();
+          usedPlayerIds.delete(candidate.id);
+        }
+      };
+      recurse(0, 0, 0);
+      return (bestAssignment || []).slice().sort((left, right) => slotOrder.indexOf(left.slot) - slotOrder.indexOf(right.slot));
+    };
+    const allWKNDFirstTeam = buildMythicalTeam(leaguePlayerPool);
+    const allWKNDSecondTeam = buildMythicalTeam(
+      leaguePlayerPool,
+      new Set(allWKNDFirstTeam.map((entry) => entry.player.id))
+    );
+    const getLeaderMetric = (player, metricKey, mode) => {
+      const stats = player?.totalStats || {};
+      const avg = getAverages(player);
+      const isPctMetric = metricKey === "fgPct" || metricKey === "fg3Pct" || metricKey === "ftPct";
+      if (mode === "perGame") {
+        return parseFloat(avg[metricKey] || 0);
+      }
+      if (isPctMetric) {
+        return parseFloat(avg[metricKey] || 0);
+      }
+      return Number(stats[metricKey] || 0);
+    };
+    const formatLeaderMetric = (player, metricKey, mode) => {
+      const avg = getAverages(player);
+      const stats = player?.totalStats || {};
+      const isPctMetric = metricKey === "fgPct" || metricKey === "fg3Pct" || metricKey === "ftPct";
+      if (mode === "perGame") {
+        return isPctMetric ? avg[metricKey] || "0%" : avg[metricKey] || "0.0";
+      }
+      if (isPctMetric) {
+        return avg[metricKey] || "0%";
+      }
+      return String(Number(stats[metricKey] || 0));
+    };
+    const shareLeaderBlock = async (entry, mode, action = "share") => {
+      const top10 = entry.ranked.slice(0, 10);
+      if (top10.length === 0) {
+        showToast("No players to share yet.", "error");
+        return;
+      }
+      const colorMap = {
+        pts: "#fb923c",
+        reb: "#34d399",
+        ast: "#60a5fa",
+        stl: "#2dd4bf",
+        blk: "#a78bfa",
+        to: "#f87171",
+        fgPct: "#22d3ee",
+        fg3Pct: "#38bdf8",
+        pf: "#fb7185"
+      };
+      const accent = colorMap[entry.id] || "#f97316";
+      const tryLoadImg = (src) => new Promise((resolve) => {
+        if (!src) {
+          resolve(null);
+          return;
+        }
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = src;
+      });
+      const W = 440;
+      const barH = 6;
+      const brandH = 54;
+      const heroH = 262;
+      const divH = 30;
+      const rowH = 40;
+      const footerH = 32;
+      const listCount = Math.min(top10.length - 1, 9);
+      const H = barH + brandH + heroH + divH + listCount * rowH + footerH + barH;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+      bgGrad.addColorStop(0, "#020817");
+      bgGrad.addColorStop(1, "#0d1424");
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+      const topBarGrad = ctx.createLinearGradient(0, 0, W, 0);
+      topBarGrad.addColorStop(0, accent);
+      topBarGrad.addColorStop(1, accent + "bb");
+      ctx.fillStyle = topBarGrad;
+      ctx.fillRect(0, 0, W, barH);
+      ctx.fillStyle = accent + "88";
+      ctx.fillRect(0, H - barH, W, barH);
+      const brandY = barH;
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 17px system-ui, sans-serif";
+      ctx.fillText("WKND", 20, brandY + 26);
+      ctx.fillStyle = accent;
+      ctx.font = "bold 8px system-ui, sans-serif";
+      ctx.fillText("BASKETBALL", 20, brandY + 40);
+      ctx.font = "bold 9px system-ui, sans-serif";
+      const modeLabel = mode === "perGame" ? "PER GAME" : "ACCUMULATED";
+      const modeLabelW = ctx.measureText(modeLabel).width + 18;
+      ctx.fillStyle = "#ffffff0d";
+      ctx.strokeStyle = "#ffffff18";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(W - 20 - modeLabelW, brandY + 14, modeLabelW, 20, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#64748b";
+      ctx.textAlign = "center";
+      ctx.fillText(modeLabel, W - 20 - modeLabelW / 2, brandY + 27);
+      const heroY = barH + brandH;
+      const heroCX = W / 2;
+      const avatarR = 52;
+      const avatarCY = heroY + 94;
+      const glowGrad = ctx.createRadialGradient(heroCX, avatarCY, 0, heroCX, avatarCY, 130);
+      glowGrad.addColorStop(0, accent + "28");
+      glowGrad.addColorStop(0.55, accent + "0a");
+      glowGrad.addColorStop(1, "transparent");
+      ctx.fillStyle = glowGrad;
+      ctx.fillRect(0, heroY, W, heroH);
+      ctx.textAlign = "center";
+      ctx.fillStyle = accent;
+      ctx.font = "bold 9px system-ui, sans-serif";
+      ctx.fillText("\u2014  LEAGUE LEADER  \u2014", heroCX, heroY + 20);
+      const rings = [
+        { r: avatarR + 18, alpha: 0.06, lw: 14 },
+        { r: avatarR + 9, alpha: 0.12, lw: 8 },
+        { r: avatarR + 3, alpha: 0.3, lw: 3 }
+      ];
+      rings.forEach(({ r, alpha, lw }) => {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        ctx.arc(heroCX, avatarCY, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      });
+      const heroImg = await tryLoadImg(top10[0].pictureUrl);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(heroCX, avatarCY, avatarR, 0, Math.PI * 2);
+      ctx.clip();
+      if (heroImg) {
+        ctx.drawImage(heroImg, heroCX - avatarR, avatarCY - avatarR, avatarR * 2, avatarR * 2);
+      } else {
+        const pGrad = ctx.createLinearGradient(heroCX - avatarR, avatarCY - avatarR, heroCX + avatarR, avatarCY + avatarR);
+        pGrad.addColorStop(0, "#1e293b");
+        pGrad.addColorStop(1, "#0f172a");
+        ctx.fillStyle = pGrad;
+        ctx.fill();
+      }
+      ctx.restore();
+      if (!heroImg) {
+        const ini = (top10[0].name || "?").split(" ").map((w) => w[0] || "").join("").slice(0, 2).toUpperCase();
+        ctx.fillStyle = "#64748b";
+        ctx.font = "bold 26px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(ini, heroCX, avatarCY + 9);
+      }
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(heroCX, avatarCY, avatarR, 0, Math.PI * 2);
+      ctx.stroke();
+      const badgePillW = 40;
+      const badgePillH = 22;
+      const badgePillX = heroCX - badgePillW / 2;
+      const badgePillY = avatarCY + avatarR - 10;
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      ctx.roundRect(badgePillX, badgePillY, badgePillW, badgePillH, 11);
+      ctx.fill();
+      ctx.fillStyle = "#000000";
+      ctx.font = "bold 11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("#1", heroCX, badgePillY + 15);
+      const nameY = avatarCY + avatarR + 30;
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 22px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(top10[0].name || "", heroCX, nameY);
+      ctx.fillStyle = "#64748b";
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillText(top10[0].team || "", heroCX, nameY + 18);
+      const statVal = String(formatLeaderMetric(top10[0], entry.valueKey, mode));
+      const statY = nameY + 66;
+      ctx.save();
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = 24;
+      ctx.fillStyle = accent;
+      ctx.font = "bold 58px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(statVal, heroCX, statY);
+      ctx.restore();
+      ctx.fillStyle = "#475569";
+      ctx.font = "bold 11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(entry.statLabel, heroCX, statY + 18);
+      const divY = heroY + heroH;
+      ctx.fillStyle = "#1e293b";
+      ctx.fillRect(20, divY + divH / 2, W - 40, 1);
+      const divLabel = "TOP 10";
+      ctx.font = "bold 9px system-ui, sans-serif";
+      const divLabelW = ctx.measureText(divLabel).width + 20;
+      ctx.fillStyle = "#020817";
+      ctx.fillRect(heroCX - divLabelW / 2, divY + 4, divLabelW, divH - 8);
+      ctx.fillStyle = "#334155";
+      ctx.textAlign = "center";
+      ctx.fillText(divLabel, heroCX, divY + divH / 2 + 4);
+      const listY = divY + divH;
+      const listAvatarR = 16;
+      const listAvatarCX = 48;
+      for (let i = 1; i <= listCount; i++) {
+        const player = top10[i];
+        const rowY = listY + (i - 1) * rowH;
+        const cy = rowY + rowH / 2;
+        if (i > 1) {
+          ctx.fillStyle = "#1e293b";
+          ctx.fillRect(16, rowY, W - 32, 1);
+        }
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#475569";
+        ctx.font = "bold 10px system-ui, sans-serif";
+        ctx.fillText(`#${i + 1}`, 20, cy + 4);
+        const img = await tryLoadImg(player.pictureUrl);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(listAvatarCX, cy, listAvatarR, 0, Math.PI * 2);
+        ctx.clip();
+        if (img) {
+          ctx.drawImage(img, listAvatarCX - listAvatarR, cy - listAvatarR, listAvatarR * 2, listAvatarR * 2);
+        } else {
+          ctx.fillStyle = "#1e293b";
+          ctx.fill();
+        }
+        ctx.restore();
+        if (!img) {
+          const ini = (player.name || "?").split(" ").map((w) => w[0] || "").join("").slice(0, 2).toUpperCase();
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#64748b";
+          ctx.font = "bold 9px system-ui, sans-serif";
+          ctx.fillText(ini, listAvatarCX, cy + 3);
+        }
+        ctx.strokeStyle = "#334155";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(listAvatarCX, cy, listAvatarR, 0, Math.PI * 2);
+        ctx.stroke();
+        const textX = listAvatarCX + listAvatarR + 10;
+        const maxNameW = W - textX - 68;
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#e2e8f0";
+        ctx.font = "bold 12px system-ui, sans-serif";
+        let dn = player.name || "";
+        while (dn.length > 1 && ctx.measureText(dn).width > maxNameW) dn = dn.slice(0, -1);
+        if (dn !== player.name) dn = dn.trimEnd() + "\u2026";
+        ctx.fillText(dn, textX, cy - 1);
+        ctx.fillStyle = "#475569";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.fillText(player.team || "", textX, cy + 13);
+        ctx.textAlign = "right";
+        ctx.fillStyle = accent;
+        ctx.font = "bold 14px system-ui, sans-serif";
+        ctx.fillText(String(formatLeaderMetric(player, entry.valueKey, mode)), W - 16, cy + 5);
+      }
+      const footerY = listY + listCount * rowH;
+      ctx.fillStyle = "#1e293b";
+      ctx.fillRect(0, footerY, W, 1);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#2d3f55";
+      ctx.font = "bold 9px system-ui, sans-serif";
+      ctx.fillText("WKNDBASKETBALL.COM", W / 2, footerY + 21);
+      const filename = `wknd-leaders-${entry.id}-${mode}.png`;
+      if (action === "download") {
+        canvas.toBlob((blob) => {
+          const link = document.createElement("a");
+          link.download = filename;
+          link.href = URL.createObjectURL(blob);
+          link.click();
+          showToast(`${entry.title} leaders image downloaded.`, "success");
+        }, "image/png");
+      } else if (typeof navigator.share === "function") {
+        canvas.toBlob(async (blob) => {
+          try {
+            const file = new File([blob], filename, { type: "image/png" });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+              await navigator.share({ files: [file], title: `WKND ${entry.title} Leaders` });
+            } else {
+              const link = document.createElement("a");
+              link.download = filename;
+              link.href = URL.createObjectURL(blob);
+              link.click();
+              showToast(`${entry.title} leaders image downloaded.`, "success");
+            }
+          } catch (err) {
+            if (err.name !== "AbortError") showToast("Could not share image.", "error");
+          }
+        }, "image/png");
+      } else {
+        const link = document.createElement("a");
+        link.download = filename;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+        showToast(`${entry.title} leaders image downloaded.`, "success");
+      }
+    };
+    const summarizeGameTeamStats = (team, game) => {
+      const totals = {
+        pts: 0,
+        reb: 0,
+        ast: 0,
+        stl: 0,
+        blk: 0,
+        to: 0,
+        pf: 0,
+        fg2m: 0,
+        fg3m: 0,
+        fg2m_miss: 0,
+        fg3m_miss: 0,
+        ftm: 0,
+        ft_miss: 0
+      };
+      (team?.players || []).forEach((player) => {
+        const pstats = game?.playerStats?.[player.id];
+        if (!pstats) return;
+        totals.pts += pstats.pts || 0;
+        totals.reb += pstats.reb || 0;
+        totals.ast += pstats.ast || 0;
+        totals.stl += pstats.stl || 0;
+        totals.blk += pstats.blk || 0;
+        totals.to += pstats.to || 0;
+        totals.pf += pstats.pf || 0;
+        totals.fg2m += pstats.fg2m || 0;
+        totals.fg3m += pstats.fg3m || 0;
+        totals.fg2m_miss += pstats.fg2m_miss || 0;
+        totals.fg3m_miss += pstats.fg3m_miss || 0;
+        totals.ftm += pstats.ftm || 0;
+        totals.ft_miss += pstats.ft_miss || 0;
+      });
+      const fgMade = totals.fg2m + totals.fg3m;
+      const fgAtt = fgMade + totals.fg2m_miss + totals.fg3m_miss;
+      const fg3Att = totals.fg3m + totals.fg3m_miss;
+      const ftAtt = totals.ftm + totals.ft_miss;
+      return {
+        ...totals,
+        fgPct: fgAtt === 0 ? "0%" : `${Math.round(fgMade / fgAtt * 100)}%`,
+        fg3Pct: fg3Att === 0 ? "0%" : `${Math.round(totals.fg3m / fg3Att * 100)}%`,
+        ftPct: ftAtt === 0 ? "0%" : `${Math.round(totals.ftm / ftAtt * 100)}%`
+      };
+    };
+    const getPlayerOfTheGame = (game, teamAObj, teamBObj) => {
+      const manualPotgPlayerId = String(game?.manualPotgPlayerId || "").trim();
+      const POINTS_LEADER_BONUS = 1.25;
+      const computePerStyleScore = (stats = {}) => {
+        const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
+        const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+        const ftMade = Number(stats.ftm || 0);
+        const ftAtt = ftMade + Number(stats.ft_miss || 0);
+        return Number(stats.pts || 0) + 0.4 * fgMade - 0.7 * fgAtt - 0.4 * (ftAtt - ftMade) + 0.7 * Number(stats.reb || 0) + Number(stats.stl || 0) + 0.7 * Number(stats.ast || 0) + 0.7 * Number(stats.blk || 0) - 0.4 * Number(stats.pf || 0) - Number(stats.to || 0);
+      };
+      const teamAScoreValue = Number(game?.teamAScore || 0);
+      const teamBScoreValue = Number(game?.teamBScore || 0);
+      const winnerTeamId = teamAScoreValue === teamBScoreValue ? null : teamAScoreValue > teamBScoreValue ? game?.teamAId : game?.teamBId;
+      const candidateTeams = winnerTeamId ? [teamAObj, teamBObj].filter((team) => team?.id === winnerTeamId) : [teamAObj, teamBObj].filter(Boolean);
+      if (manualPotgPlayerId) {
+        const manualPlayer = teams.flatMap((team) => team.players || []).find((player) => player.id === manualPotgPlayerId);
+        const manualTeam = teams.find((team) => (team.players || []).some((player) => player.id === manualPotgPlayerId));
+        const manualStats = game?.playerStats?.[manualPotgPlayerId];
+        const manualTeamCanWin = !winnerTeamId || String(manualTeam?.id || "") === String(winnerTeamId || "");
+        if (manualPlayer && manualStats && manualTeamCanWin) {
+          return {
+            id: manualPlayer.id,
+            name: manualPlayer.name,
+            number: manualPlayer.number,
+            pictureUrl: manualPlayer.pictureUrl || "",
+            teamName: manualTeam?.name || "",
+            teamColor: manualTeam?.color || "#f97316",
+            teamId: manualTeam?.id || "",
+            stats: manualStats,
+            perScore: computePerStyleScore(manualStats),
+            selectionMode: "manual"
+          };
+        }
+      }
+      const candidates = candidateTeams.filter(Boolean).flatMap((team) => (team.players || []).map((player) => {
+        const pstats = game?.playerStats?.[player.id];
+        if (!pstats) return null;
+        const perScore = computePerStyleScore(pstats);
+        return {
+          id: player.id,
+          name: player.name,
+          number: player.number,
+          pictureUrl: player.pictureUrl || "",
+          teamName: team.name,
+          teamColor: team.color,
+          stats: pstats,
+          perScore
+        };
+      })).filter(Boolean);
+      if (candidates.length === 0) return null;
+      const maxPoints = candidates.reduce((maxValue, entry) => {
+        const pts = Number(entry?.stats?.pts || 0);
+        return pts > maxValue ? pts : maxValue;
+      }, 0);
+      const weightedCandidates = candidates.map((entry) => {
+        const pts = Number(entry?.stats?.pts || 0);
+        const leaderBonus = maxPoints > 0 && pts === maxPoints ? POINTS_LEADER_BONUS : 0;
+        return { ...entry, perScore: Number(entry.perScore || 0) + leaderBonus };
+      });
+      return weightedCandidates.sort((a, b) => b.perScore - a.perScore || (b.stats.pts || 0) - (a.stats.pts || 0))[0];
+    };
+    const getDefaultHistoryDetailTab = (game) => {
+      if (!game) return "scoring";
+      if (String(game.manualPotgPlayerId || "").trim()) return "potg";
+      if (game._detailLoaded) {
+        const teamAObj = teams.find((t) => t.id === game.teamAId);
+        const teamBObj = teams.find((t) => t.id === game.teamBId);
+        return getPlayerOfTheGame(game, teamAObj, teamBObj) ? "potg" : "scoring";
+      }
+      return "scoring";
+    };
+    const buildShareableGameLogUrl = (gameId) => {
+      if (!gameId) return "";
+      const url = new URL(window.location.origin + "/");
+      url.searchParams.set("view", "game");
+      url.searchParams.set("gameId", String(gameId));
+      if (historyDetailTab) {
+        url.searchParams.set("tab", historyDetailTab);
+      }
+      return url.toString();
+    };
+    const handleCopyGameLogShareLink = async (gameId) => {
+      const shareUrl = buildShareableGameLogUrl(gameId);
+      if (!shareUrl) return;
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(shareUrl);
+        } else {
+          const textArea = document.createElement("textarea");
+          textArea.value = shareUrl;
+          textArea.setAttribute("readonly", "");
+          textArea.style.position = "absolute";
+          textArea.style.left = "-9999px";
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textArea);
+        }
+        showToast("Shareable game-log link copied.", "success");
+      } catch (error) {
+        showToast("Could not copy link. Please copy it manually from the browser address bar.", "error");
+      }
+    };
+    const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+    const readBlobAsDataUrl = (blob) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image blob"));
+      reader.readAsDataURL(blob);
+    });
+    const buildPlayerStatSummary = (stats = {}) => {
+      const pts = Number(stats.pts || 0);
+      const reb = Number(stats.reb || 0);
+      const ast = Number(stats.ast || 0);
+      return `${pts} PTS \u2022 ${reb} REB \u2022 ${ast} AST`;
+    };
+    const resolvePlayerImageDataUrl = async (pictureUrl) => {
+      const src = String(pictureUrl || "").trim();
+      if (!src) return "";
+      if (src.startsWith("data:image/")) return src;
+      const response = await fetch(src, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load best player profile image.");
+      const blob = await response.blob();
+      return readBlobAsDataUrl(blob);
+    };
+    const handlePlayerArtUpload = async (event) => {
+      const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+      event.target.value = "";
+      if (!file) return;
+      if (!String(file.type || "").startsWith("image/")) {
+        showToast("Please upload an image file.", "error");
+        return;
+      }
+      if (file.size > 4.5 * 1024 * 1024) {
+        showToast("Image is too large. Use a file smaller than 4.5MB.", "error");
+        return;
+      }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        setPlayerArtSourceDataUrl(dataUrl);
+        setPlayerArtOutputDataUrl("");
+        setPlayerArtDirection("");
+        showToast("Player photo uploaded. You can now generate 2D art.", "success");
+      } catch (error) {
+        showToast("Could not read the uploaded image.", "error");
+      }
+    };
+    const handleCustomCoverUpload = async (gameId, event) => {
+      const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+      event.target.value = "";
+      if (!file || !gameId) return;
+      if (!String(file.type || "").startsWith("image/")) {
+        showToast("Please upload an image file.", "error");
+        return;
+      }
+      if (file.size > 4.5 * 1024 * 1024) {
+        showToast("Image is too large. Use a file smaller than 4.5MB.", "error");
+        return;
+      }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        await apiRequest(`/api/games/${encodeURIComponent(gameId)}/social-cover`, {
+          method: "PUT",
+          body: JSON.stringify({ imageDataUrl: dataUrl })
+        });
+        setGames((prev) => prev.map((game) => game.id === gameId ? { ...game, socialCoverDataUrl: dataUrl, socialCoverLen: dataUrl ? dataUrl.length : 0 } : game));
+        showToast("Custom social cover uploaded for this game.", "success");
+      } catch (error) {
+        showToast(String(error?.message || "Could not upload custom social cover."), "error");
+      }
+    };
+    const handleClearCustomCover = async (gameId) => {
+      if (!gameId) return;
+      try {
+        await apiRequest(`/api/games/${encodeURIComponent(gameId)}/social-cover`, {
+          method: "DELETE"
+        });
+        setGames((prev) => prev.map((game) => game.id === gameId ? { ...game, socialCoverDataUrl: "", socialCoverLen: 0 } : game));
+        showToast("Custom social cover removed. Using generated cover.", "info");
+      } catch (error) {
+        showToast(String(error?.message || "Could not remove custom social cover."), "error");
+      }
+    };
+    const buildSocialCoverBaseDataUrl = ({ game, teamAObj, teamBObj }) => {
+      const W = 1200;
+      const H = 630;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      const colorA = teamAObj?.color || "#10b981";
+      const colorB = teamBObj?.color || "#ef4444";
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      ctx.globalAlpha = 0.06;
+      for (let i = -H; i < W + H; i += 48) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i + H, H);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 20;
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = colorA;
+      ctx.fillRect(0, 0, W / 2, 6);
+      ctx.fillStyle = colorB;
+      ctx.fillRect(W / 2, 0, W / 2, 6);
+      ctx.fillStyle = colorA;
+      ctx.fillRect(0, H - 6, W / 2, 6);
+      ctx.fillStyle = colorB;
+      ctx.fillRect(W / 2, H - 6, W / 2, 6);
+      ctx.fillStyle = "#1e293b";
+      ctx.beginPath();
+      ctx.roundRect(40, 28, 240, 32, 8);
+      ctx.fill();
+      ctx.fillStyle = "#f97316";
+      ctx.font = "bold 13px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("WKND GLEAGUE SEASON 3", 160, 49);
+      ctx.fillStyle = "#1e293b";
+      ctx.beginPath();
+      ctx.roundRect(W - 200, 28, 160, 32, 8);
+      ctx.fill();
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "13px system-ui, sans-serif";
+      ctx.fillText(game.date || "", W - 120, 49);
+      const drawTeamBlock = (anchorX, y, name, score, color, alignRight) => {
+        ctx.textAlign = alignRight ? "right" : "left";
+        ctx.fillStyle = color;
+        ctx.font = "bold 20px system-ui, sans-serif";
+        ctx.fillText((name || "").toUpperCase(), anchorX, y);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 126px system-ui, sans-serif";
+        ctx.fillText(String(score ?? 0), anchorX, y + 128);
+      };
+      drawTeamBlock(78, 140, game.teamAName, game.teamAScore, colorA, false);
+      drawTeamBlock(W - 78, 140, game.teamBName, game.teamBScore, colorB, true);
+      ctx.fillStyle = "#334155";
+      ctx.font = "bold 28px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("VS", W / 2, 220);
+      const winner = Number(game.teamAScore) > Number(game.teamBScore) ? game.teamAName : Number(game.teamBScore) > Number(game.teamAScore) ? game.teamBName : null;
+      const resultText = winner ? `${winner} wins` : "Final Score";
+      ctx.fillStyle = "#64748b";
+      ctx.font = "18px system-ui, sans-serif";
+      ctx.fillText(resultText.toUpperCase(), W / 2, 310);
+      ctx.strokeStyle = "#1e293b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(60, 340);
+      ctx.lineTo(W - 60, 340);
+      ctx.stroke();
+      return canvas.toDataURL("image/png");
+    };
+    const handleGeneratePlayerArt = async ({ game, teamAObj, teamBObj, playerOfTheGame, silent = false }) => {
+      if (!playerOfTheGame) {
+        if (!silent) showToast("No best player available for this game yet.", "error");
+        return null;
+      }
+      setIsGeneratingPlayerArt(true);
+      try {
+        const sourceDataUrl = playerArtSourceDataUrl;
+        const fallbackImageUrl = String(playerOfTheGame?.pictureUrl || "").trim();
+        if (!sourceDataUrl && !fallbackImageUrl) {
+          if (!silent) showToast("Upload a player photo, or add a profile image for the best player.", "error");
+          return null;
+        }
+        const dynamicPlayerName = String(playerOfTheGame?.name || "").trim();
+        const dynamicTeamName = String(playerOfTheGame?.teamName || game?.teamAName || "").trim();
+        const dynamicPlayerStatsSummary = buildPlayerStatSummary(playerOfTheGame?.stats || {});
+        const dynamicScoreLine = `${game?.teamAName || "HOME"} ${Number(game?.teamAScore || 0)} - ${Number(game?.teamBScore || 0)} ${game?.teamBName || "AWAY"}`;
+        const response = await fetch("/api/generate-player-2d-art", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageDataUrl: sourceDataUrl || null,
+            imageUrl: sourceDataUrl ? null : fallbackImageUrl,
+            coverImageDataUrl: buildSocialCoverBaseDataUrl({ game, teamAObj, teamBObj }),
+            playerName: dynamicPlayerName,
+            teamName: dynamicTeamName,
+            playerStatsSummary: dynamicPlayerStatsSummary,
+            gameContext: {
+              gameId: game?.id || "",
+              date: game?.date || "",
+              teamAName: game?.teamAName || "",
+              teamAScore: Number(game?.teamAScore || 0),
+              teamBName: game?.teamBName || "",
+              teamBScore: Number(game?.teamBScore || 0),
+              scoreLine: dynamicScoreLine,
+              bestPlayerName: dynamicPlayerName,
+              bestPlayerTeam: dynamicTeamName,
+              bestPlayerStats: dynamicPlayerStatsSummary
+            },
+            stylePrompt: playerArtStylePrompt
+          })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to generate 2D player art.");
+        }
+        const generatedDataUrl = String(payload?.imageDataUrl || "");
+        setPlayerArtOutputDataUrl(generatedDataUrl);
+        setPlayerArtDirection(String(payload?.artDirection || ""));
+        if (!silent) showToast("2D player art generated successfully.", "success");
+        return generatedDataUrl;
+      } catch (error) {
+        if (!silent) showToast(String(error?.message || "Failed to generate 2D player art."), "error");
+        return null;
+      } finally {
+        setIsGeneratingPlayerArt(false);
+      }
+    };
+    const handleGenerateSocialCover = async ({ game, teamAObj, teamBObj, playerOfTheGame }) => {
+      let generatedArtDataUrl = await handleGeneratePlayerArt({ game, teamAObj, teamBObj, playerOfTheGame, silent: true });
+      let fallbackPlayerImageDataUrl = playerArtSourceDataUrl;
+      if (!fallbackPlayerImageDataUrl && playerOfTheGame?.pictureUrl) {
+        try {
+          fallbackPlayerImageDataUrl = await resolvePlayerImageDataUrl(playerOfTheGame.pictureUrl);
+          if (fallbackPlayerImageDataUrl) {
+            setPlayerArtSourceDataUrl(fallbackPlayerImageDataUrl);
+          }
+        } catch (e) {
+        }
+      }
+      if (!generatedArtDataUrl && !fallbackPlayerImageDataUrl) {
+        showToast("Upload a player photo first, or add a best-player profile image.", "error");
+        return;
+      }
+      if (!generatedArtDataUrl && fallbackPlayerImageDataUrl) {
+        generatedArtDataUrl = fallbackPlayerImageDataUrl;
+        showToast("AI layer failed. Using uploaded player image directly for social cover.", "info");
+      } else if (generatedArtDataUrl) {
+        showToast("Social cover generated successfully.", "success");
+      }
+      try {
+        await handleDownloadCoverImage({ game, teamAObj, teamBObj, playerOfTheGame, generatedPlayerArtDataUrl: generatedArtDataUrl });
+      } catch (error) {
+        showToast(String(error?.message || "Failed to render social cover image."), "error");
+      }
+    };
+    const handleDownloadPlayerArt = () => {
+      if (!playerArtOutputDataUrl) return;
+      const link = document.createElement("a");
+      link.download = `wknd-player-2d-${Date.now()}.png`;
+      link.href = playerArtOutputDataUrl;
+      link.click();
+    };
+    const handleDownloadCoverImage = async ({ game, teamAObj, teamBObj, playerOfTheGame, generatedPlayerArtDataUrl }) => {
+      const W = 1200, H = 630;
+      const canvas = document.createElement("canvas");
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      const customCoverDataUrl = String(game?.socialCoverDataUrl || "").trim();
+      if (!customCoverDataUrl && !generatedPlayerArtDataUrl && game?.id) {
+        try {
+          const response = await fetch(`/api/social-cover/${encodeURIComponent(game.id)}.png?v=${Date.now()}`, {
+            cache: "no-store"
+          });
+          if (response.ok) {
+            const blob = await response.blob();
+            if (blob && blob.size > 0) {
+              const blobUrl = URL.createObjectURL(blob);
+              const link2 = document.createElement("a");
+              link2.download = `wknd-game-${game.id}-cover.png`;
+              link2.href = blobUrl;
+              link2.click();
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 1e3);
+              showToast("Cover image downloaded.", "success");
+              return;
+            }
+          }
+        } catch (_) {
+        }
+      }
+      const detectFaceBoundingBox = async (img) => {
+        try {
+          if (typeof window === "undefined" || typeof window.FaceDetector !== "function") return null;
+          const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+          const faces = await detector.detect(img);
+          if (!Array.isArray(faces) || faces.length === 0) return null;
+          const box = faces[0]?.boundingBox || null;
+          if (!box) return null;
+          const x = Number(box.x || 0);
+          const y = Number(box.y || 0);
+          const width = Number(box.width || 0);
+          const height = Number(box.height || 0);
+          if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+          return { x, y, width, height };
+        } catch {
+          return null;
+        }
+      };
+      const loadImage = (src) => new Promise((resolve, reject) => {
+        if (!src) {
+          reject(new Error("No image source"));
+          return;
+        }
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
+      let socialCoverLogo = null;
+      const logoCandidates = ["/wknd-s3-logo.png", "/src/wknd-s3-logo.png"];
+      for (const logoSource of logoCandidates) {
+        try {
+          socialCoverLogo = await loadImage(logoSource);
+          if (socialCoverLogo) break;
+        } catch (_) {
+        }
+      }
+      const drawTopLeftCoverLogo = () => {
+        if (!socialCoverLogo) return;
+        const maxW = 220;
+        const maxH = 44;
+        const srcW = Number(socialCoverLogo.naturalWidth || socialCoverLogo.width || 0);
+        const srcH = Number(socialCoverLogo.naturalHeight || socialCoverLogo.height || 0);
+        if (!srcW || !srcH) return;
+        const scale = Math.min(maxW / srcW, maxH / srcH);
+        const drawW = Math.max(1, Math.round(srcW * scale));
+        const drawH = Math.max(1, Math.round(srcH * scale));
+        const badgeX = 32;
+        const badgeY = 18;
+        const badgeW = 236;
+        const badgeH = 52;
+        const imageX = badgeX + Math.round((badgeW - drawW) / 2);
+        const imageY = badgeY + Math.round((badgeH - drawH) / 2);
+        ctx.drawImage(socialCoverLogo, imageX, imageY, drawW, drawH);
+      };
+      const drawPOTGAvatar = async ({ avatarSource, avatarX, avatarY, avatarR, fallbackName, ringColor }) => {
+        ctx.beginPath();
+        ctx.arc(avatarX, avatarY, avatarR + 5, 0, Math.PI * 2);
+        ctx.fillStyle = `${ringColor || "#f97316"}66`;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(avatarX, avatarY, avatarR + 1, 0, Math.PI * 2);
+        ctx.fillStyle = "#0b1220";
+        ctx.fill();
+        let avatarDrawn = false;
+        try {
+          const avatarImg = await loadImage(avatarSource || "");
+          const srcW = Number(avatarImg.naturalWidth || avatarImg.width || 0);
+          const srcH = Number(avatarImg.naturalHeight || avatarImg.height || 0);
+          let cropSize = Math.max(1, Math.min(srcW, srcH) * 0.72);
+          let sx = Math.max(0, (srcW - cropSize) / 2);
+          let sy = Math.max(0, (srcH - cropSize) / 2);
+          const faceBox = await detectFaceBoundingBox(avatarImg);
+          if (faceBox) {
+            const faceCenterX = faceBox.x + faceBox.width / 2;
+            const faceCenterY = faceBox.y + faceBox.height / 2;
+            const targetCrop = Math.min(srcW, srcH, Math.max(faceBox.width * 1.6, faceBox.height * 1.95));
+            cropSize = Math.max(1, targetCrop);
+            sx = Math.max(0, Math.min(srcW - cropSize, faceCenterX - cropSize / 2));
+            sy = Math.max(0, Math.min(srcH - cropSize, faceCenterY - cropSize * 0.5));
+          }
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          ctx.drawImage(
+            avatarImg,
+            sx,
+            sy,
+            cropSize,
+            cropSize,
+            avatarX - avatarR,
+            avatarY - avatarR,
+            avatarR * 2,
+            avatarR * 2
+          );
+          ctx.restore();
+          avatarDrawn = true;
+        } catch (_) {
+          avatarDrawn = false;
+        }
+        if (!avatarDrawn) {
+          ctx.beginPath();
+          ctx.arc(avatarX, avatarY, avatarR, 0, Math.PI * 2);
+          ctx.fillStyle = "#1e293b";
+          ctx.fill();
+          ctx.fillStyle = "#f8fafc";
+          ctx.font = "bold 36px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText((fallbackName || "?").slice(0, 1).toUpperCase(), avatarX, avatarY + 12);
+        }
+      };
+      if (customCoverDataUrl) {
+        try {
+          const cover = await loadImage(customCoverDataUrl);
+          const srcW = Number(cover.naturalWidth || cover.width || W);
+          const srcH = Number(cover.naturalHeight || cover.height || H);
+          const scale = Math.max(W / srcW, H / srcH);
+          const drawW = srcW * scale;
+          const drawH = srcH * scale;
+          const drawX = (W - drawW) / 2;
+          const drawY = (H - drawH) / 2;
+          ctx.drawImage(cover, drawX, drawY, drawW, drawH);
+        } catch {
+          ctx.fillStyle = "#0f172a";
+          ctx.fillRect(0, 0, W, H);
+        }
+        const bottomFade = ctx.createLinearGradient(0, H * 0.75, 0, H);
+        bottomFade.addColorStop(0, "rgba(2, 6, 23, 0)");
+        bottomFade.addColorStop(1, "rgba(2, 6, 23, 0.94)");
+        ctx.fillStyle = bottomFade;
+        ctx.fillRect(0, H * 0.75, W, H * 0.25);
+        drawTopLeftCoverLogo();
+        const colorA2 = teamAObj?.color || "#10b981";
+        const colorB2 = teamBObj?.color || "#ef4444";
+        const scoreTextRight = W - 34;
+        const scoreTextTop = H - 102;
+        ctx.save();
+        ctx.shadowColor = "rgba(2, 6, 23, 0.95)";
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetY = 2;
+        ctx.textAlign = "right";
+        ctx.fillStyle = colorA2;
+        ctx.font = "bold 20px system-ui, sans-serif";
+        ctx.fillText(`${String(game.teamAName || "").toUpperCase()} ${Number(game.teamAScore || 0)}`, scoreTextRight, scoreTextTop, 360);
+        ctx.fillStyle = colorB2;
+        ctx.font = "bold 20px system-ui, sans-serif";
+        ctx.fillText(`${String(game.teamBName || "").toUpperCase()} ${Number(game.teamBScore || 0)}`, scoreTextRight, scoreTextTop + 26, 360);
+        ctx.restore();
+        const scoreBarW = 260;
+        const scoreBarH = 8;
+        const scoreBarX = scoreTextRight - scoreBarW;
+        const scoreBarY = scoreTextTop + 46;
+        ctx.fillStyle = colorA2;
+        ctx.fillRect(scoreBarX, scoreBarY, scoreBarW / 2, scoreBarH);
+        ctx.fillStyle = colorB2;
+        ctx.fillRect(scoreBarX + scoreBarW / 2, scoreBarY, scoreBarW / 2, scoreBarH);
+        if (playerOfTheGame) {
+          const potgBaseX = 28;
+          const potgBaseY = H - 88;
+          const avatarX = potgBaseX + 36;
+          const avatarY = potgBaseY;
+          const avatarR = 34;
+          await drawPOTGAvatar({
+            avatarSource: playerOfTheGame.pictureUrl || "",
+            avatarX,
+            avatarY,
+            avatarR,
+            fallbackName: playerOfTheGame.name || "?",
+            ringColor: playerOfTheGame.teamColor || "#f97316"
+          });
+          const contentLeft = avatarX + avatarR + 16;
+          const contentWidth = 420;
+          ctx.save();
+          ctx.shadowColor = "rgba(2, 6, 23, 0.92)";
+          ctx.shadowBlur = 10;
+          ctx.shadowOffsetY = 2;
+          ctx.textAlign = "left";
+          ctx.fillStyle = "#f97316";
+          ctx.font = "bold 12px system-ui, sans-serif";
+          ctx.fillText("PLAYER OF THE GAME", contentLeft, potgBaseY - 22, contentWidth);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "bold 30px system-ui, sans-serif";
+          ctx.fillText(playerOfTheGame.name || "", contentLeft, potgBaseY + 6, contentWidth);
+          const potgStats = playerOfTheGame.stats || {};
+          const potgLine = [
+            potgStats.pts != null ? `${potgStats.pts} PTS` : null,
+            potgStats.reb != null ? `${potgStats.reb} REB` : null,
+            potgStats.ast != null ? `${potgStats.ast} AST` : null
+          ].filter(Boolean).join("  \xB7  ");
+          ctx.fillStyle = "#e2e8f0";
+          ctx.font = "bold 15px system-ui, sans-serif";
+          ctx.fillText(potgLine, contentLeft, potgBaseY + 28, contentWidth);
+          ctx.restore();
+        }
+        const link2 = document.createElement("a");
+        link2.download = `wknd-game-${game.id}-cover-custom.png`;
+        link2.href = canvas.toDataURL("image/png");
+        link2.click();
+        showToast("Custom cover image downloaded.", "success");
+        return;
+      }
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, W, H);
+      if (generatedPlayerArtDataUrl) {
+        try {
+          const artBase = await loadImage(generatedPlayerArtDataUrl);
+          ctx.save();
+          ctx.globalAlpha = 0.34;
+          ctx.drawImage(artBase, W - 760, 0, 760, H);
+          ctx.restore();
+        } catch (_) {
+        }
+        const rightSoftMask = ctx.createLinearGradient(W - 860, 0, W, 0);
+        rightSoftMask.addColorStop(0, "rgba(2, 6, 23, 0)");
+        rightSoftMask.addColorStop(1, "rgba(2, 6, 23, 0.34)");
+        ctx.fillStyle = rightSoftMask;
+        ctx.fillRect(W - 860, 0, 860, H);
+      }
+      ctx.save();
+      ctx.globalAlpha = 0.06;
+      for (let i = -H; i < W + H; i += 48) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i + H, H);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 20;
+        ctx.stroke();
+      }
+      ctx.restore();
+      const colorA = teamAObj?.color || "#10b981";
+      const colorB = teamBObj?.color || "#ef4444";
+      ctx.fillStyle = colorA;
+      ctx.fillRect(0, 0, W / 2, 6);
+      ctx.fillStyle = colorB;
+      ctx.fillRect(W / 2, 0, W / 2, 6);
+      ctx.fillStyle = colorA;
+      ctx.fillRect(0, H - 6, W / 2, 6);
+      ctx.fillStyle = colorB;
+      ctx.fillRect(W / 2, H - 6, W / 2, 6);
+      drawTopLeftCoverLogo();
+      ctx.fillStyle = "#1e293b";
+      ctx.beginPath();
+      ctx.roundRect(W - 200, 28, 160, 32, 8);
+      ctx.fill();
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "13px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(game.date || "", W - 120, 49);
+      const drawTeamBlock = (anchorX, y, name, score, color, alignRight) => {
+        ctx.textAlign = alignRight ? "right" : "left";
+        ctx.fillStyle = color;
+        ctx.font = "bold 20px system-ui, sans-serif";
+        ctx.fillText((name || "").toUpperCase(), anchorX, y);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 126px system-ui, sans-serif";
+        ctx.fillText(String(score ?? 0), anchorX, y + 128);
+      };
+      drawTeamBlock(78, 140, game.teamAName, game.teamAScore, colorA, false);
+      drawTeamBlock(W - 78, 140, game.teamBName, game.teamBScore, colorB, true);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#334155";
+      ctx.font = "bold 28px system-ui, sans-serif";
+      ctx.fillText("VS", W / 2, 220);
+      const winner = Number(game.teamAScore) > Number(game.teamBScore) ? game.teamAName : Number(game.teamBScore) > Number(game.teamAScore) ? game.teamBName : null;
+      const resultText = winner ? `${winner} wins` : "Final Score";
+      ctx.fillStyle = "#64748b";
+      ctx.font = "18px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(resultText.toUpperCase(), W / 2, 310);
+      ctx.strokeStyle = "#1e293b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(60, 340);
+      ctx.lineTo(W - 60, 340);
+      ctx.stroke();
+      if (playerOfTheGame) {
+        ctx.fillStyle = "#f97316";
+        ctx.font = "bold 13px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("PLAYER OF THE GAME", W / 2, 368);
+        const avatarX = W / 2;
+        const avatarY = 432;
+        const avatarR = 44;
+        ctx.beginPath();
+        ctx.arc(avatarX, avatarY, avatarR + 5, 0, Math.PI * 2);
+        ctx.fillStyle = `${playerOfTheGame.teamColor || "#f97316"}66`;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(avatarX, avatarY, avatarR + 1, 0, Math.PI * 2);
+        ctx.fillStyle = "#0b1220";
+        ctx.fill();
+        await drawPOTGAvatar({
+          avatarSource: playerOfTheGame.pictureUrl || "",
+          avatarX,
+          avatarY,
+          avatarR,
+          fallbackName: playerOfTheGame.name || "?",
+          ringColor: playerOfTheGame.teamColor || "#f97316"
+        });
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "bold 14px system-ui, sans-serif";
+        ctx.fillText(`#${playerOfTheGame.number || "-"} \u2022 ${playerOfTheGame.teamName || ""}`, W / 2, 514);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 34px system-ui, sans-serif";
+        ctx.fillText(playerOfTheGame.name || "", W / 2, 554);
+        const potgStats = playerOfTheGame.stats || {};
+        const potgLine = [
+          potgStats.pts != null ? `${potgStats.pts} PTS` : null,
+          potgStats.reb != null ? `${potgStats.reb} REB` : null,
+          potgStats.ast != null ? `${potgStats.ast} AST` : null
+        ].filter(Boolean).join("  \xB7  ");
+        ctx.fillStyle = "#e2e8f0";
+        ctx.font = "bold 22px system-ui, sans-serif";
+        ctx.fillText(potgLine, W / 2, 584);
+      }
+      const snippet = String(game.gameWriteup || "").trim().slice(0, 120);
+      if (snippet) {
+        ctx.fillStyle = "#475569";
+        ctx.font = "italic 14px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        const lineY = playerOfTheGame ? 610 : 395;
+        ctx.fillText(`"${snippet}${snippet.length === 120 ? "\u2026" : ""}"`, W / 2, lineY);
+      }
+      const shareUrl = buildShareableGameLogUrl(game.id);
+      ctx.fillStyle = "#334155";
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(shareUrl, W / 2, H - 22);
+      const link = document.createElement("a");
+      link.download = `wknd-game-${game.id}-cover.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      showToast("Cover image downloaded.", "success");
+    };
+    const syncHistoryShareUrl = (gameId, mode = "replace") => {
+      try {
+        const rosterPlayer = activeTab === "teams" ? selectedRosterPlayer : null;
+        const nextUrl = buildAppUrl({
+          tab: activeTab,
+          historyGameId: activeTab === "history" ? gameId : null,
+          historyTabValue: activeTab === "history" ? historyDetailTab : "",
+          rosterPlayer
+        });
+        const nextState = {
+          __wkndNav: true,
+          activeTab,
+          selectedHistoryGameId: gameId || null,
+          historyDetailTab: activeTab === "history" ? historyDetailTab : null,
+          selectedRosterPlayer: activeTab === "teams" ? rosterPlayer : null
+        };
+        if (mode === "push") {
+          window.history.pushState(nextState, "", nextUrl);
+        } else {
+          window.history.replaceState(nextState, "", nextUrl);
+        }
+        lastNavUrlRef.current = nextUrl;
+      } catch (e) {
+      }
+    };
+    const openHistoryGame = (gameId) => {
+      const targetGame = games.find((game) => game.id === gameId);
+      setSelectedHistoryGameId(gameId);
+      setHistoryDetailTab(getDefaultHistoryDetailTab(targetGame));
+    };
+    useEffect(() => {
+      if (!pendingSharedGameId) return;
+      const targetGame = games.find((game) => game.id === pendingSharedGameId);
+      if (!targetGame) {
+        if (gamesBootstrappedRef.current) {
+          setPendingSharedGameId(null);
+        }
+        return;
+      }
+      openHistoryGame(targetGame.id);
+      if (pendingSharedHistoryDetailTab) {
+        setHistoryDetailTab(pendingSharedHistoryDetailTab);
+        setPendingSharedHistoryDetailTab("");
+      }
+      setPendingSharedGameId(null);
+    }, [pendingSharedGameId, pendingSharedHistoryDetailTab, games]);
+    useEffect(() => {
+      if (!pendingSharedRosterPlayer) return;
+      const team = teams.find((item) => item.id === pendingSharedRosterPlayer.teamId);
+      if (!team) return;
+      const playerExists = (team.players || []).some((player) => player.id === pendingSharedRosterPlayer.playerId);
+      if (!playerExists) {
+        setPendingSharedRosterPlayer(null);
+        return;
+      }
+      setSelectedRosterPlayer({
+        teamId: pendingSharedRosterPlayer.teamId,
+        playerId: pendingSharedRosterPlayer.playerId
+      });
+      setPendingSharedRosterPlayer(null);
+    }, [pendingSharedRosterPlayer, teams]);
+    useEffect(() => {
+      if (suppressNextNavHistoryPushRef.current) {
+        suppressNextNavHistoryPushRef.current = false;
+        syncHistoryShareUrl(selectedHistoryGameId, "replace");
+        return;
+      }
+      const nextGameId = activeTab === "history" ? selectedHistoryGameId : null;
+      const nextRosterPlayer = activeTab === "teams" ? selectedRosterPlayer : null;
+      let nextUrl = "";
+      try {
+        nextUrl = buildAppUrl({
+          tab: activeTab,
+          historyGameId: activeTab === "history" ? nextGameId : null,
+          historyTabValue: activeTab === "history" ? historyDetailTab : "",
+          rosterPlayer: nextRosterPlayer
+        });
+      } catch (e) {
+      }
+      const currentState = window.history.state;
+      const currentTab = currentState?.__wkndNav ? String(currentState.activeTab || "live") : null;
+      const currentGameId = currentState?.__wkndNav ? currentState.selectedHistoryGameId || null : null;
+      const currentHistoryDetailTab = currentState?.__wkndNav ? currentState.historyDetailTab || null : null;
+      const currentRosterPlayer = currentState?.__wkndNav ? currentState.selectedRosterPlayer || null : null;
+      const nextHistoryDetailTab = activeTab === "history" ? historyDetailTab : null;
+      const stateMatches = currentTab === activeTab && currentGameId === nextGameId && currentHistoryDetailTab === nextHistoryDetailTab && JSON.stringify(currentRosterPlayer || null) === JSON.stringify(nextRosterPlayer || null);
+      const currentUrl = (() => {
+        try {
+          return new URL(window.location.href).toString();
+        } catch (e) {
+          return "";
+        }
+      })();
+      const urlMatches = !nextUrl || nextUrl === currentUrl;
+      if (stateMatches && urlMatches) {
+        return;
+      }
+      syncHistoryShareUrl(nextGameId, "push");
+    }, [activeTab, selectedHistoryGameId, selectedRosterPlayer, historyDetailTab]);
+    const getTopTeamPerformers = (team, game, limit = 3) => {
+      if (!team || !game) return [];
+      const computePerStyleScore = (stats = {}) => {
+        const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
+        const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+        const ftMade = Number(stats.ftm || 0);
+        const ftAtt = ftMade + Number(stats.ft_miss || 0);
+        return Number(stats.pts || 0) + 0.4 * fgMade - 0.7 * fgAtt - 0.4 * (ftAtt - ftMade) + 0.7 * Number(stats.reb || 0) + Number(stats.stl || 0) + 0.7 * Number(stats.ast || 0) + 0.7 * Number(stats.blk || 0) - 0.4 * Number(stats.pf || 0) - Number(stats.to || 0);
+      };
+      return (team.players || []).map((player) => {
+        const stats = game?.playerStats?.[player.id];
+        if (!stats) return null;
+        return {
+          id: player.id,
+          name: player.name,
+          number: player.number,
+          pictureUrl: player.pictureUrl || "",
+          teamName: team.name,
+          teamColor: team.color,
+          stats,
+          perScore: computePerStyleScore(stats)
+        };
+      }).filter(Boolean).filter((entry) => Number(entry.perScore || 0) > 0).sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0)).slice(0, limit);
+    };
+    const getGameTeamLeaders = (team, game) => {
+      const leaderDefs = [
+        { key: "pts", label: "PTS", higherIsBetter: true },
+        { key: "reb", label: "REB", higherIsBetter: true },
+        { key: "ast", label: "AST", higherIsBetter: true },
+        { key: "stl", label: "STL", higherIsBetter: true },
+        { key: "blk", label: "BLK", higherIsBetter: true },
+        { key: "to", label: "TO", higherIsBetter: false }
+      ];
+      const playerEntries = (team?.players || []).map((player) => {
+        const stats = game?.playerStats?.[player.id];
+        if (!stats) return null;
+        return {
+          id: player.id,
+          name: player.name,
+          number: player.number,
+          pictureUrl: player.pictureUrl || "",
+          stats
+        };
+      }).filter(Boolean);
+      return leaderDefs.map((def) => {
+        const sorted = [...playerEntries].sort((a, b) => {
+          const aValue = Number(a.stats?.[def.key] || 0);
+          const bValue = Number(b.stats?.[def.key] || 0);
+          if (aValue !== bValue) {
+            return def.higherIsBetter ? bValue - aValue : aValue - bValue;
+          }
+          return a.name.localeCompare(b.name);
+        });
+        const top = sorted[0] || null;
+        const topValue = top ? Number(top.stats?.[def.key] || 0) : 0;
+        const leaders = top ? sorted.filter((entry) => Number(entry.stats?.[def.key] || 0) === topValue) : [];
+        return {
+          label: def.label,
+          value: topValue,
+          leaders,
+          playerName: leaders.length ? leaders.map((entry) => entry.name).join(" / ") : "-",
+          playerNumber: leaders.length ? leaders.map((entry) => entry.number).join(" / ") : "-",
+          pictureUrl: leaders[0]?.pictureUrl || ""
+        };
+      });
+    };
+    const compileTeamStatistics = (players, teamId) => {
+      const totals = {
+        gp: games.filter((g) => g.teamAId === teamId || g.teamBId === teamId).length,
+        pts: 0,
+        ast: 0,
+        reb: 0,
+        stl: 0,
+        blk: 0,
+        to: 0,
+        pf: 0,
+        fg2m: 0,
+        fg3m: 0,
+        fg2m_miss: 0,
+        fg3m_miss: 0,
+        ftm: 0,
+        ft_miss: 0
+      };
+      players.forEach((p) => {
+        const stats = p.totalStats || {};
+        totals.pts += stats.pts || 0;
+        totals.ast += stats.ast || 0;
+        totals.reb += stats.reb || 0;
+        totals.stl += stats.stl || 0;
+        totals.blk += stats.blk || 0;
+        totals.to += stats.to || 0;
+        totals.pf += stats.pf || 0;
+        totals.fg2m += stats.fg2m || 0;
+        totals.fg3m += stats.fg3m || 0;
+        totals.fg2m_miss += stats.fg2m_miss || 0;
+        totals.fg3m_miss += stats.fg3m_miss || 0;
+        totals.ftm += stats.ftm || 0;
+        totals.ft_miss += stats.ft_miss || 0;
+      });
+      if (totals.gp === 0) {
+        totals.gp = Math.max(...players.map((p) => p.gamesPlayed || 0), 0);
+      }
+      const gp = totals.gp || 1;
+      const shooters = computeShootingPercentages(totals);
+      return {
+        totals,
+        shooters,
+        avgs: {
+          pts: (totals.pts / gp).toFixed(1),
+          ast: (totals.ast / gp).toFixed(1),
+          reb: (totals.reb / gp).toFixed(1),
+          stl: (totals.stl / gp).toFixed(1),
+          blk: (totals.blk / gp).toFixed(1),
+          to: (totals.to / gp).toFixed(1),
+          pf: (totals.pf / gp).toFixed(1)
+        }
+      };
+    };
+    const renderPlayerCompactRow = (playerId, isTeamA, slotLabel = "") => {
+      if (!playerId) return null;
+      const teamObj = isTeamA ? teams.find((t) => t.id === teamAId) : teams.find((t) => t.id === teamBId);
+      const player = teams && teams.length > 0 ? teams.flatMap((t) => t?.players || []).find((p) => p?.id === playerId) : null;
+      if (!player) return null;
+      const onCourtLastName = (typeof player.name === "string" ? player.name.split(",")[0] : "").trim() || player.name;
+      const stats = liveStats[playerId] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+      const hasActionArmed = activeAction !== null && !isLiveGameplayModalActive;
+      const performancePool = [
+        { label: "PTS", value: stats.pts || 0 },
+        { label: "REB", value: stats.reb || 0 },
+        { label: "AST", value: stats.ast || 0 },
+        { label: "STL", value: stats.stl || 0 },
+        { label: "BLK", value: stats.blk || 0 }
+      ];
+      const topThreeStats = performancePool.slice().sort((a, b) => {
+        if (b.value === a.value) {
+          return performancePool.findIndex((item) => item.label === a.label) - performancePool.findIndex((item) => item.label === b.label);
+        }
+        return b.value - a.value;
+      }).slice(0, 3);
+      const topTwoStats = topThreeStats.slice(0, 2);
+      const mobileOneLineStats = [...topTwoStats, { label: "PF", value: stats.pf || 0 }];
+      const oneLineStats = [...topThreeStats, { label: "PF", value: stats.pf || 0 }];
+      const pfValue = stats.pf || 0;
+      const isDisqualified = stats.pf >= 5;
+      const teamAccessAllowed = canOperateTeam(isTeamA);
+      const canSelect = hasActionArmed && teamAccessAllowed && !isDisqualified;
+      const canSubstitute = !hasActionArmed && canOperateLive && teamAccessAllowed && !isDisqualified;
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: player.id,
+          "data-player-id": player.id,
+          onClick: () => {
+            if (isDisqualified) return;
+            if (hasActionArmed) {
+              if (canSelect) handlePlayerClick(player.id, isTeamA);
+              return;
+            }
+            if (!canUseLiveControls) return;
+            triggerSubModal(player.id, isTeamA);
+          },
+          className: `bg-slate-955/90 border p-3 rounded-xl flex flex-row items-stretch justify-between gap-2 transition-all duration-300 ${hasActionArmed && teamAccessAllowed ? "armed-target hover:bg-slate-900 border-emerald-500/50" : "border-slate-800 hover:border-slate-700/60"} ${isDisqualified ? "bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none" : ""} ${isLoggedIn && !teamAccessAllowed ? "opacity-55 saturate-50" : ""} ${isDisqualified ? "cursor-not-allowed" : canSubstitute ? "cursor-pointer" : canSelect ? "cursor-pointer" : "cursor-default"} ${!isLiveGameplayModalActive && flashPlayers[player.id] ? "animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]" : ""} ${!isLiveGameplayModalActive && subFlashPlayers[player.id] ? "sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]" : ""}`
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("span", { className: "w-12 md:w-14 min-h-[52px] text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0 inline-flex items-center justify-center" }, player.number), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("span", { className: "font-extrabold text-[11px] text-white block truncate leading-tight md:hidden" }, player.name), /* @__PURE__ */ React.createElement("span", { className: "font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight" }, onCourtLastName), /* @__PURE__ */ React.createElement("div", { className: "hidden md:flex gap-2 mt-1 items-center" }, slotLabel && /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-sky-300 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 uppercase" }, slotLabel), isLoggedIn && !hasActionArmed && /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase" }, "Sub"), isLoggedIn && !teamAccessAllowed && /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-slate-400 font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700 uppercase" }, "Locked")), slotLabel && /* @__PURE__ */ React.createElement("div", { className: "md:hidden mt-1" }, /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-sky-300 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 uppercase" }, slotLabel)))),
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-stretch gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap overflow-x-auto max-w-full self-auto" }, /* @__PURE__ */ React.createElement("div", { className: "flex md:hidden items-stretch gap-1.5 w-full justify-end" }, mobileOneLineStats.map((item) => {
+          const isPfStat = item.label === "PF";
+          const valueClass = isPfStat ? pfValue >= 5 ? "text-red-300" : pfValue >= 4 ? "text-orange-300" : pfValue >= 3 ? "text-amber-300" : "text-white" : "text-white";
+          const labelClass = isPfStat ? pfValue >= 5 ? "text-red-400" : pfValue >= 4 ? "text-orange-400" : pfValue >= 3 ? "text-amber-400" : "text-slate-400" : "text-slate-400";
+          return /* @__PURE__ */ React.createElement("div", { key: `mobile-line-${item.label}`, className: "rounded-md border border-slate-800 bg-slate-900 px-2 py-1.5 text-center min-w-[44px] min-h-[52px] h-full flex flex-col justify-between" }, /* @__PURE__ */ React.createElement("div", { className: `text-[9px] uppercase tracking-wider font-bold leading-none ${labelClass}` }, item.label), /* @__PURE__ */ React.createElement("div", { className: `mt-1 font-mono font-black text-lg leading-none ${valueClass}` }, item.value));
+        })), /* @__PURE__ */ React.createElement("div", { className: "hidden md:flex items-stretch gap-2" }, oneLineStats.map((item) => {
+          const isPfStat = item.label === "PF";
+          const valueClass = isPfStat ? pfValue >= 5 ? "text-red-300" : pfValue >= 4 ? "text-orange-300" : pfValue >= 3 ? "text-amber-300" : "text-white" : "text-white";
+          const labelClass = isPfStat ? pfValue >= 5 ? "text-red-400" : pfValue >= 4 ? "text-orange-400" : pfValue >= 3 ? "text-amber-400" : "text-slate-400" : "text-slate-400";
+          return /* @__PURE__ */ React.createElement("div", { key: `line-${item.label}`, className: "rounded-md border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-center min-w-[48px] min-h-[52px] h-full flex flex-col justify-between" }, /* @__PURE__ */ React.createElement("div", { className: `text-[9px] uppercase tracking-wider font-bold leading-none ${labelClass}` }, item.label), /* @__PURE__ */ React.createElement("div", { className: `mt-1 font-mono font-black text-lg md:text-xl leading-none ${valueClass}` }, item.value));
+        })))
+      );
+    };
+    return /* @__PURE__ */ React.createElement("div", { className: "max-w-7xl mx-auto px-4 py-4 md:py-8 relative" }, toast && /* @__PURE__ */ React.createElement("div", { className: `fixed top-4 right-4 z-50 px-4 py-2.5 rounded-xl text-xs font-bold shadow-2xl transition-all duration-300 border ${toast.type === "error" ? "bg-red-955 text-red-400 border-red-800" : toast.type === "info" ? "bg-blue-955 text-blue-400 border-blue-800" : "bg-emerald-955 text-emerald-400 border-emerald-800"}` }, toast.message), SHOW_LIVE_SYNC_DEBUG && isGameLive && /* @__PURE__ */ React.createElement("div", { className: "fixed bottom-3 right-3 z-40 w-[320px] max-w-[92vw] rounded-xl border border-cyan-500/40 bg-slate-950/95 text-[10px] text-cyan-100 font-mono p-2.5 space-y-1 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "font-black text-cyan-300 uppercase tracking-wider" }, "Live Sync Debug"), /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-cyan-500" }, "client ", syncClientIdRef.current.slice(-6))), /* @__PURE__ */ React.createElement("div", null, "lineupRev local/remote: ", /* @__PURE__ */ React.createElement("strong", null, lineupRevision), " / ", /* @__PURE__ */ React.createElement("strong", null, syncDebug.lastRemoteLineupRevision || 0)), /* @__PURE__ */ React.createElement("div", null, "keepLocalRotation: ", /* @__PURE__ */ React.createElement("strong", null, String(syncDebug.keepLocalRotation))), /* @__PURE__ */ React.createElement("div", null, "pending queue: ", /* @__PURE__ */ React.createElement("strong", null, syncDebug.pendingQueue || 0), " | localOnlyLogs: ", /* @__PURE__ */ React.createElement("strong", null, String(syncDebug.hasLocalOnly))), /* @__PURE__ */ React.createElement("div", null, "incoming seq/event: ", /* @__PURE__ */ React.createElement("strong", null, syncDebug.lastIncomingSeq || 0), " / ", /* @__PURE__ */ React.createElement("span", { className: "text-cyan-300" }, syncDebug.lastIncomingEventId || "-")), /* @__PURE__ */ React.createElement("div", null, "persist: ", /* @__PURE__ */ React.createElement("span", { className: "text-cyan-300" }, syncDebug.lastPersist)), syncDebug.persistError ? /* @__PURE__ */ React.createElement("div", { className: "text-rose-300 break-words" }, "error: ", syncDebug.persistError) : null, /* @__PURE__ */ React.createElement("div", null, "home lineup: ", /* @__PURE__ */ React.createElement("span", { className: "text-cyan-300" }, (teamALineup || []).join(", ") || "-")), /* @__PURE__ */ React.createElement("div", null, "away lineup: ", /* @__PURE__ */ React.createElement("span", { className: "text-cyan-300" }, (teamBLineup || []).join(", ") || "-"))), showAuthModal && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("form", { onSubmit: handleAuthLogin, className: "w-full max-w-sm rounded-t-2xl md:rounded-2xl border border-slate-700 bg-slate-950 p-5 space-y-3 max-h-[85vh] overflow-y-auto" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-extrabold text-white uppercase tracking-wider" }, "Operator/Admin Login"), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] text-slate-400 font-bold mb-1 uppercase" }, "Role"), /* @__PURE__ */ React.createElement("select", { value: authFormRole, onChange: (e) => setAuthFormRole(e.target.value), className: "w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-white text-xs" }, /* @__PURE__ */ React.createElement("option", { value: "operator" }, "Operator"), /* @__PURE__ */ React.createElement("option", { value: "admin" }, "Admin"))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[11px] text-slate-400 font-bold mb-1 uppercase" }, "Password"), /* @__PURE__ */ React.createElement("input", { type: "password", value: authPassword, onChange: (e) => setAuthPassword(e.target.value), className: "w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-white text-xs", required: true })), /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-end gap-2 pt-1" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => {
+      setShowAuthModal(false);
+      setAuthPassword("");
+    }, className: "px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-bold" }, "Login")))), /* @__PURE__ */ React.createElement("header", { className: "flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4 border-b border-slate-800 pb-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", { className: "text-xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-orange-400 to-amber-300 bg-clip-text text-transparent" }, "WKND League Stats")), /* @__PURE__ */ React.createElement("div", { className: "md:hidden relative" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setMobileNavOpen((prev) => !prev),
+        className: "w-full bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-100 flex items-center justify-between shadow-lg",
+        "aria-haspopup": "menu",
+        "aria-expanded": mobileNavOpen,
+        "aria-label": "Open navigation menu"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-2" }, /* @__PURE__ */ React.createElement(activeNavTab.icon, null), activeNavTab.label),
+      /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", className: `transition-transform ${mobileNavOpen ? "rotate-180 text-orange-300" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement("path", { d: "m6 9 6 6 6-6" }))
+    ), mobileNavOpen && /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 right-0 mt-2 z-40 rounded-xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl overflow-hidden" }, visibleNavTabs.map((tab) => {
+      const TabIcon = tab.icon;
+      const isActive = activeTab === tab.id;
+      return /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: `mobile-nav-${tab.id}`,
+          type: "button",
+          onClick: () => {
+            setActiveTab(tab.id);
+            setMobileNavOpen(false);
+          },
+          className: `w-full px-3 py-2.5 text-sm font-semibold flex items-center justify-between border-b border-slate-800/70 last:border-b-0 transition-colors cursor-pointer ${isActive ? "bg-orange-500/20 text-orange-200" : "text-slate-300 hover:bg-slate-900"}`
+        },
+        /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-2" }, /* @__PURE__ */ React.createElement(TabIcon, null), tab.label),
+        isActive && /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black uppercase tracking-wide text-orange-300" }, "Active")
+      );
+    }), canOperateLive && /* @__PURE__ */ React.createElement("div", { className: "border-t border-slate-800/70 px-3 py-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] font-black uppercase tracking-wider text-slate-400" }, "Current Account: ", /* @__PURE__ */ React.createElement("span", { className: "text-orange-300" }, authRole.toUpperCase())), authRole === "operator" && isGameLive && /* @__PURE__ */ React.createElement("div", { className: "text-[10px] font-black uppercase tracking-wider text-slate-400" }, "Handling: ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-300" }, isOperatorScreenLockedByAdminBoth ? "LOCKED (WAITING FOR ASSIGNMENT)" : operatorHandledTeamLabel)), showOperatorFocusControls && /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-1.5" }, operatorFocusOptions.map((option) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: `focus-mobile-${option.id}`,
+        type: "button",
+        onClick: () => handleOperatorFocusChange(option.id),
+        className: `rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? "" : "border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200"}`,
+        style: operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : void 0
+      },
+      getFocusOptionLabel(option.id)
+    )))), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          if (authRole === "viewer") {
+            setShowAuthModal(true);
+          } else {
+            handleAuthLogout();
+          }
+          setMobileNavOpen(false);
+        },
+        className: `w-full px-3 py-2.5 text-sm font-semibold flex items-center justify-between border-t border-slate-800/70 transition-colors cursor-pointer ${authRole === "viewer" ? "text-orange-300 hover:bg-orange-500/10" : "text-slate-300 hover:bg-slate-900"}`
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-2" }, /* @__PURE__ */ React.createElement(Icons.ShieldAlert, null), authRole === "viewer" ? "Login" : "Logout")
+    ))), /* @__PURE__ */ React.createElement("nav", { className: "hidden md:flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("home"), className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "home" ? "bg-orange-500 text-white shadow-lg" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement(Icons.Activity, null), " Home"), /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("live"), className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "live" ? "bg-orange-500 text-white shadow-lg" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement(Icons.Activity, null), " Live"), /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("teams"), className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "teams" ? "bg-orange-500 text-white shadow-lg" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement(Icons.Users, null), " Rosters"), /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("standings"), className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "standings" ? "bg-orange-500 text-white shadow-lg" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement(Icons.Trophy, null), " Standings"), /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("history"), className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "history" ? "bg-orange-500 text-white shadow-lg" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement(Icons.History, null), " Game Log"), /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("leaders"), className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "leaders" ? "bg-orange-500 text-white shadow-lg" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement(Icons.Trophy, null), " Leaders"), canViewAwardsPage && /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("awards"), className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${activeTab === "awards" ? "bg-orange-500 text-white shadow-lg" : "text-slate-400"}` }, /* @__PURE__ */ React.createElement(Icons.Trophy, null), " Awards"), /* @__PURE__ */ React.createElement("div", { className: "relative" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          if (authRole === "viewer") {
+            setShowAuthModal(true);
+            return;
+          }
+          setShowAccountMenu((prev) => !prev);
+        },
+        className: `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${authRole === "viewer" ? "text-orange-300 border border-orange-500/40 bg-orange-500/15 hover:bg-orange-500/25" : "text-slate-300 border border-slate-700 hover:bg-slate-800"}`
+      },
+      /* @__PURE__ */ React.createElement(Icons.ShieldAlert, null),
+      " ",
+      authRole === "viewer" ? "Login" : authRole.toUpperCase()
+    ), authRole !== "viewer" && showAccountMenu && /* @__PURE__ */ React.createElement("div", { className: "absolute right-0 mt-2 w-72 rounded-xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl p-3 z-50" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] font-black uppercase tracking-wider text-slate-400" }, "Current Account"), /* @__PURE__ */ React.createElement("div", { className: "text-xs font-bold text-orange-300 mt-0.5" }, authRole.toUpperCase()), authRole === "operator" && isGameLive && /* @__PURE__ */ React.createElement("div", { className: "mt-2 text-[10px] font-black uppercase tracking-wider text-slate-400" }, "Handling: ", /* @__PURE__ */ React.createElement("span", { className: "text-emerald-300" }, isOperatorScreenLockedByAdminBoth ? "LOCKED (WAITING FOR ASSIGNMENT)" : operatorHandledTeamLabel)), showOperatorFocusControls && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400" }, "Admin Team Focus"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-1.5 mt-1.5" }, operatorFocusOptions.map((option) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: `focus-account-${option.id}`,
+        type: "button",
+        onClick: () => handleOperatorFocusChange(option.id),
+        className: `rounded-md border px-2 py-1 text-[9px] font-black tracking-wide transition-all cursor-pointer ${operatorFocus === option.id ? "" : "border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200"}`,
+        style: operatorFocus === option.id ? getFocusOptionActiveStyle(option.id) : void 0
+      },
+      getFocusOptionLabel(option.id)
+    )))), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          handleAuthLogout();
+        },
+        className: "w-full mt-3 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-700 text-slate-200 hover:bg-slate-900 cursor-pointer"
+      },
+      "Logout"
+    ))))), /* @__PURE__ */ React.createElement("main", null, activeTab === "live" && /* @__PURE__ */ React.createElement("div", null, !isGameLive ? /* @__PURE__ */ React.createElement("div", { className: "space-y-4 mt-4" }, canAdminControlClock && /* @__PURE__ */ React.createElement("div", { className: "max-w-xl mx-auto bg-slate-900/65 rounded-2xl border border-slate-800 p-6 shadow-2xl" }, /* @__PURE__ */ React.createElement("form", { onSubmit: handleStartMatch, className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-slate-400 text-xs font-bold mb-1 uppercase" }, "Home (A)"), /* @__PURE__ */ React.createElement("select", { value: teamAId, onChange: (e) => setTeamAId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white text-xs focus:outline-none", required: true }, /* @__PURE__ */ React.createElement("option", { value: "" }, "-- Select --"), teams.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.name)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-slate-400 text-xs font-bold mb-1 uppercase" }, "Away (B)"), /* @__PURE__ */ React.createElement("select", { value: teamBId, onChange: (e) => setTeamBId(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white text-xs focus:outline-none", required: true }, /* @__PURE__ */ React.createElement("option", { value: "" }, "-- Select --"), teams.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.name))))), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "w-full bg-orange-500 font-bold py-2.5 rounded-xl text-xs text-white cursor-pointer shadow-lg" }, "Start Live Tracking Match"))), /* @__PURE__ */ React.createElement("div", { className: "max-w-4xl mx-auto bg-slate-900/65 rounded-2xl border border-slate-800 p-4 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-extrabold text-white uppercase tracking-wide" }, "Game Log"), /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveTab("history"), className: "px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 text-[11px] font-bold cursor-pointer border border-blue-500/30" }, "Open Game Log")), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 leading-relaxed" }, "Archived games and detailed box scores live in Game Log. Use that tab for summaries, edits, and CSV export."))) : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, isOperatorScreenLockedByAdminBoth && /* @__PURE__ */ React.createElement("div", { className: "col-span-12 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] font-bold text-amber-200" }, "Operator screen locked while admin focus is BOTH. Wait for admin to assign a single team focus."), /* @__PURE__ */ React.createElement("div", { className: `grid grid-cols-1 lg:grid-cols-12 gap-4 ${isLiveGameplayModalActive ? "pointer-events-none select-none [&_*]:!animate-none [&_*]:!transition-none [&_*]:!transform-none [&_*]:!shadow-none" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "md:hidden col-span-12 sticky top-2 z-20" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl p-1.5 backdrop-blur-sm" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-7 items-center px-1.5 py-1 rounded-lg bg-slate-950 border border-slate-900" }, /* @__PURE__ */ React.createElement("div", { className: "col-span-3 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1 mb-0.5" }, Array.from({ length: timeoutLimit }).map((_, idx) => /* @__PURE__ */ React.createElement("span", { key: `timeout-a-${idx}`, className: `w-1.5 h-1.5 rounded-full ${idx < teamATimeoutUsed ? "bg-amber-300" : "bg-slate-800"}` }))), /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-slate-400 font-bold block truncate" }, teams.find((t) => t.id === teamAId)?.name), /* @__PURE__ */ React.createElement("div", { className: `mt-0.5 text-3xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamA ? "score-burst text-amber-200 drop-shadow-[0_0_10px_rgba(251,191,36,0.7)]" : "text-white"}` }, teamAScore)), /* @__PURE__ */ React.createElement("div", { className: "col-span-1 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-slate-600 font-black font-mono text-[10px]" }, "VS"), /* @__PURE__ */ React.createElement("div", { className: "mt-0.5 text-[12px] font-black tracking-wide text-orange-300 uppercase leading-none" }, getPeriodLabel(currentQuarter)), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[11px] font-mono font-black text-emerald-300" }, periodClockLabel)), /* @__PURE__ */ React.createElement("div", { className: "col-span-3 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-end gap-1 mb-0.5" }, Array.from({ length: timeoutLimit }).map((_, idx) => /* @__PURE__ */ React.createElement("span", { key: `timeout-b-${idx}`, className: `w-1.5 h-1.5 rounded-full ${idx < teamBTimeoutUsed ? "bg-amber-300" : "bg-slate-800"}` }))), /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-slate-400 font-bold block truncate" }, teams.find((t) => t.id === teamBId)?.name), /* @__PURE__ */ React.createElement("div", { className: `mt-0.5 text-3xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamB ? "score-burst text-amber-200 drop-shadow-[0_0_10px_rgba(251,191,36,0.7)]" : "text-white"}` }, teamBScore))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-7 items-center gap-1 mt-1 px-1.5" }, /* @__PURE__ */ React.createElement("div", { className: "col-span-3 flex gap-1" }, Array.from({ length: foulBarMax }).map((_, idx) => /* @__PURE__ */ React.createElement("span", { key: `foul-a-${idx}`, className: `h-1.5 flex-1 rounded ${idx < teamAFoulsForDisplay ? "bg-rose-400" : "bg-slate-800"}` }))), /* @__PURE__ */ React.createElement("div", { className: "col-span-1 text-center text-[8px] font-bold uppercase tracking-wide text-slate-500" }, "PF"), /* @__PURE__ */ React.createElement("div", { className: "col-span-3 flex gap-1" }, Array.from({ length: foulBarMax }).map((_, idx) => /* @__PURE__ */ React.createElement("span", { key: `foul-b-${idx}`, className: `h-1.5 flex-1 rounded ${idx < teamBFoulsForDisplay ? "bg-rose-400" : "bg-slate-800"}` })))))), /* @__PURE__ */ React.createElement("div", { className: "hidden md:block col-span-12 sticky top-2 z-30 bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-xl" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-7 items-center bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-lg" }, /* @__PURE__ */ React.createElement("div", { className: "col-span-3 relative text-center pb-4" }, /* @__PURE__ */ React.createElement("div", { className: "absolute top-0 left-0 flex items-center gap-1 pointer-events-none" }, Array.from({ length: timeoutLimit }).map((_, idx) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: `timeout-a-${idx}`,
+        className: `w-2 h-2 rounded-full ${idx < teamATimeoutUsed ? "bg-amber-300" : "bg-slate-800"}`
+      }
+    ))), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-400 font-bold block truncate" }, teams.find((t) => t.id === teamAId)?.name), /* @__PURE__ */ React.createElement("div", { className: `mt-1 text-4xl md:text-5xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamA ? "score-burst text-amber-200 drop-shadow-[0_0_12px_rgba(251,191,36,0.75)]" : "text-white"}` }, teamAScore), /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 right-0 bottom-0 border-t border-slate-800/90 pt-1.5 px-0.5" }, /* @__PURE__ */ React.createElement("div", { className: "flex gap-1" }, Array.from({ length: foulBarMax }).map((_, idx) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: `foul-a-${idx}`,
+        className: `h-1.5 flex-1 rounded ${idx < teamAFoulsForDisplay ? "bg-rose-400" : "bg-slate-800"}`
+      }
+    ))))), /* @__PURE__ */ React.createElement("div", { className: "col-span-1 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-slate-600 font-black font-mono text-xs" }, "VS"), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[13px] md:text-[15px] font-black tracking-wide text-orange-300 uppercase leading-none" }, getPeriodLabel(currentQuarter)), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-base md:text-lg font-mono font-black text-emerald-300" }, periodClockLabel)), /* @__PURE__ */ React.createElement("div", { className: "col-span-3 relative text-center pb-4" }, /* @__PURE__ */ React.createElement("div", { className: "absolute top-0 right-0 flex items-center gap-1 pointer-events-none" }, Array.from({ length: timeoutLimit }).map((_, idx) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: `timeout-b-${idx}`,
+        className: `w-2 h-2 rounded-full ${idx < teamBTimeoutUsed ? "bg-amber-300" : "bg-slate-800"}`
+      }
+    ))), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-400 font-bold block truncate" }, teams.find((t) => t.id === teamBId)?.name), /* @__PURE__ */ React.createElement("div", { className: `mt-1 text-4xl md:text-5xl font-mono font-black leading-none transition-all duration-300 ${scoreFlashTeams.teamB ? "score-burst text-amber-200 drop-shadow-[0_0_12px_rgba(251,191,36,0.75)]" : "text-white"}` }, teamBScore), /* @__PURE__ */ React.createElement("div", { className: "absolute left-0 right-0 bottom-0 border-t border-slate-800/90 pt-1.5 px-0.5" }, /* @__PURE__ */ React.createElement("div", { className: "flex gap-1" }, Array.from({ length: foulBarMax }).map((_, idx) => /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        key: `foul-b-${idx}`,
+        className: `h-1.5 flex-1 rounded ${idx < teamBFoulsForDisplay ? "bg-rose-400" : "bg-slate-800"}`
+      }
+    ))))))), canOperateLive && /* @__PURE__ */ React.createElement("div", { className: `col-span-12 ${isOperatorScreenLockedByAdminBoth ? "pointer-events-none select-none opacity-70 cursor-not-allowed ring-1 ring-amber-400/35 bg-slate-950/35 rounded-xl [&_*]:!cursor-not-allowed" : ""}` }, /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/55 p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 mb-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] font-extrabold uppercase tracking-widest text-slate-500" }, "Global Match Controls"), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          setShowExtraGameControls((prev) => {
+            const next = !prev;
+            if (!next) {
+              setShowSyncClockEditor(false);
+              setIsEditingClockInput(false);
+            }
+            return next;
+          });
+        },
+        className: "inline-flex items-center justify-center gap-1 rounded-lg border border-slate-700 bg-slate-900/80 px-2 py-1 text-[9px] font-bold text-slate-300 hover:bg-slate-800/90 cursor-pointer"
+      },
+      /* @__PURE__ */ React.createElement(Icons.Zap, null),
+      showExtraGameControls ? "Hide Extra" : "Show Extra"
+    )), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-1.5" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => handleLogTimeout(true),
+        disabled: !teamATimeoutEnabled || !canOperateTeam(true),
+        className: "w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed border-2 backdrop-blur-md shadow-sm",
+        style: {
+          borderColor: (() => {
+            const color = String(liveHomeTeam?.color || "#06b6d4").replace("#", "");
+            const normalized = color.length === 3 ? color.split("").map((ch) => ch + ch).join("") : color.padEnd(6, "0").slice(0, 6);
+            const red = parseInt(normalized.slice(0, 2), 16);
+            const green = parseInt(normalized.slice(2, 4), 16);
+            const blue = parseInt(normalized.slice(4, 6), 16);
+            const isLight = (red * 299 + green * 587 + blue * 114) / 1e3 > 180;
+            return isLight ? "#cbd5e1" : liveHomeTeam?.color || "#06b6d4";
+          })(),
+          backgroundColor: (() => {
+            const color = String(liveHomeTeam?.color || "#06b6d4").replace("#", "");
+            const normalized = color.length === 3 ? color.split("").map((ch) => ch + ch).join("") : color.padEnd(6, "0").slice(0, 6);
+            const red = parseInt(normalized.slice(0, 2), 16);
+            const green = parseInt(normalized.slice(2, 4), 16);
+            const blue = parseInt(normalized.slice(4, 6), 16);
+            const isLight = (red * 299 + green * 587 + blue * 114) / 1e3 > 180;
+            return isLight ? "#e2e8f0" : liveHomeTeam?.color || "#0f172a";
+          })(),
+          color: (() => {
+            const color = String(liveHomeTeam?.color || "#06b6d4").replace("#", "");
+            const normalized = color.length === 3 ? color.split("").map((ch) => ch + ch).join("") : color.padEnd(6, "0").slice(0, 6);
+            const red = parseInt(normalized.slice(0, 2), 16);
+            const green = parseInt(normalized.slice(2, 4), 16);
+            const blue = parseInt(normalized.slice(4, 6), 16);
+            const isLight = (red * 299 + green * 587 + blue * 114) / 1e3 > 180;
+            return isLight ? "#020617" : liveHomeTeam?.textColor || "#ffffff";
+          })()
+        }
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.Timer, null), (liveHomeTeam?.name || "TEAM A").toUpperCase(), " TIMEOUT")
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: handlePeriodAction,
+        disabled: periodActionRequiresAdminControl && !canAdminControlClock,
+        title: periodActionRequiresAdminControl && !canAdminControlClock ? "Only admin can control clock or lock scores." : void 0,
+        className: `w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase border transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:saturate-0 disabled:cursor-not-allowed ${(() => {
+          const periodActionLabel2 = String(displayPeriodActionLabel || "").toUpperCase();
+          if (periodActionLabel2.includes("START") || periodActionLabel2.includes("RESUME")) {
+            return "bg-emerald-600 hover:bg-emerald-500 border-emerald-500 text-white shadow-[0_0_20px_rgba(16,185,129,0.6)]";
+          }
+          if (periodActionLabel2.includes("PAUSE")) {
+            return "bg-slate-800 hover:bg-slate-700 border-slate-700 text-amber-400";
+          }
+          if (periodActionLabel2.includes("END") || periodActionLabel2.includes("LOCK")) {
+            return "bg-red-700 hover:bg-red-600 border-red-600 text-white shadow-[0_0_25px_rgba(239,68,68,0.6)] animate-pulse";
+          }
+          return "bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200";
+        })()}`
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, displayPeriodActionIsStart || displayPeriodActionIsResume ? /* @__PURE__ */ React.createElement(Icons.Play, null) : displayPeriodActionIsEnd ? /* @__PURE__ */ React.createElement(Icons.Stop, null) : /* @__PURE__ */ React.createElement(Icons.Pause, null), String(displayPeriodActionLabel || "").toUpperCase())
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => handleLogTimeout(false),
+        disabled: !teamBTimeoutEnabled || !canOperateTeam(false),
+        className: "w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed border-2 backdrop-blur-md shadow-sm",
+        style: {
+          borderColor: (() => {
+            const color = String(liveAwayTeam?.color || "#ef4444").replace("#", "");
+            const normalized = color.length === 3 ? color.split("").map((ch) => ch + ch).join("") : color.padEnd(6, "0").slice(0, 6);
+            const red = parseInt(normalized.slice(0, 2), 16);
+            const green = parseInt(normalized.slice(2, 4), 16);
+            const blue = parseInt(normalized.slice(4, 6), 16);
+            const isLight = (red * 299 + green * 587 + blue * 114) / 1e3 > 180;
+            return isLight ? "#cbd5e1" : liveAwayTeam?.color || "#ef4444";
+          })(),
+          backgroundColor: (() => {
+            const color = String(liveAwayTeam?.color || "#ef4444").replace("#", "");
+            const normalized = color.length === 3 ? color.split("").map((ch) => ch + ch).join("") : color.padEnd(6, "0").slice(0, 6);
+            const red = parseInt(normalized.slice(0, 2), 16);
+            const green = parseInt(normalized.slice(2, 4), 16);
+            const blue = parseInt(normalized.slice(4, 6), 16);
+            const isLight = (red * 299 + green * 587 + blue * 114) / 1e3 > 180;
+            return isLight ? "#e2e8f0" : liveAwayTeam?.color || "#0f172a";
+          })(),
+          color: (() => {
+            const color = String(liveAwayTeam?.color || "#ef4444").replace("#", "");
+            const normalized = color.length === 3 ? color.split("").map((ch) => ch + ch).join("") : color.padEnd(6, "0").slice(0, 6);
+            const red = parseInt(normalized.slice(0, 2), 16);
+            const green = parseInt(normalized.slice(2, 4), 16);
+            const blue = parseInt(normalized.slice(4, 6), 16);
+            const isLight = (red * 299 + green * 587 + blue * 114) / 1e3 > 180;
+            return isLight ? "#020617" : liveAwayTeam?.textColor || "#ffffff";
+          })()
+        }
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.Timer, null), (liveAwayTeam?.name || "TEAM B").toUpperCase(), " TIMEOUT")
+    ))), showExtraGameControls && /* @__PURE__ */ React.createElement("div", { className: "mt-2 rounded-xl border border-slate-800 bg-slate-950/55 p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] font-extrabold uppercase tracking-widest text-slate-500 mb-2" }, "Secondary Controls"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-1.5" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: handleOfficialsTimeout,
+        disabled: !canOfficialsTimeout,
+        className: "w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-slate-700/60 bg-slate-900/80 backdrop-blur-sm text-slate-100 hover:bg-slate-800/90 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_12px_rgba(148,163,184,0.2)]"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.Timer, null), "OFFICIALS TIMEOUT")
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        disabled: !technicalFoulAction || isActionDisabled(technicalFoulAction),
+        onClick: () => technicalFoulAction && openActionForTeam(technicalFoulAction, effectiveOperatorFocus === "away" ? false : true),
+        title: getActionDisabledTitle(technicalFoulAction),
+        className: "w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-amber-700/50 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_12px_rgba(245,158,11,0.2)]"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.ShieldAlert, null), "TECHNICAL FOUL")
+    ), isLoggedIn && /* @__PURE__ */ React.createElement("div", { className: "relative w-full min-h-[2.75rem] md:min-h-[3rem]" }, !showSyncClockEditor ? /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          if (!showSyncClockEditor) {
+            setShowSyncClockEditor(true);
+          }
+        },
+        disabled: isSyncClockControlDisabled,
+        title: !canAdminControlClock ? "Only admin can sync clock." : void 0,
+        className: `w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border transition-all duration-200 ${isSyncClockControlDisabled ? "border-slate-700/60 bg-slate-900/80 text-slate-500 cursor-not-allowed opacity-70" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 cursor-pointer hover:shadow-[0_0_12px_rgba(16,185,129,0.2)]"}`
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.History, null), "SYNC CLOCK")
+    ) : /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 w-full rounded-lg border border-emerald-500/30 bg-slate-950/90 px-2 py-1.5 flex items-center gap-1.5 overflow-hidden" }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "text",
+        value: manualClockInput,
+        onFocus: () => setIsEditingClockInput(true),
+        onBlur: () => setIsEditingClockInput(false),
+        onChange: (e) => setManualClockInput(e.target.value),
+        placeholder: "MM:SS",
+        className: "flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-md px-2 py-1.5 text-[10px] text-white font-mono focus:outline-none uppercase"
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onMouseDown: (e) => e.preventDefault(),
+        onClick: handleApplyManualClock,
+        className: "shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-md border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer",
+        "aria-label": "Save synced clock",
+        title: "SAVE"
+      },
+      /* @__PURE__ */ React.createElement(Icons.Save, null)
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          setShowSyncClockEditor(false);
+          setIsEditingClockInput(false);
+        },
+        className: "shrink-0 inline-flex items-center justify-center h-7 w-7 rounded-md border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 cursor-pointer",
+        "aria-label": "Close sync clock editor",
+        title: "CLOSE"
+      },
+      /* @__PURE__ */ React.createElement(Icons.X, null)
+    ))), canFinalizeGame ? /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: openEndGameConfirm,
+        disabled: !canAdminControlClock,
+        title: !canAdminControlClock ? "Only admin can end and lock scores." : void 0,
+        className: "w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-red-500/45 bg-red-950/30 text-red-400 hover:bg-red-950/40 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] animate-pulse"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.Stop, null), "END MATCH")
+    ) : /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: openFinalizePeriodConfirm,
+        disabled: !canEndCurrentPeriod || !canAdminControlClock,
+        title: !canAdminControlClock ? "Only admin can end and lock scores." : void 0,
+        className: "w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-red-500/45 bg-red-950/30 text-red-400 hover:bg-red-950/40 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] animate-pulse"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.Stop, null), currentQuarter <= 4 ? `END QUARTER (${getPeriodLabel(currentQuarter)})` : `END PERIOD (${getPeriodLabel(currentQuarter)})`)
+    ))), /* @__PURE__ */ React.createElement("div", { className: "mt-2 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 border-b border-slate-800 pb-1.5 px-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.Zap, null), "Tap action first, then select player on court")), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block" }, "PRIMARY SCORING ACTIONS")), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-1.5" }, [
+      ["pts_2", "fg2m_miss"],
+      ["pts_3", "fg3m_miss"],
+      ["pts_1", "ft_miss"]
+    ].map(([madeId, missId]) => {
+      const madeAction = liveActionById.get(madeId);
+      const missAction = liveActionById.get(missId);
+      const madeLabel = String(getActionDisplayLabel(madeAction) || "").toUpperCase();
+      const missLabel = String(getActionDisplayLabel(missAction) || "").toUpperCase();
+      const madeIcon = madeId === "pts_1" ? /* @__PURE__ */ React.createElement(Icons.Zap, null) : madeId === "pts_3" ? /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "8" }), /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "4" }), /* @__PURE__ */ React.createElement("path", { d: "M12 2v4" }), /* @__PURE__ */ React.createElement("path", { d: "M12 18v4" }), /* @__PURE__ */ React.createElement("path", { d: "M2 12h4" }), /* @__PURE__ */ React.createElement("path", { d: "M18 12h4" })) : /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M12 2s4 3.5 4 7.5c0 2.2-1.1 3.7-2.1 4.7-.8-.9-1.3-2-1.7-3.4-1 1.2-2 2.9-2 4.8C10.2 19.2 12.6 22 16 22c3.3 0 6-2.5 6-6 0-6.7-5.2-10.7-10-14z" }));
+      const missIcon = missId === "ft_miss" ? /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "9" }), /* @__PURE__ */ React.createElement("path", { d: "M5 19 19 5" })) : /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "9" }), /* @__PURE__ */ React.createElement("path", { d: "M9 9l6 6" }), /* @__PURE__ */ React.createElement("path", { d: "M15 9l-6 6" }));
+      return /* @__PURE__ */ React.createElement("div", { key: `${madeId}-${missId}`, className: "grid grid-rows-2 gap-1.5" }, madeAction ? /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          disabled: isActionDisabled(madeAction),
+          onClick: () => openActionForTeam(madeAction, effectiveOperatorFocus === "away" ? false : true),
+          title: getActionDisabledTitle(madeAction),
+          className: `w-full min-h-[4.5rem] md:min-h-[5rem] py-4 md:py-5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-emerald-950/20 backdrop-blur-md ${madeId === "pts_1" ? "text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]" : "text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]"}`
+        },
+        madeIcon,
+        /* @__PURE__ */ React.createElement("span", null, madeLabel)
+      ) : null, missAction ? /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          disabled: isActionDisabled(missAction),
+          onClick: () => openActionForTeam(missAction, effectiveOperatorFocus === "away" ? false : true),
+          title: getActionDisabledTitle(missAction),
+          className: "w-full min-h-[4.5rem] md:min-h-[5rem] py-4 md:py-5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-red-950/20 backdrop-blur-md text-red-300 border-red-500/50 hover:bg-red-950/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.25)]"
+        },
+        missIcon,
+        /* @__PURE__ */ React.createElement("span", null, missLabel)
+      ) : null);
+    }))), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block" }, "POSSESSION & GAME FLOW")), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-1.5" }, reboundAction && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: "drb",
+        type: "button",
+        disabled: isActionDisabled(reboundAction),
+        onClick: () => openActionForTeamWithLabel(reboundAction, effectiveOperatorFocus === "away" ? false : true, "+1 REB"),
+        title: getActionDisabledTitle(reboundAction),
+        className: "w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+      },
+      /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "9" }), /* @__PURE__ */ React.createElement("path", { d: "M12 16V8" }), /* @__PURE__ */ React.createElement("path", { d: "m8 12 4-4 4 4" })),
+      /* @__PURE__ */ React.createElement("span", null, "+1 REB")
+    )), flowActions.filter((act) => act.id === "ast").map((act) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: `flow-${act.id}`,
+        disabled: isActionDisabled(act),
+        onClick: () => openActionForTeam(act, effectiveOperatorFocus === "away" ? false : true),
+        title: getActionDisabledTitle(act),
+        className: "w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+      },
+      /* @__PURE__ */ React.createElement(Icons.ChevronRight, null),
+      /* @__PURE__ */ React.createElement("span", null, String(getActionDisplayLabel(act) || "").toUpperCase())
+    )), flowActions.filter((act) => act.id === "stl" || act.id === "blk").map((act) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: `flow-${act.id}`,
+        disabled: isActionDisabled(act),
+        onClick: () => openActionForTeam(act, effectiveOperatorFocus === "away" ? false : true),
+        title: getActionDisabledTitle(act),
+        className: "w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+      },
+      act.id === "stl" ? /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M6 18 18 6" }), /* @__PURE__ */ React.createElement("path", { d: "M7 6h5v5" }), /* @__PURE__ */ React.createElement("path", { d: "M6 12a6 6 0 0 1 6-6" })) : /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M12 2 4 7v5c0 5 3 9 8 10 5-1 8-5 8-10V7l-8-5Z" }), /* @__PURE__ */ React.createElement("path", { d: "M9 12h6" })),
+      /* @__PURE__ */ React.createElement("span", null, String(getActionDisplayLabel(act) || "").toUpperCase())
+    )))), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/45 p-2.5 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block" }, "WHISTLES & FOULS")), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-3 gap-1.5" }, whistleActions.map((act) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: act.id,
+        disabled: isActionDisabled(act),
+        onClick: () => openActionForTeam(act, effectiveOperatorFocus === "away" ? false : true),
+        title: getActionDisabledTitle(act),
+        className: `w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${act.id === "pf" ? "bg-amber-950/20 hover:bg-amber-950/30 hover:shadow-[0_0_12px_rgba(245,158,11,0.2)] text-amber-300 border-amber-500/50" : "bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50"}`
+      },
+      act.id === "to" ? /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 12a9 9 0 0 1 9-9" }), /* @__PURE__ */ React.createElement("path", { d: "M12 3h7v7" }), /* @__PURE__ */ React.createElement("path", { d: "M21 12a9 9 0 0 1-9 9" }), /* @__PURE__ */ React.createElement("path", { d: "M12 21H5v-7" })) : act.id === "pf_offensive" ? /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M12 2 2 20h20L12 2Z" }), /* @__PURE__ */ React.createElement("path", { d: "M12 8v5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 16h.01" })) : /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4 shrink-0 stroke-[2]", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("circle", { cx: "12", cy: "12", r: "9" }), /* @__PURE__ */ React.createElement("path", { d: "M12 7v5" }), /* @__PURE__ */ React.createElement("path", { d: "M12 16h.01" })),
+      /* @__PURE__ */ React.createElement("span", null, String(getActionDisplayLabel(act) || "").toUpperCase())
+    )))))), showHomeLivePanel && showAwayLivePanel && /* @__PURE__ */ React.createElement("div", { className: "col-span-12 md:hidden flex bg-slate-955 p-1 rounded-xl border border-slate-855 gap-1" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveMobileConsoleTab("home"), className: `flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === "home" ? "bg-slate-800 text-white" : "text-slate-400"}` }, "\u{1F3E0} Home lineup"), /* @__PURE__ */ React.createElement("button", { onClick: () => setActiveMobileConsoleTab("away"), className: `flex-1 inline-flex items-center justify-center py-1.5 text-center text-xs font-bold rounded-lg ${activeMobileConsoleTab === "away" ? "bg-slate-800 text-white" : "text-slate-400"}` }, "\u{1F68C} Away lineup")), /* @__PURE__ */ React.createElement("div", { className: `col-span-12 ${canOperateLive ? `lg:col-span-9 grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? "md:grid-cols-2" : "md:grid-cols-1"}` : "lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]"} gap-4` }, showHomeLivePanel && /* @__PURE__ */ React.createElement("div", { className: `bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === "home" || !showAwayLivePanel ? "block" : "hidden md:block"}` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 mb-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] font-extrabold text-slate-400 uppercase tracking-wider" }, "ON COURT - ", homeTeamLabel), canOperateLive && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1" }, homeCanAddOnCourt && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => handleOpenAddFromBenchModal(true),
+        disabled: !canOperateTeam(true),
+        className: "px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/10"
+      },
+      "Add Player"
+    ), homeCanClearOnCourt && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => openClearOnCourtConfirm(true),
+        disabled: !canOperateTeam(true),
+        className: "px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-500/10"
+      },
+      "Clear"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => openWaveSubConfirm(true),
+        disabled: !canOperateTeam(true),
+        className: "px-2 py-0.5 rounded-md border border-sky-500/35 bg-sky-500/10 text-[9px] font-black uppercase tracking-wide text-sky-300 hover:bg-sky-500/20 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed",
+        title: "One-tap lineup wave switch. Repeats are only allowed when fewer than 10 eligible players are available."
+      },
+      "Wave Sub"
+    ))), /* @__PURE__ */ React.createElement("div", { className: "space-y-1.5" }, getOrderedLiveLineupEntries(teamAId, teamALineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, true, slot)).filter(Boolean)), canOperateLive && teamALineup.length < 5 && /* @__PURE__ */ React.createElement("div", { className: "mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1.5" }, "Available from bench (", teamALineup.length, "/5)"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1.5" }, (() => {
+      const teamObj = teams.find((t) => t.id === teamAId);
+      const rosterIds = (teamObj?.players || []).map((p) => p.id);
+      const fallbackCandidates = rosterIds.filter((id) => !teamALineup.includes(id) && !dnpPlayers.includes(id));
+      const addCandidates = (teamABench.length > 0 ? teamABench : fallbackCandidates).filter((id) => !dnpPlayers.includes(id));
+      if (!addCandidates.length) {
+        return /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500" }, "No bench players available");
+      }
+      return addCandidates.map((benchId) => {
+        const p = teamObj?.players.find((x) => x.id === benchId);
+        if (!p) return null;
+        const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
+        return /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: `add-home-${benchId}`,
+            type: "button",
+            disabled: isFouledOut || !canOperateTeam(true),
+            onClick: () => handleAddOnCourtPlayer(benchId, true),
+            className: "px-2 py-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed",
+            title: isFouledOut ? "Player has 5 fouls" : "Add to on-court"
+          },
+          "#",
+          p.number,
+          " ",
+          p.name
+        );
+      });
+    })()))), !canOperateLive && /* @__PURE__ */ React.createElement("div", { className: "hidden lg:flex bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex-col max-h-[504px]" }, /* @__PURE__ */ React.createElement("div", { className: "px-3 py-2 border-b border-slate-800 bg-slate-950/80" }, /* @__PURE__ */ React.createElement("h4", { className: "text-[10px] font-extrabold uppercase tracking-widest text-slate-400" }, "PLAY-BY-PLAY")), /* @__PURE__ */ React.createElement("div", { className: "p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]" }, gameLog.filter((log) => !log?.hiddenFromLog).map((log, idx) => {
+      const isSubEvent = log?.kind === "sub" || typeof log.text === "string" && log.text.includes("SUB:");
+      const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
+      const hasHomeTag = typeof log.text === "string" && log.text.startsWith("[HOME] ");
+      const hasAwayTag = typeof log.text === "string" && log.text.startsWith("[AWAY] ");
+      const cleanText = typeof log.text === "string" ? log.text.replace(/^\[(HOME|AWAY)\]\s*/, "") : log.text;
+      const scoreTagData = parseScoreTagFromLogText(cleanText);
+      const dotColor = log.isTeamA === true || hasHomeTag ? liveHomeTeam?.color || "#10b981" : log.isTeamA === false || hasAwayTag ? liveAwayTeam?.color || "#ef4444" : "#64748b";
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: log.id || idx,
+          className: `py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? "bg-slate-950/45" : "bg-slate-900/25"} ${isSubEvent ? "border-amber-500/35 text-amber-100" : "border-transparent"} ${isSubFlash ? "sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]" : ""}`
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-start gap-0 min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "flex w-full items-center justify-end gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex w-full items-center gap-2" }, log?.quarter ? /* @__PURE__ */ React.createElement("span", { className: "text-[9px] uppercase tracking-wide text-slate-400" }, getPeriodLabel(log.quarter), " ", log.clockRemaining || "--:--") : null, scoreTagData ? /* @__PURE__ */ React.createElement("span", { className: "ml-auto shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-300" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full", style: { backgroundColor: liveHomeTeam?.color || "#10b981" } }), /* @__PURE__ */ React.createElement("span", { className: "font-black" }, scoreTagData.teamAcronym, " ", scoreTagData.teamAScore), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "-"), /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full", style: { backgroundColor: liveAwayTeam?.color || "#ef4444" } }), /* @__PURE__ */ React.createElement("span", { className: "font-black" }, scoreTagData.teamBAcronym, " ", scoreTagData.teamBScore)) : null)))),
+        /* @__PURE__ */ React.createElement("div", { className: "mt-1 flex items-start gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full mt-1 shrink-0", style: { backgroundColor: dotColor } }), /* @__PURE__ */ React.createElement("span", { className: "flex-1 min-w-0 break-words" }, cleanText)),
+        /* @__PURE__ */ React.createElement("div", { className: "mt-1 pr-0.5 text-right text-[8px] text-slate-500/80" }, (log.time || "").split(" ")[0] || "--:--:--")
+      );
+    }))), showAwayLivePanel && /* @__PURE__ */ React.createElement("div", { className: `bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === "away" || !showHomeLivePanel ? "block" : "hidden md:block"}` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 mb-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] font-extrabold text-slate-400 uppercase tracking-wider" }, "ON COURT - ", awayTeamLabel), canOperateLive && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1" }, awayCanAddOnCourt && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => handleOpenAddFromBenchModal(false),
+        disabled: !canOperateTeam(false),
+        className: "px-2 py-0.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 text-[9px] font-black uppercase tracking-wide text-emerald-300 hover:bg-emerald-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/10"
+      },
+      "Add Player"
+    ), awayCanClearOnCourt && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => openClearOnCourtConfirm(false),
+        disabled: !canOperateTeam(false),
+        className: "px-2 py-0.5 rounded-md border border-rose-500/35 bg-rose-500/10 text-[9px] font-black uppercase tracking-wide text-rose-300 hover:bg-rose-500/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-500/10"
+      },
+      "Clear"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => openWaveSubConfirm(false),
+        disabled: !canOperateTeam(false),
+        className: "px-2 py-0.5 rounded-md border border-sky-500/35 bg-sky-500/10 text-[9px] font-black uppercase tracking-wide text-sky-300 hover:bg-sky-500/20 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed",
+        title: "One-tap lineup wave switch. Repeats are only allowed when fewer than 10 eligible players are available."
+      },
+      "Wave Sub"
+    ))), /* @__PURE__ */ React.createElement("div", { className: "space-y-1.5" }, getOrderedLiveLineupEntries(teamBId, teamBLineup).map(({ playerId, slot }) => renderPlayerCompactRow(playerId, false, slot)).filter(Boolean)), canOperateLive && teamBLineup.length < 5 && /* @__PURE__ */ React.createElement("div", { className: "mt-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] font-black uppercase tracking-wider text-slate-400 mb-1.5" }, "Available from bench (", teamBLineup.length, "/5)"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1.5" }, (() => {
+      const teamObj = teams.find((t) => t.id === teamBId);
+      const rosterIds = (teamObj?.players || []).map((p) => p.id);
+      const fallbackCandidates = rosterIds.filter((id) => !teamBLineup.includes(id) && !dnpPlayers.includes(id));
+      const addCandidates = (teamBBench.length > 0 ? teamBBench : fallbackCandidates).filter((id) => !dnpPlayers.includes(id));
+      if (!addCandidates.length) {
+        return /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500" }, "No bench players available");
+      }
+      return addCandidates.map((benchId) => {
+        const p = teamObj?.players.find((x) => x.id === benchId);
+        if (!p) return null;
+        const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
+        return /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: `add-away-${benchId}`,
+            type: "button",
+            disabled: isFouledOut || !canOperateTeam(false),
+            onClick: () => handleAddOnCourtPlayer(benchId, false),
+            className: "px-2 py-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed",
+            title: isFouledOut ? "Player has 5 fouls" : "Add to on-court"
+          },
+          "#",
+          p.number,
+          " ",
+          p.name
+        );
+      });
+    })())))), /* @__PURE__ */ React.createElement("div", { className: `${canOperateLive ? "col-span-12 lg:col-span-3" : "col-span-12 lg:hidden"} flex flex-col gap-4 h-full min-h-0` }, /* @__PURE__ */ React.createElement("div", { className: `bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col ${canOperateLive ? "max-h-[420px] md:max-h-[520px] lg:max-h-[504px]" : "max-h-[420px] md:max-h-[520px] lg:max-h-[504px]"}` }, /* @__PURE__ */ React.createElement("div", { className: "px-3 py-2 border-b border-slate-800 bg-slate-950/80" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-[10px] font-extrabold uppercase tracking-widest text-slate-400" }, "PLAY-BY-PLAY"), isLoggedIn && canOperateLive && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: handleUndo,
+        disabled: !canUndoLatest,
+        className: "inline-flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-200 hover:bg-slate-800 disabled:opacity-35 disabled:cursor-not-allowed"
+      },
+      /* @__PURE__ */ React.createElement(Icons.Undo, null),
+      "Undo"
+    )), isLoggedIn && canOperateLive && undoTargetSummary && /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[9px] font-mono text-slate-500" }, undoTargetSummary, undoTargetBlockedReason ? ` (${undoTargetBlockedReason})` : "")), /* @__PURE__ */ React.createElement("div", { className: "p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]" }, gameLog.filter((log) => !log?.hiddenFromLog).map((log, idx) => {
+      const isSubEvent = log?.kind === "sub" || typeof log.text === "string" && log.text.includes("SUB:");
+      const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
+      const isConvertBlocked = isProtectedLogEntry(log, finalizedPeriods);
+      const isCurrentPeriodLog = Number(getEffectiveQuarterFromLogEntry(log, gameLog)) === Number(currentQuarter);
+      const isStatLog = isEditableStatLogEntry(log);
+      const canDeleteLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
+      const canEditLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
+      const hasHomeTag = typeof log.text === "string" && log.text.startsWith("[HOME] ");
+      const hasAwayTag = typeof log.text === "string" && log.text.startsWith("[AWAY] ");
+      const cleanText = typeof log.text === "string" ? log.text.replace(/^\[(HOME|AWAY)\]\s*/, "") : log.text;
+      const scoreTagData = parseScoreTagFromLogText(cleanText);
+      const dotColor = log.isTeamA === true || hasHomeTag ? liveHomeTeam?.color || "#10b981" : log.isTeamA === false || hasAwayTag ? liveAwayTeam?.color || "#ef4444" : "#64748b";
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: log.id || idx,
+          className: `py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? "bg-slate-950/45" : "bg-slate-900/25"} ${isSubEvent ? "border-amber-500/35 text-amber-100" : "border-transparent"} ${isSubFlash ? "sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]" : ""}`
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, log?.quarter ? /* @__PURE__ */ React.createElement("span", { className: "text-[9px] uppercase tracking-wide text-slate-400" }, getPeriodLabel(log.quarter), " ", log.clockRemaining || "--:--") : /* @__PURE__ */ React.createElement("span", null), scoreTagData ? /* @__PURE__ */ React.createElement("span", { className: "shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-950/80 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-300" }, /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full", style: { backgroundColor: liveHomeTeam?.color || "#10b981" } }), /* @__PURE__ */ React.createElement("span", { className: "font-black" }, scoreTagData.teamAcronym, " ", scoreTagData.teamAScore), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "-"), /* @__PURE__ */ React.createElement("span", { className: "w-1.5 h-1.5 rounded-full", style: { backgroundColor: liveAwayTeam?.color || "#ef4444" } }), /* @__PURE__ */ React.createElement("span", { className: "font-black" }, scoreTagData.teamBAcronym, " ", scoreTagData.teamBScore)) : null),
+        /* @__PURE__ */ React.createElement("div", { className: "mt-1 flex items-start gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full mt-1 shrink-0", style: { backgroundColor: dotColor } }), /* @__PURE__ */ React.createElement("span", { className: "flex-1 min-w-0 break-words" }, cleanText)),
+        /* @__PURE__ */ React.createElement("div", { className: "mt-1 flex items-center justify-between" }, isLoggedIn && canOperateLive && (canEditLiveLog || canDeleteLiveLog) ? /* @__PURE__ */ React.createElement("div", { className: "inline-flex items-center gap-1" }, canEditLiveLog && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => handleOpenLiveLogEdit(log.id),
+            className: "h-4 w-4 inline-flex items-center justify-center text-slate-600 hover:text-slate-400 cursor-pointer",
+            title: "Edit action (current period only)"
+          },
+          /* @__PURE__ */ React.createElement(Icons.Edit, null)
+        ), canDeleteLiveLog && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => setConfirmDialog({
+              title: "Delete live log entry?",
+              text: "This will remove the selected current-period log and replay the live state.",
+              onConfirm: () => {
+                setConfirmDialog(null);
+                handleDeleteLogEntry(log.id);
+              }
+            }),
+            className: "h-4 w-4 inline-flex items-center justify-center text-slate-600 hover:text-rose-400 cursor-pointer",
+            title: "Delete this log (current period only)"
+          },
+          /* @__PURE__ */ React.createElement(Icons.Trash, null)
+        )) : /* @__PURE__ */ React.createElement("span", null), /* @__PURE__ */ React.createElement("span", { className: "text-[8px] text-slate-500/80" }, (log.time || "").split(" ")[0] || "--:--:--"))
+      );
+    })))), /* @__PURE__ */ React.createElement("div", { className: "col-span-12 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl mt-4" }, /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        onClick: () => setShowLiveRunningBoxscore(!showLiveRunningBoxscore),
+        className: "p-4 bg-slate-950 flex items-center justify-between cursor-pointer select-none border-b border-slate-800"
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "text-xs bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-500/30" }, "LIVE"), /* @__PURE__ */ React.createElement("h3", { className: "text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2" }, "\u{1F4CA} Live Boxscore")),
+      /* @__PURE__ */ React.createElement("span", { className: `text-slate-500 transition-transform duration-200 ${showLiveRunningBoxscore ? "rotate-180" : ""}` }, /* @__PURE__ */ React.createElement(Icons.ChevronDown, null))
+    ), showLiveRunningBoxscore && /* @__PURE__ */ React.createElement("div", { className: "p-4 space-y-4 bg-slate-955/30" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setLiveBoxscoreTab("home"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === "home" ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+      },
+      `${teams.find((t) => t.id === teamAId)?.name || "Home"} Box Score`
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setLiveBoxscoreTab("away"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === "away" ? "bg-blue-500/20 text-blue-300 border-blue-500/40" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+      },
+      `${teams.find((t) => t.id === teamBId)?.name || "Away"} Box Score`
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setLiveBoxscoreTab("scoring"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === "scoring" ? "bg-orange-500/20 text-orange-300 border-orange-500/40" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+      },
+      "Quarter Scoring"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setLiveBoxscoreTab("comparison"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === "comparison" ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+      },
+      "Comparison"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setLiveBoxscoreTab("fouls"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === "fouls" ? "bg-rose-500/20 text-rose-300 border-rose-500/40" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+      },
+      "Foul Trouble"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setLiveBoxscoreTab("potg"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === "potg" ? "bg-amber-500/20 text-amber-300 border-amber-500/40" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+      },
+      "POTG"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setLiveBoxscoreTab("leaders"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${liveBoxscoreTab === "leaders" ? "bg-purple-500/20 text-purple-300 border-purple-500/40" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+      },
+      "Leaders"
+    )), liveBoxscoreTab === "home" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: teams.find((t) => t.id === teamAId)?.color || "#e2e8f0" } }), /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-black uppercase text-slate-200" }, teams.find((t) => t.id === teamAId)?.name, " Live Stats")), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-mono text-slate-500" }, "Live Team Score: ", /* @__PURE__ */ React.createElement("strong", { className: "text-white font-bold" }, teamAScore))), /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-xl border border-slate-850/80 bg-slate-950/40" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-[11px] min-w-[550px]" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 font-mono text-[9px] border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2 px-3" }, "Player"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "FG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "3PT"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "FT"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-red-400" }, "PF"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-rose-300" }, "GP Tag"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50 font-mono text-slate-300" }, (teams.find((t) => t.id === teamAId)?.players || []).map((player) => {
+      const pstats = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+      const totalMade = (pstats.fg2m || 0) + (pstats.fg3m || 0);
+      const totalAtt = totalMade + (pstats.fg2m_miss || 0) + (pstats.fg3m_miss || 0);
+      const fg3Att = (pstats.fg3m || 0) + (pstats.fg3m_miss || 0);
+      const ftAtt = (pstats.ftm || 0) + (pstats.ft_miss || 0);
+      const onCourt = teamALineup.includes(player.id);
+      const isMarkedDnp = dnpPlayers.includes(player.id);
+      const dnpLocked = hasAnyTrackedLiveStat(player.id);
+      return /* @__PURE__ */ React.createElement("tr", { key: player.id, "data-player-id": player.id, className: `hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? "bg-emerald-500/5 font-semibold text-white" : "opacity-70"} ${flashPlayers[player.id] ? "animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10" : ""} ${subFlashPlayers[player.id] ? "sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10" : ""}` }, /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-3 truncate font-sans" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono text-slate-500 text-[10px] mr-1" }, "#", player.number), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => {
+            setActiveTab("teams");
+            setSelectedRosterPlayer({ teamId: teamAId, playerId: player.id });
+          },
+          className: "text-left text-white hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer",
+          title: "Open player profile"
+        },
+        player.name
+      ), onCourt && /* @__PURE__ */ React.createElement("span", { className: "ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded" }, "On Court")), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-orange-400 font-bold" }, pstats.pts), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, totalMade, "/", totalAtt), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.fg3m || 0, "/", fg3Att), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.ftm || 0, "/", ftAtt), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-emerald-400" }, pstats.reb), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-blue-400" }, pstats.ast), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.stl || 0), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.blk || 0), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-amber-500" }, pstats.to || 0), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-red-400 font-bold" }, pstats.pf), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, dnpLocked ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex px-2 py-0.5 rounded text-[9px] font-black border bg-emerald-500/10 text-emerald-300 border-emerald-500/40", title: "Player has recorded stats; DNP not available" }, "Played") : /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          disabled: !canOperateTeam(true),
+          onClick: () => togglePlayerDidNotPlay(player.id),
+          className: `px-2 py-0.5 rounded text-[9px] font-black border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isMarkedDnp ? "bg-rose-500/20 text-rose-200 border-rose-500/60" : "bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`,
+          title: isMarkedDnp ? "Marked DNP: excluded from games played for this match" : "Mark as DNP: exclude from games played for this match"
+        },
+        isMarkedDnp ? "DNP" : "Counted"
+      )));
+    }))))) : liveBoxscoreTab === "away" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: teams.find((t) => t.id === teamBId)?.color || "#3b82f6" } }), /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-black uppercase text-slate-200" }, teams.find((t) => t.id === teamBId)?.name, " Live Stats")), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-mono text-slate-500" }, "Live Team Score: ", /* @__PURE__ */ React.createElement("strong", { className: "text-white font-bold" }, teamBScore))), /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-xl border border-slate-850/80 bg-slate-955/40" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-[11px] min-w-[550px]" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 font-mono text-[9px] border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2 px-3" }, "Player"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "FG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "3PT"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "FT"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-red-400" }, "PF"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-rose-300" }, "GP Tag"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/50 font-mono text-slate-300" }, (teams.find((t) => t.id === teamBId)?.players || []).map((player) => {
+      const pstats = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+      const totalMade = (pstats.fg2m || 0) + (pstats.fg3m || 0);
+      const totalAtt = totalMade + (pstats.fg2m_miss || 0) + (pstats.fg3m_miss || 0);
+      const fg3Att = (pstats.fg3m || 0) + (pstats.fg3m_miss || 0);
+      const ftAtt = (pstats.ftm || 0) + (pstats.ft_miss || 0);
+      const onCourt = teamBLineup.includes(player.id);
+      const isMarkedDnp = dnpPlayers.includes(player.id);
+      const dnpLocked = hasAnyTrackedLiveStat(player.id);
+      return /* @__PURE__ */ React.createElement("tr", { key: player.id, "data-player-id": player.id, className: `hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? "bg-emerald-500/5 font-semibold text-white" : "opacity-70"} ${flashPlayers[player.id] ? "animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10" : ""} ${subFlashPlayers[player.id] ? "sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10" : ""}` }, /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-3 truncate font-sans" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono text-slate-500 text-[10px] mr-1" }, "#", player.number), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => {
+            setActiveTab("teams");
+            setSelectedRosterPlayer({ teamId: teamBId, playerId: player.id });
+          },
+          className: "text-left text-white hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer",
+          title: "Open player profile"
+        },
+        player.name
+      ), onCourt && /* @__PURE__ */ React.createElement("span", { className: "ml-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 px-1 rounded" }, "On Court")), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-orange-400 font-bold" }, pstats.pts), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, totalMade, "/", totalAtt), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.fg3m || 0, "/", fg3Att), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.ftm || 0, "/", ftAtt), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-emerald-400" }, pstats.reb), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-blue-400" }, pstats.ast), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.stl || 0), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, pstats.blk || 0), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-amber-500" }, pstats.to || 0), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center text-red-400 font-bold" }, pstats.pf), /* @__PURE__ */ React.createElement("td", { className: "py-1.5 px-2 text-center" }, dnpLocked ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex px-2 py-0.5 rounded text-[9px] font-black border bg-emerald-500/10 text-emerald-300 border-emerald-500/40", title: "Player has recorded stats; DNP not available" }, "Played") : /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          disabled: !canOperateTeam(false),
+          onClick: () => togglePlayerDidNotPlay(player.id),
+          className: `px-2 py-0.5 rounded text-[9px] font-black border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isMarkedDnp ? "bg-rose-500/20 text-rose-200 border-rose-500/60" : "bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`,
+          title: isMarkedDnp ? "Marked DNP: excluded from games played for this match" : "Mark as DNP: exclude from games played for this match"
+        },
+        isMarkedDnp ? "DNP" : "Counted"
+      )));
+    }))))) : liveBoxscoreTab === "scoring" ? /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-black uppercase text-slate-200" }, "Scoring By Quarter"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-mono text-slate-500" }, "Live quarter breakdown")), /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-xl border border-slate-850/80 bg-slate-950/40" }, /* @__PURE__ */ React.createElement("table", { className: "w-full min-w-[520px] text-[11px] font-mono border-collapse" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2 px-3 text-left" }, "Team"), liveQuarterStats.map((row) => /* @__PURE__ */ React.createElement("th", { key: `live-boxscore-quarter-head-${row.quarter}`, className: "py-2 px-3 text-center" }, getPeriodLabel(row.quarter))))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60 text-slate-200" }, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 font-bold", style: { color: teams.find((t) => t.id === teamAId)?.color || "#10b981" } }, teams.find((t) => t.id === teamAId)?.name || "Team A"), liveQuarterStats.map((row) => /* @__PURE__ */ React.createElement("td", { key: `live-boxscore-quarter-a-${row.quarter}`, className: "py-2 px-3 text-center font-black" }, row.teamA.pts))), /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 font-bold", style: { color: teams.find((t) => t.id === teamBId)?.color || "#3b82f6" } }, teams.find((t) => t.id === teamBId)?.name || "Team B"), liveQuarterStats.map((row) => /* @__PURE__ */ React.createElement("td", { key: `live-boxscore-quarter-b-${row.quarter}`, className: "py-2 px-3 text-center font-black" }, row.teamB.pts))))))) : liveBoxscoreTab === "comparison" ? (() => {
+      const livePseudoGame = {
+        teamAId,
+        teamBId,
+        teamAScore,
+        teamBScore,
+        playerStats: liveStats
+      };
+      const liveTeamATotals = summarizeGameTeamStats(liveHomeTeam, livePseudoGame);
+      const liveTeamBTotals = summarizeGameTeamStats(liveAwayTeam, livePseudoGame);
+      const liveTeamAFgMade = (Number(liveTeamATotals.fg2m) || 0) + (Number(liveTeamATotals.fg3m) || 0);
+      const liveTeamBFgMade = (Number(liveTeamBTotals.fg2m) || 0) + (Number(liveTeamBTotals.fg3m) || 0);
+      const liveTeamAFgMiss = (Number(liveTeamATotals.fg2m_miss) || 0) + (Number(liveTeamATotals.fg3m_miss) || 0);
+      const liveTeamBFgMiss = (Number(liveTeamBTotals.fg2m_miss) || 0) + (Number(liveTeamBTotals.fg3m_miss) || 0);
+      const liveTeamAFgAtt = liveTeamAFgMade + liveTeamAFgMiss;
+      const liveTeamBFgAtt = liveTeamBFgMade + liveTeamBFgMiss;
+      const liveTeamA3PMade = Number(liveTeamATotals.fg3m) || 0;
+      const liveTeamB3PMade = Number(liveTeamBTotals.fg3m) || 0;
+      const liveTeamA3PMiss = Number(liveTeamATotals.fg3m_miss) || 0;
+      const liveTeamB3PMiss = Number(liveTeamBTotals.fg3m_miss) || 0;
+      const liveTeamA3PAtt = liveTeamA3PMade + liveTeamA3PMiss;
+      const liveTeamB3PAtt = liveTeamB3PMade + liveTeamB3PMiss;
+      const liveTeamAFtMade = Number(liveTeamATotals.ftm) || 0;
+      const liveTeamBFtMade = Number(liveTeamBTotals.ftm) || 0;
+      const liveTeamAFtMiss = Number(liveTeamATotals.ft_miss) || 0;
+      const liveTeamBFtMiss = Number(liveTeamBTotals.ft_miss) || 0;
+      const liveTeamAFtAtt = liveTeamAFtMade + liveTeamAFtMiss;
+      const liveTeamBFtAtt = liveTeamBFtMade + liveTeamBFtMiss;
+      const liveComparisonRows = [
+        { label: "PTS", teamAValue: Math.round(Number(liveTeamATotals.pts) || 0), teamBValue: Math.round(Number(liveTeamBTotals.pts) || 0), teamACompare: Number(liveTeamATotals.pts) || 0, teamBCompare: Number(liveTeamBTotals.pts) || 0 },
+        { label: "FG", teamAValue: formatMadeAttempts(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatMadeAttempts(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: liveTeamAFgMade, teamBCompare: liveTeamBFgMade },
+        { label: "FG%", teamAValue: formatPercentOrNA(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatPercentOrNA(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: toPercent(liveTeamAFgMade, liveTeamAFgAtt), teamBCompare: toPercent(liveTeamBFgMade, liveTeamBFgAtt) },
+        { label: "3PT", teamAValue: formatMadeAttempts(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatMadeAttempts(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: liveTeamA3PMade, teamBCompare: liveTeamB3PMade },
+        { label: "3P%", teamAValue: formatPercentOrNA(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatPercentOrNA(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: toPercent(liveTeamA3PMade, liveTeamA3PAtt), teamBCompare: toPercent(liveTeamB3PMade, liveTeamB3PAtt) },
+        { label: "FT", teamAValue: formatMadeAttempts(liveTeamAFtMade, liveTeamAFtAtt), teamBValue: formatMadeAttempts(liveTeamBFtMade, liveTeamBFtAtt), teamACompare: liveTeamAFtMade, teamBCompare: liveTeamBFtMade },
+        { label: "REB", teamAValue: Math.round(Number(liveTeamATotals.reb) || 0), teamBValue: Math.round(Number(liveTeamBTotals.reb) || 0), teamACompare: Number(liveTeamATotals.reb) || 0, teamBCompare: Number(liveTeamBTotals.reb) || 0 },
+        { label: "AST", teamAValue: Math.round(Number(liveTeamATotals.ast) || 0), teamBValue: Math.round(Number(liveTeamBTotals.ast) || 0), teamACompare: Number(liveTeamATotals.ast) || 0, teamBCompare: Number(liveTeamBTotals.ast) || 0 },
+        { label: "STL", teamAValue: Math.round(Number(liveTeamATotals.stl) || 0), teamBValue: Math.round(Number(liveTeamBTotals.stl) || 0), teamACompare: Number(liveTeamATotals.stl) || 0, teamBCompare: Number(liveTeamBTotals.stl) || 0 },
+        { label: "BLK", teamAValue: Math.round(Number(liveTeamATotals.blk) || 0), teamBValue: Math.round(Number(liveTeamBTotals.blk) || 0), teamACompare: Number(liveTeamATotals.blk) || 0, teamBCompare: Number(liveTeamBTotals.blk) || 0 },
+        { label: "TO", teamAValue: Math.round(Number(liveTeamATotals.to) || 0), teamBValue: Math.round(Number(liveTeamBTotals.to) || 0), teamACompare: Number(liveTeamATotals.to) || 0, teamBCompare: Number(liveTeamBTotals.to) || 0 },
+        { label: "PF", teamAValue: Math.round(Number(liveTeamATotals.pf) || 0), teamBValue: Math.round(Number(liveTeamBTotals.pf) || 0), teamACompare: Number(liveTeamATotals.pf) || 0, teamBCompare: Number(liveTeamBTotals.pf) || 0 }
+      ];
+      return /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, "Team Total Comparison"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "Live totals for this game")), /* @__PURE__ */ React.createElement("div", { className: "rounded-lg border border-slate-800 bg-slate-950/30 p-3 md:p-4 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-[10px] font-bold uppercase tracking-wider" }, /* @__PURE__ */ React.createElement("span", { className: "text-right", style: { color: liveHomeTeam?.color || "#10b981" } }, liveHomeTeam?.name || "Home"), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "Stat"), /* @__PURE__ */ React.createElement("span", { style: { color: liveAwayTeam?.color || "#ef4444" } }, liveAwayTeam?.name || "Away")), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800/70 overflow-hidden" }, liveComparisonRows.map((row) => {
+        const aNum = Number(row.teamACompare) || 0;
+        const bNum = Number(row.teamBCompare) || 0;
+        const totalValue = Math.max(aNum + bNum, 1);
+        const aWidth = `${Math.min(100, aNum / totalValue * 100)}%`;
+        const bWidth = `${Math.min(100, bNum / totalValue * 100)}%`;
+        return /* @__PURE__ */ React.createElement("div", { key: `live-compare-${row.label}`, className: "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45" }, /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0 flex justify-end" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-left border-b", style: { width: aWidth, backgroundColor: `${liveHomeTeam?.color || "#10b981"}0c`, borderBottomColor: `${liveHomeTeam?.color || "#10b981"}aa` } })), /* @__PURE__ */ React.createElement("span", { className: "relative z-10 block text-right text-xl leading-none font-black text-slate-100" }, row.teamAValue)), /* @__PURE__ */ React.createElement("span", { className: "inline-flex h-full items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100" }, row.label)), /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-right border-b", style: { width: bWidth, backgroundColor: `${liveAwayTeam?.color || "#ef4444"}0c`, borderBottomColor: `${liveAwayTeam?.color || "#ef4444"}aa` } })), /* @__PURE__ */ React.createElement("span", { className: "relative z-10 block text-left text-xl leading-none font-black text-slate-100" }, row.teamBValue)));
+      }))));
+    })() : liveBoxscoreTab === "potg" ? (() => {
+      const livePseudoGame = {
+        teamAId,
+        teamBId,
+        teamAScore,
+        teamBScore,
+        playerStats: liveStats
+      };
+      const livePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeam, liveAwayTeam);
+      const liveTopTeamAPerformers = getTopTeamPerformers(liveHomeTeam, livePseudoGame, 3);
+      const liveTopTeamBPerformers = getTopTeamPerformers(liveAwayTeam, livePseudoGame, 3);
+      if (!livePlayerOfTheGame) {
+        return /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, "Potential POTG"), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 italic" }, "No clear POTG candidate yet. Record more live stats."));
+      }
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] uppercase tracking-widest text-amber-400 font-bold mb-1" }, "Potential Player of the Game"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "w-11 h-11 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0" }, livePlayerOfTheGame.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: livePlayerOfTheGame.pictureUrl, alt: livePlayerOfTheGame.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-sm font-black text-slate-200 font-mono" }, (livePlayerOfTheGame.name || "?").slice(0, 1).toUpperCase())), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-extrabold text-white" }, "#", livePlayerOfTheGame.number, " ", livePlayerOfTheGame.name, /* @__PURE__ */ React.createElement("span", { className: "ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full border", style: { color: livePlayerOfTheGame.teamColor || "#fff", borderColor: `${livePlayerOfTheGame.teamColor || "#fff"}55` } }, livePlayerOfTheGame.teamName))), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-slate-400 mt-1" }, `PER-style live rating ${Number(livePlayerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.`)), (() => {
+        const displayedStats = [
+          ["PTS", Number(livePlayerOfTheGame.stats?.pts || 0)],
+          ["REB", Number(livePlayerOfTheGame.stats?.reb || 0)],
+          ["AST", Number(livePlayerOfTheGame.stats?.ast || 0)],
+          ["STL", Number(livePlayerOfTheGame.stats?.stl || 0)],
+          ["BLK", Number(livePlayerOfTheGame.stats?.blk || 0)],
+          ["TO", Number(livePlayerOfTheGame.stats?.to || 0)],
+          ["PER", Math.round(Number(livePlayerOfTheGame.perScore || 0))]
+        ].filter(([label, value]) => label === "PER" || value !== 0);
+        const maxValue = displayedStats.reduce((best, [, value]) => Math.max(best, Number(value || 0)), 0);
+        return /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            className: "grid gap-2 font-mono text-slate-300",
+            style: { gridTemplateColumns: `repeat(${Math.max(displayedStats.length, 1)}, minmax(0, 1fr))` }
+          },
+          displayedStats.map(([label, value]) => {
+            const isOutstanding = label === "PER" || Number(value) === maxValue && maxValue > 0;
+            return /* @__PURE__ */ React.createElement(
+              "div",
+              {
+                key: `live-potg-stat-${label}`,
+                className: `rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between border ${isOutstanding ? "bg-amber-500/15 border-amber-400/70 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]" : "bg-slate-900/80 border-slate-800"}`
+              },
+              /* @__PURE__ */ React.createElement("div", { className: `text-[9px] uppercase tracking-wider font-bold leading-none ${isOutstanding ? "text-amber-200" : "text-slate-400"}` }, label),
+              /* @__PURE__ */ React.createElement("div", { className: `mt-1 font-mono font-black text-lg md:text-xl leading-none ${isOutstanding ? "text-amber-100" : "text-white"}` }, value)
+            );
+          })
+        );
+      })()), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3" }, /* @__PURE__ */ React.createElement("h5", { className: "text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-2" }, "Top Live Performers"), (() => {
+        const baseLiveTopPerformers = [...liveTopTeamAPerformers, ...liveTopTeamBPerformers].sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0)).slice(0, 6);
+        const selectedLivePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeam, liveAwayTeam);
+        const specialLivePotgEntries = [selectedLivePlayerOfTheGame].filter(Boolean).filter((entry, index, allEntries) => allEntries.findIndex((candidate) => candidate?.id === entry?.id) === index).map((entry) => ({
+          ...entry,
+          stats: entry.stats || {},
+          perScore: Number(entry.perScore || 0),
+          teamName: entry.teamName,
+          teamColor: entry.teamColor
+        }));
+        const mergedLiveTopPerformers = [...baseLiveTopPerformers];
+        specialLivePotgEntries.forEach((entry) => {
+          if (!mergedLiveTopPerformers.some((existingEntry) => existingEntry.id === entry.id)) {
+            mergedLiveTopPerformers.push(entry);
+          }
+        });
+        return /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-xs min-w-[920px]" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center" }, "#"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3" }, "Player"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400 font-bold" }, "FG M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-cyan-400 font-bold" }, "3PT M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-pink-400 font-bold" }, "FT%"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-blue-400" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-teal-400" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-violet-400" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-amber-500" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-red-400" }, "PF"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-slate-200" }, "PER"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300" }, mergedLiveTopPerformers.length === 0 ? /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-slate-600 italic", colSpan: 13 }, "No qualifying performers")) : mergedLiveTopPerformers.map((entry, idx) => {
+          const shooting = computeShootingPercentages(entry.stats || {}, { showNAWhenNoAttempts: true });
+          return /* @__PURE__ */ React.createElement("tr", { key: `live-potg-top-${entry.id}`, className: "hover:bg-slate-855/20" }, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center font-bold text-slate-500" }, "#", idx + 1), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 text-white font-bold font-sans" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full shrink-0", style: { backgroundColor: entry.teamColor || "#94a3b8" } }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono mr-1.5 text-[10px]" }, "#", entry.number), entry.name))), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-orange-400 font-black" }, entry.stats?.pts || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, shooting.fgMadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, shooting.fg3MadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-pink-400 font-bold" }, shooting.ftPct), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400" }, entry.stats?.reb || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-blue-400" }, entry.stats?.ast || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-teal-400 font-mono" }, entry.stats?.stl || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-violet-400 font-mono" }, entry.stats?.blk || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-amber-500 font-mono" }, entry.stats?.to || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-red-400 font-mono" }, entry.stats?.pf || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center font-black text-slate-100" }, Number(entry.perScore || 0).toFixed(1)));
+        })))));
+      })()));
+    })() : liveBoxscoreTab === "leaders" ? (() => {
+      const teamALeaders = getGameTeamLeaders(liveHomeTeam || { players: [] }, { playerStats: liveStats });
+      const teamBLeaders = getGameTeamLeaders(liveAwayTeam || { players: [] }, { playerStats: liveStats });
+      return /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, "Live Leaders"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "Current game top performers by team")), /* @__PURE__ */ React.createElement("div", { className: "rounded-lg border border-slate-800 bg-slate-950/30 p-3 md:p-4 space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-[10px] font-bold uppercase tracking-wider" }, /* @__PURE__ */ React.createElement("span", { className: "text-right", style: { color: liveHomeTeam?.color || "#10b981" } }, liveHomeTeam?.name || "Home"), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "Leader"), /* @__PURE__ */ React.createElement("span", { style: { color: liveAwayTeam?.color || "#ef4444" } }, liveAwayTeam?.name || "Away")), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800/70 overflow-hidden" }, [
+        ["PTS", teamALeaders.find((item) => item.label === "PTS"), teamBLeaders.find((item) => item.label === "PTS")],
+        ["REB", teamALeaders.find((item) => item.label === "REB"), teamBLeaders.find((item) => item.label === "REB")],
+        ["AST", teamALeaders.find((item) => item.label === "AST"), teamBLeaders.find((item) => item.label === "AST")],
+        ["STL", teamALeaders.find((item) => item.label === "STL"), teamBLeaders.find((item) => item.label === "STL")],
+        ["BLK", teamALeaders.find((item) => item.label === "BLK"), teamBLeaders.find((item) => item.label === "BLK")],
+        ["TO", teamALeaders.find((item) => item.label === "TO"), teamBLeaders.find((item) => item.label === "TO")]
+      ].map(([label, teamALeader, teamBLeader]) => {
+        const aValue = Number(teamALeader?.value || 0);
+        const bValue = Number(teamBLeader?.value || 0);
+        const aLeaders = teamALeader?.leaders || [];
+        const bLeaders = teamBLeader?.leaders || [];
+        const hasALeader = aValue > 0;
+        const hasBLeader = bValue > 0;
+        if (!hasALeader && !hasBLeader) return null;
+        const totalValue = Math.max(aValue + bValue, 1);
+        const aWidth = `${Math.min(100, aValue / totalValue * 100)}%`;
+        const bWidth = `${Math.min(100, bValue / totalValue * 100)}%`;
+        return /* @__PURE__ */ React.createElement("div", { key: `live-leader-${label}`, className: "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45" }, /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0 flex justify-end" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-left border-b", style: { width: aWidth, backgroundColor: `${liveHomeTeam?.color || "#10b981"}0c`, borderBottomColor: `${liveHomeTeam?.color || "#10b981"}aa` } })), /* @__PURE__ */ React.createElement("div", { className: "relative z-10 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-end gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-end" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center -space-x-2" }, hasALeader ? aLeaders.slice(0, 2).map((leader) => /* @__PURE__ */ React.createElement("span", { key: `live-leader-a-avatar-${label}-${leader.id}`, className: "w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center" }, leader.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: leader.pictureUrl, alt: leader.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-200" }, (leader.name || "?").slice(0, 1).toUpperCase()))) : null), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[10px] text-slate-400 truncate max-w-[170px]" }, hasALeader ? aLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(" / ") : "-")), /* @__PURE__ */ React.createElement("div", { className: "text-base font-black text-slate-100" }, hasALeader ? teamALeader.value : "-")))), /* @__PURE__ */ React.createElement("span", { className: "inline-flex h-full flex-col items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5 gap-1" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100" }, label)), /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-right border-b", style: { width: bWidth, backgroundColor: `${liveAwayTeam?.color || "#ef4444"}0c`, borderBottomColor: `${liveAwayTeam?.color || "#ef4444"}aa` } })), /* @__PURE__ */ React.createElement("div", { className: "relative z-10 text-left" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-start gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-base font-black text-slate-100" }, hasBLeader ? teamBLeader.value : "-"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-start" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center -space-x-2" }, hasBLeader ? bLeaders.slice(0, 2).map((leader) => /* @__PURE__ */ React.createElement("span", { key: `live-leader-b-avatar-${label}-${leader.id}`, className: "w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center" }, leader.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: leader.pictureUrl, alt: leader.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-200" }, (leader.name || "?").slice(0, 1).toUpperCase()))) : null), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[10px] text-slate-400 truncate max-w-[170px]" }, hasBLeader ? bLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(" / ") : "-"))))));
+      }))));
+    })() : /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-850/80 bg-slate-950/40 p-3 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: teams.find((t) => t.id === teamAId)?.color || "#10b981" } }), /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-black uppercase text-slate-200" }, teams.find((t) => t.id === teamAId)?.name || "Home", " Foul Trouble")), homeFoulTroublePlayers.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 italic" }, "No home players with high foul load this game.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, homeFoulTroublePlayers.map((player) => /* @__PURE__ */ React.createElement("div", { key: `home-foul-trouble-${player.id}`, className: "flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-8 h-8 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0" }, player.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: player.pictureUrl, alt: player.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-200" }, (player.name || "?").slice(0, 1).toUpperCase())), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-bold text-white truncate" }, "#", player.number, " ", player.name), /* @__PURE__ */ React.createElement("div", { className: `text-[10px] font-bold ${player.fouls >= 5 ? "text-red-300" : player.isHighRiskFoulPace || player.isThreeFoulConcern ? "text-amber-300" : "text-slate-400"}` }, player.fouls >= 5 ? "Disqualified" : player.isHighRiskFoulPace ? "At foul-out pace over remaining quarters" : player.isThreeFoulConcern ? "3+ fouls: concern" : "Foul tracking"), /* @__PURE__ */ React.createElement("div", { className: "mt-1 flex flex-wrap gap-1" }, Object.entries(player.quarterFouls || {}).filter(([, value]) => Number(value || 0) > 0).sort((a, b) => Number(a[0]) - Number(b[0])).map(([quarter, value]) => /* @__PURE__ */ React.createElement("span", { key: `home-foul-q-${player.id}-${quarter}`, className: `inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-black border ${Number(value || 0) >= 2 ? "border-amber-500/60 bg-amber-500/15 text-amber-300" : "border-slate-700 bg-slate-900 text-slate-300"}` }, `${getPeriodLabel(Number(quarter))}: ${Number(value || 0)}PF`))))), /* @__PURE__ */ React.createElement("span", { className: `shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? "border-red-500/50 bg-red-500/15 text-red-300" : "border-amber-500/50 bg-amber-500/15 text-amber-300"}` }, player.fouls >= 5 ? `${player.fouls} PF` : `${player.fouls} PF (${player.allowedPerRemainingPeriod.toFixed(2)}/Q left)`))))), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-850/80 bg-slate-950/40 p-3 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: teams.find((t) => t.id === teamBId)?.color || "#3b82f6" } }), /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-black uppercase text-slate-200" }, teams.find((t) => t.id === teamBId)?.name || "Away", " Foul Trouble")), awayFoulTroublePlayers.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500 italic" }, "No away players with high foul load this game.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, awayFoulTroublePlayers.map((player) => /* @__PURE__ */ React.createElement("div", { key: `away-foul-trouble-${player.id}`, className: "flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-8 h-8 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0" }, player.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: player.pictureUrl, alt: player.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-200" }, (player.name || "?").slice(0, 1).toUpperCase())), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "text-[11px] font-bold text-white truncate" }, "#", player.number, " ", player.name), /* @__PURE__ */ React.createElement("div", { className: `text-[10px] font-bold ${player.fouls >= 5 ? "text-red-300" : player.isHighRiskFoulPace || player.isThreeFoulConcern ? "text-amber-300" : "text-slate-400"}` }, player.fouls >= 5 ? "Disqualified" : player.isHighRiskFoulPace ? "At foul-out pace over remaining quarters" : player.isThreeFoulConcern ? "3+ fouls: concern" : "Foul tracking"), /* @__PURE__ */ React.createElement("div", { className: "mt-1 flex flex-wrap gap-1" }, Object.entries(player.quarterFouls || {}).filter(([, value]) => Number(value || 0) > 0).sort((a, b) => Number(a[0]) - Number(b[0])).map(([quarter, value]) => /* @__PURE__ */ React.createElement("span", { key: `away-foul-q-${player.id}-${quarter}`, className: `inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-black border ${Number(value || 0) >= 2 ? "border-amber-500/60 bg-amber-500/15 text-amber-300" : "border-slate-700 bg-slate-900 text-slate-300"}` }, `${getPeriodLabel(Number(quarter))}: ${Number(value || 0)}PF`))))), /* @__PURE__ */ React.createElement("span", { className: `shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black border ${player.fouls >= 5 ? "border-red-500/50 bg-red-500/15 text-red-300" : "border-amber-500/50 bg-amber-500/15 text-amber-300"}` }, player.fouls >= 5 ? `${player.fouls} PF` : `${player.fouls} PF (${player.allowedPerRemainingPeriod.toFixed(2)}/Q left)`)))))))), canOperateLive && /* @__PURE__ */ React.createElement("div", { className: "col-span-12 mt-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex justify-end" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center justify-end gap-2" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: handleDiscardLiveMatch,
+        disabled: !canAdminControlClock,
+        title: !canAdminControlClock ? "Only admin can discard a match." : void 0,
+        className: "bg-red-600/15 hover:bg-red-600/25 border border-red-500/40 text-red-300 font-bold py-1.5 px-3 rounded-lg text-[11px] transition-all inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+      },
+      /* @__PURE__ */ React.createElement(Icons.Trash, null),
+      "Discard Live Match"
+    ))))))), activeTab === "teams" && /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, selectedRosterTeam && selectedRosterAthlete ? /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 bg-slate-955 p-3 rounded-xl border border-slate-850" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setSelectedRosterPlayer(null),
+        className: "px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 text-xs font-bold cursor-pointer"
+      },
+      "Back To Roster"
+    ), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "Player Profile")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-xl space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col md:flex-row gap-4 md:items-stretch md:justify-between" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, selectedRosterAthlete.pictureUrl ? /* @__PURE__ */ React.createElement(
+      "img",
+      {
+        src: selectedRosterAthlete.pictureUrl,
+        alt: selectedRosterAthlete.name,
+        className: "w-28 h-28 md:w-32 md:h-32 rounded-2xl object-cover border border-slate-700"
+      }
+    ) : /* @__PURE__ */ React.createElement("div", { className: "w-28 h-28 md:w-32 md:h-32 rounded-2xl border border-slate-700 bg-slate-950 text-slate-300 flex items-center justify-center text-3xl font-black" }, (selectedRosterAthlete.name || "?").slice(0, 1).toUpperCase()), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] uppercase tracking-widest text-slate-500 font-bold" }, selectedRosterTeam.name), /* @__PURE__ */ React.createElement("div", { className: "flex items-start justify-between gap-2" }, /* @__PURE__ */ React.createElement("h3", { className: "text-lg md:text-xl font-black text-white leading-tight" }, "#", selectedRosterAthlete.number, " ", selectedRosterAthlete.name), isLoggedIn && canEditPlayers && /* @__PURE__ */ React.createElement("button", { onClick: () => handleStartAdvancedEditPlayer(selectedRosterPlayer.teamId, selectedRosterAthlete), className: "text-cyan-400 hover:text-cyan-300 p-1.5 rounded cursor-pointer shrink-0", title: "Edit player profile", "aria-label": "Edit player profile" }, /* @__PURE__ */ React.createElement("svg", { className: "w-4 h-4", fill: "currentColor", viewBox: "0 0 20 20" }, /* @__PURE__ */ React.createElement("path", { d: "M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" })))), /* @__PURE__ */ React.createElement("div", { className: "my-2 flex flex-wrap items-center justify-start gap-1.5" }, Array.isArray(selectedRosterAthlete.positions) && selectedRosterAthlete.positions.length > 0 ? selectedRosterAthlete.positions.map((pos) => /* @__PURE__ */ React.createElement("span", { key: `profile-pos-${selectedRosterAthlete.id}-${pos}`, className: "px-1.5 py-0.5 rounded-md text-[10px] font-black border border-cyan-500/35 bg-cyan-500/10 text-cyan-200 font-mono" }, pos)) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "No positions set")), /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-400" }, "Games Played: ", selectedRosterAthlete.gamesPlayed || 0), selectedRosterAthlete.writeup && /* @__PURE__ */ React.createElement("p", { className: "mt-2 text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap" }, selectedRosterAthlete.writeup))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-2 text-center font-mono md:w-[360px] lg:w-[420px]" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/95 border border-orange-500/40 rounded-lg py-2.5 flex flex-col justify-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "PTS"), /* @__PURE__ */ React.createElement("div", { className: "text-2xl md:text-3xl font-black text-orange-300 leading-none mt-1" }, selectedRosterAthleteAverages?.pts || "0.0")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/95 border border-emerald-500/35 rounded-lg py-2.5 flex flex-col justify-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "REB"), /* @__PURE__ */ React.createElement("div", { className: "text-2xl md:text-3xl font-black text-emerald-300 leading-none mt-1" }, selectedRosterAthleteAverages?.reb || "0.0")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/95 border border-blue-500/35 rounded-lg py-2.5 flex flex-col justify-center" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "AST"), /* @__PURE__ */ React.createElement("div", { className: "text-2xl md:text-3xl font-black text-blue-300 leading-none mt-1" }, selectedRosterAthleteAverages?.ast || "0.0")))), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/40 p-3" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2" }, "Season Averages"), /* @__PURE__ */ React.createElement("div", { className: "space-y-2 font-mono" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-6 gap-2 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-md py-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "STL"), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-black text-teal-300" }, selectedRosterAthleteAverages?.stl || "0.0")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-md py-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "BLK"), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-black text-violet-300" }, selectedRosterAthleteAverages?.blk || "0.0")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-md py-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "TO"), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-black text-amber-400" }, selectedRosterAthleteAverages?.to || "0.0")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-md py-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "FG M/A"), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-black text-emerald-400" }, `${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg2m_miss || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m_miss || 0)}`)), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-md py-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "3PT M/A"), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-black text-cyan-400" }, `${Number(selectedRosterAthlete?.totalStats?.fg3m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m_miss || 0)}`)), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-md py-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500" }, "FT%"), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-black text-pink-400" }, selectedRosterAthleteAverages?.ftPct || "0%")))))), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/40 p-3 space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] uppercase tracking-widest text-slate-500 font-bold" }, "Game History"), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 font-mono" }, "All Games")), selectedRosterAthleteRecentGames && selectedRosterAthleteRecentGames.length > 0 ? /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-lg border border-slate-800 bg-slate-950/20" }, /* @__PURE__ */ React.createElement("table", { className: "w-full min-w-[820px] text-[11px] font-mono text-slate-300" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-left" }, "Date"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-left" }, "Opp"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "Score"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, "FG M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, "3PT M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-red-400" }, "PF"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "GP"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60" }, selectedRosterAthleteRecentGames.map((game) => /* @__PURE__ */ React.createElement(
+      "tr",
+      {
+        key: `profile-last-game-${game.gameId}`,
+        className: "hover:bg-slate-900/30 cursor-pointer",
+        onClick: () => {
+          setActiveTab("history");
+          openHistoryGame(game.gameId);
+        },
+        onKeyDown: (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setActiveTab("history");
+            openHistoryGame(game.gameId);
+          }
+        },
+        role: "button",
+        tabIndex: 0,
+        title: "Open game details"
+      },
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-slate-400 whitespace-nowrap" }, game.date || "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 font-bold text-slate-200 whitespace-nowrap" }, "vs ", game.opponentName),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-slate-400 whitespace-nowrap" }, selectedRosterTeam.name, " ", game.teamScore, " - ", game.opponentScore),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center font-black text-orange-400" }, game.didPlay ? game.stats?.pts || 0 : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, game.didPlay ? `${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0) + Number(game.stats?.fg2m_miss || 0) + Number(game.stats?.fg3m_miss || 0)}` : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, game.didPlay ? `${Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg3m || 0) + Number(game.stats?.fg3m_miss || 0)}` : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, game.didPlay ? game.stats?.reb || 0 : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, game.didPlay ? game.stats?.ast || 0 : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, game.didPlay ? game.stats?.stl || 0 : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, game.didPlay ? game.stats?.blk || 0 : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, game.didPlay ? game.stats?.to || 0 : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-red-400" }, game.didPlay ? game.stats?.pf || 0 : "-"),
+      /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center font-black" }, game.didPlay ? /* @__PURE__ */ React.createElement("span", { className: "text-emerald-300" }, "Played") : /* @__PURE__ */ React.createElement("span", { className: "text-rose-300" }, "DNP"))
+    ))))) : /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 italic" }, "No completed games recorded for this team yet."))) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-955 p-4 rounded-xl border border-slate-850" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-base font-bold text-white font-sans" }, "Division Rosters")), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1.5 text-xs font-bold font-sans" }, isLoggedIn && /* @__PURE__ */ React.createElement("button", { onClick: handleExportRostersOnly, className: "bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer" }, "Export Templates"), isLoggedIn && /* @__PURE__ */ React.createElement("label", { className: "bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer" }, "Import Templates", /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".json", onChange: handleImportRostersOnly, className: "hidden" })), isLoggedIn && /* @__PURE__ */ React.createElement("label", { className: "bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded cursor-pointer transition-colors" }, "Import CSV Roster (Sheets)", /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".csv", onChange: handleImportCSV, className: "hidden" })), isLoggedIn && /* @__PURE__ */ React.createElement("button", { onClick: handleExportData, className: "bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer" }, "Export DB"), isLoggedIn && /* @__PURE__ */ React.createElement("label", { className: "bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer" }, "Restore DB", /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".json", onChange: handleImportData, className: "hidden" })), isLoggedIn && /* @__PURE__ */ React.createElement("label", { className: "bg-slate-900 px-3 py-1.5 rounded border border-slate-855 text-emerald-400 cursor-pointer font-bold" }, "Merge Matches", /* @__PURE__ */ React.createElement("input", { type: "file", accept: ".json", onChange: handleMergeData, className: "hidden" })))), /* @__PURE__ */ React.createElement("div", { className: "flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-xs font-bold" }, /* @__PURE__ */ React.createElement("div", { className: "flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setRosterViewMode("averages"),
+        className: `px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${rosterViewMode === "averages" ? "bg-orange-500 text-white shadow" : "text-slate-400"}`
+      },
+      "Per Game (Averages)"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setRosterViewMode("totals"),
+        className: `px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${rosterViewMode === "totals" ? "bg-orange-500 text-white shadow" : "text-slate-400"}`
+      },
+      "Accumulated Totals"
+    )), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 self-stretch sm:self-auto justify-end" }, isLoggedIn && /* @__PURE__ */ React.createElement("button", { onClick: () => setShowNewTeamModal(true), className: "bg-slate-900 hover:bg-slate-855 text-white px-3 py-2 rounded-xl border border-slate-800 cursor-pointer" }, "Create Team"), isLoggedIn && canEditPlayers && /* @__PURE__ */ React.createElement("button", { onClick: () => {
+      if (teams.length === 0) return;
+      setSelectedTeamIdForPlayer(teams[0].id);
+      setShowNewPlayerModal(true);
+    }, className: "bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl cursor-pointer" }, "Add Player"))), /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, teams.map((team) => {
+      const teamStats = compileTeamStatistics(team.players, team.id);
+      return /* @__PURE__ */ React.createElement("div", { key: team.id, className: "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-md" }, /* @__PURE__ */ React.createElement("div", { className: "p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between" }, /* @__PURE__ */ React.createElement("span", { className: "font-extrabold text-xs text-white flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: team.color } }), " ", team.name), isLoggedIn && /* @__PURE__ */ React.createElement("button", { onClick: () => handleDeleteTeam(team.id), className: "text-slate-500 hover:text-red-400 cursor-pointer" }, /* @__PURE__ */ React.createElement(Icons.Trash, null))), /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-[11px] min-w-[950px]" }, rosterViewMode === "averages" ? (
+        // PER GAME AVERAGES VIEW
+        /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/30 text-slate-400 font-mono border-b border-slate-855" }, /* @__PURE__ */ React.createElement("th", { className: "py-2 px-4" }, "No."), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-4" }, "Name"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "GP"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-orange-400" }, "PPG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, "FG M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, "3PT M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-pink-400 font-bold" }, "FT%"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-emerald-400" }, "RPG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-blue-400" }, "APG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-teal-400" }, "SPG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-violet-400" }, "BPG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-amber-500" }, "TOPG"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-red-400" }, "Foul/G"), isLoggedIn && /* @__PURE__ */ React.createElement("th", { className: "py-2 px-4 text-center" }, "Action"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-850/40 text-slate-300 font-medium font-mono" }, team.players.map((p) => {
+          const gp = p.gamesPlayed || 0;
+          const avgs = getAverages(p);
+          const isEditingPlayer = editingPlayer && editingPlayer.teamId === team.id && editingPlayer.playerId === p.id;
+          return /* @__PURE__ */ React.createElement("tr", { key: p.id, className: "hover:bg-slate-855/10" }, /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-4 font-bold text-slate-400" }, isEditingPlayer ? /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "text",
+              value: editingPlayer.number,
+              onChange: (e) => setEditingPlayer({ ...editingPlayer, number: e.target.value }),
+              className: "w-16 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono"
+            }
+          ) : /* @__PURE__ */ React.createElement(React.Fragment, null, "#", p.number)), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-4 font-bold text-white font-sans" }, isEditingPlayer ? /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "text",
+              value: editingPlayer.name,
+              onChange: (e) => setEditingPlayer({ ...editingPlayer, name: e.target.value }),
+              className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-sans"
+            }
+          ) : /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => setSelectedRosterPlayer({ teamId: team.id, playerId: p.id }),
+              className: "text-left text-white hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer"
+            },
+            p.name
+          )), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center" }, gp), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-orange-400" }, avgs.pts), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-emerald-400" }, `${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0)}/${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg2m_miss || 0) + Number(p.totalStats?.fg3m_miss || 0)}`), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-cyan-400" }, `${Number(p.totalStats?.fg3m || 0)}/${Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg3m_miss || 0)}`), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-pink-400" }, avgs.ftPct), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-emerald-300" }, avgs.reb), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-blue-300" }, avgs.ast), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-teal-400 font-mono" }, avgs.spg), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-violet-400 font-mono" }, avgs.bpg), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-amber-500" }, avgs.to), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-red-400" }, avgs.pf), isLoggedIn && /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-4 text-center" }, isEditingPlayer ? /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: handleSaveEditPlayer, className: "text-emerald-400 hover:text-emerald-300 text-[11px] font-bold cursor-pointer" }, "Save"), /* @__PURE__ */ React.createElement("button", { onClick: handleCancelEditPlayer, className: "text-slate-400 hover:text-slate-200 text-[11px] font-bold cursor-pointer" }, "Cancel")) : canEditPlayers ? /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => handleStartAdvancedEditPlayer(team.id, p), className: "text-cyan-400 hover:text-cyan-300 p-1 rounded cursor-pointer", title: "Advanced profile", "aria-label": "Advanced profile" }, /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("rect", { x: "3", y: "4", width: "18", height: "16", rx: "2" }), /* @__PURE__ */ React.createElement("circle", { cx: "9", cy: "10", r: "2" }), /* @__PURE__ */ React.createElement("path", { d: "M15 9h3M15 13h3M7 16c.8-1.2 2-2 3.5-2s2.7.8 3.5 2" }))), /* @__PURE__ */ React.createElement("button", { onClick: () => handleStartEditPlayer(team.id, p), className: "text-blue-400 hover:text-blue-300 p-1 rounded cursor-pointer", title: "Edit player", "aria-label": "Edit player" }, /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M12 20h9" }), /* @__PURE__ */ React.createElement("path", { d: "M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" }))), /* @__PURE__ */ React.createElement("button", { onClick: () => handleDeletePlayer(team.id, p.id), className: "text-slate-500 hover:text-red-400 cursor-pointer" }, /* @__PURE__ */ React.createElement(Icons.Trash, null))) : /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "-")));
+        }), /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/40 text-white font-sans font-bold border-t border-slate-700/80" }, /* @__PURE__ */ React.createElement("td", { className: "py-3 px-4 font-mono text-slate-450" }, "-"), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-4 text-amber-400 tracking-wider font-extrabold text-[12px] uppercase" }, "Team Averages"), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono" }, teamStats.totals.gp), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-orange-400" }, teamStats.avgs.pts), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-emerald-400" }, teamStats.shooters.fgMadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-cyan-400" }, teamStats.shooters.fg3MadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-pink-400" }, teamStats.shooters.ftPct), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-emerald-300" }, teamStats.avgs.reb), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-blue-300" }, teamStats.avgs.ast), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-teal-400" }, teamStats.avgs.stl), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-violet-400" }, teamStats.avgs.blk), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-amber-500" }, teamStats.avgs.to), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-red-400" }, teamStats.avgs.pf), isLoggedIn && /* @__PURE__ */ React.createElement("td", { className: "py-3 px-4 text-center font-mono" }, "-"))))
+      ) : (
+        // ACCUMULATED TOTALS VIEW
+        /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/30 text-slate-400 font-mono border-b border-slate-855" }, /* @__PURE__ */ React.createElement("th", { className: "py-2 px-4" }, "No."), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-4" }, "Name"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center" }, "GP"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, "FG (M/A)"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, "3P (M/A)"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-pink-400 font-bold" }, "FT (M/A)"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-emerald-400" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-blue-400" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-teal-400" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-violet-400" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-amber-500" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2 px-2 text-center text-red-400" }, "PF"), isLoggedIn && /* @__PURE__ */ React.createElement("th", { className: "py-2 px-4 text-center" }, "Action"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-850/40 text-slate-300 font-medium font-mono" }, team.players.map((p) => {
+          const gp = p.gamesPlayed || 0;
+          const ts = p.totalStats || {};
+          const fgMade = (ts.fg2m || 0) + (ts.fg3m || 0);
+          const fgAtt = fgMade + (ts.fg2m_miss || 0) + (ts.fg3m_miss || 0);
+          const fg3Att = (ts.fg3m || 0) + (ts.fg3m_miss || 0);
+          const ftAtt = (ts.ftm || 0) + (ts.ft_miss || 0);
+          const isEditingPlayer = editingPlayer && editingPlayer.teamId === team.id && editingPlayer.playerId === p.id;
+          return /* @__PURE__ */ React.createElement("tr", { key: p.id, className: "hover:bg-slate-855/10" }, /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-4 font-bold text-slate-400" }, isEditingPlayer ? /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "text",
+              value: editingPlayer.number,
+              onChange: (e) => setEditingPlayer({ ...editingPlayer, number: e.target.value }),
+              className: "w-16 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono"
+            }
+          ) : /* @__PURE__ */ React.createElement(React.Fragment, null, "#", p.number)), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-4 font-bold text-white font-sans" }, isEditingPlayer ? /* @__PURE__ */ React.createElement(
+            "input",
+            {
+              type: "text",
+              value: editingPlayer.name,
+              onChange: (e) => setEditingPlayer({ ...editingPlayer, name: e.target.value }),
+              className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-sans"
+            }
+          ) : /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => setSelectedRosterPlayer({ teamId: team.id, playerId: p.id }),
+              className: "text-left text-white hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer"
+            },
+            p.name
+          )), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center" }, gp), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-orange-400" }, ts.pts || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-emerald-400" }, fgMade, "/", fgAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-cyan-400" }, ts.fg3m || 0, "/", fg3Att), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center font-bold text-pink-400" }, ts.ftm || 0, "/", ftAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-emerald-300" }, ts.reb || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-blue-300" }, ts.ast || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-teal-400 font-mono" }, ts.stl || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-violet-400 font-mono" }, ts.blk || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-amber-500" }, ts.to || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-2 text-center text-red-400" }, ts.pf || 0), isLoggedIn && /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-4 text-center" }, isEditingPlayer ? /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: handleSaveEditPlayer, className: "text-emerald-400 hover:text-emerald-300 text-[11px] font-bold cursor-pointer" }, "Save"), /* @__PURE__ */ React.createElement("button", { onClick: handleCancelEditPlayer, className: "text-slate-400 hover:text-slate-200 text-[11px] font-bold cursor-pointer" }, "Cancel")) : canEditPlayers ? /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => handleStartAdvancedEditPlayer(team.id, p), className: "text-cyan-400 hover:text-cyan-300 p-1 rounded cursor-pointer", title: "Advanced profile", "aria-label": "Advanced profile" }, /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("rect", { x: "3", y: "4", width: "18", height: "16", rx: "2" }), /* @__PURE__ */ React.createElement("circle", { cx: "9", cy: "10", r: "2" }), /* @__PURE__ */ React.createElement("path", { d: "M15 9h3M15 13h3M7 16c.8-1.2 2-2 3.5-2s2.7.8 3.5 2" }))), /* @__PURE__ */ React.createElement("button", { onClick: () => handleStartEditPlayer(team.id, p), className: "text-blue-400 hover:text-blue-300 p-1 rounded cursor-pointer", title: "Edit player", "aria-label": "Edit player" }, /* @__PURE__ */ React.createElement("svg", { xmlns: "http://www.w3.org/2000/svg", width: "13", height: "13", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "M12 20h9" }), /* @__PURE__ */ React.createElement("path", { d: "M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" }))), /* @__PURE__ */ React.createElement("button", { onClick: () => handleDeletePlayer(team.id, p.id), className: "text-slate-500 hover:text-red-400 cursor-pointer" }, /* @__PURE__ */ React.createElement(Icons.Trash, null))) : /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "-")));
+        }), /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-955/60 text-white font-sans font-bold border-t border-slate-700/80" }, /* @__PURE__ */ React.createElement("td", { className: "py-3 px-4 font-mono text-slate-450" }, "-"), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-4 text-emerald-450 tracking-wider font-extrabold text-[12px] uppercase" }, "Team Totals"), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono" }, "-"), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-orange-400" }, teamStats.totals.pts), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-emerald-400" }, teamStats.totals.fg2m + teamStats.totals.fg3m, "/", teamStats.totals.fg2m + teamStats.totals.fg3m + teamStats.totals.fg2m_miss + teamStats.totals.fg3m_miss), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-cyan-400" }, teamStats.totals.fg3m, "/", teamStats.totals.fg3m + teamStats.totals.fg3m_miss), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-pink-400" }, teamStats.totals.ftm, "/", teamStats.totals.ftm + teamStats.totals.ft_miss), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-emerald-300" }, teamStats.totals.reb), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-blue-300" }, teamStats.totals.ast), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-teal-400" }, teamStats.totals.stl), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-violet-400" }, teamStats.totals.blk), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-amber-500" }, teamStats.totals.to), /* @__PURE__ */ React.createElement("td", { className: "py-3 px-2 text-center font-mono text-red-400" }, teamStats.totals.pf), isLoggedIn && /* @__PURE__ */ React.createElement("td", { className: "py-3 px-4 text-center font-mono" }, "-"))))
+      ))));
+    })))), activeTab === "home" && (() => {
+      const recentGames = games.slice().sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a)).slice(0, 8);
+      const homeLeaderDefs = [
+        { id: "pts", label: "PTS", full: "Points", color: "#f97316" },
+        { id: "reb", label: "REB", full: "Rebounds", color: "#3b82f6" },
+        { id: "ast", label: "AST", full: "Assists", color: "#10b981" },
+        { id: "stl", label: "STL", full: "Steals", color: "#a855f7" },
+        { id: "blk", label: "BLK", full: "Blocks", color: "#ef4444" },
+        { id: "fg3m", label: "3PM", full: "3-Pointers Made", color: "#0ea5e9" },
+        { id: "ftm", label: "FTM", full: "Free Throws Made", color: "#ec4899" },
+        { id: "fgPct", label: "FG%", full: "Field Goal %", color: "#f59e0b", isPct: true },
+        { id: "fg3Pct", label: "3P%", full: "Three-Point %", color: "#06b6d4", isPct: true },
+        { id: "ftPct", label: "FT%", full: "Free Throw %", color: "#d946ef", isPct: true },
+        { id: "to", label: "TO", full: "Turnovers", color: "#64748b" },
+        { id: "pf", label: "PF", full: "Fouls", color: "#f43f5e" }
+      ];
+      const eligiblePlayers = leaguePlayerPool.filter((p) => Number(p.gamesPlayed || 0) > 0);
+      return /* @__PURE__ */ React.createElement("div", { className: "space-y-5" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto pb-1 -mx-1" }, /* @__PURE__ */ React.createElement("div", { className: "flex gap-2.5 px-1", style: { minWidth: "max-content" } }, recentGames.map((g) => {
+        const winA = g.teamAScore > g.teamBScore;
+        const winB = g.teamBScore > g.teamAScore;
+        const tA = teams.find((t) => t.id === g.teamAId);
+        const tB = teams.find((t) => t.id === g.teamBId);
+        const dateStr = String(g.date || "").split("T")[0];
+        return /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: g.id,
+            type: "button",
+            onClick: () => {
+              setSelectedHistoryGameId(g.id);
+              setActiveTab("history");
+            },
+            className: "flex-shrink-0 w-40 bg-slate-900/80 border border-slate-800 rounded-xl p-3 text-left hover:border-slate-600 hover:bg-slate-800/80 transition-all cursor-pointer"
+          },
+          /* @__PURE__ */ React.createElement("p", { className: "text-[9px] font-semibold text-slate-500 uppercase tracking-wider mb-2" }, dateStr),
+          /* @__PURE__ */ React.createElement("div", { className: "space-y-1.5" }, [{ team: tA, score: g.teamAScore, win: winA }, { team: tB, score: g.teamBScore, win: winB }].map((row, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: `flex items-center justify-between gap-2 ${row.win ? "" : "opacity-50"}` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5 min-w-0" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full flex-shrink-0", style: { background: row.team?.color || "#64748b" } }), /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-bold text-white truncate" }, row.team?.name || "\u2014")), /* @__PURE__ */ React.createElement("span", { className: `text-[13px] font-black tabular-nums flex-shrink-0 ${row.win ? "text-white" : "text-slate-400"}` }, row.score))))
+        );
+      }))), (() => {
+        const heroGames = recentGames.slice(0, 4);
+        heroGamesCountRef.current = heroGames.length;
+        if (!heroGames.length) return null;
+        const safeIdx = Math.min(heroCarouselIdx, heroGames.length - 1);
+        const hg = heroGames[safeIdx];
+        const hgTeamA = teams.find((t) => t.id === hg.teamAId);
+        const hgTeamB = teams.find((t) => t.id === hg.teamBId);
+        const hgWinA = hg.teamAScore > hg.teamBScore;
+        const hgWinB = hg.teamBScore > hg.teamAScore;
+        const hasCustomCover = Number(hg.socialCoverLen || 0) > 0;
+        const colorA = hgTeamA?.color || "#334155";
+        const colorB = hgTeamB?.color || "#334155";
+        const rawWriteup = String(hg.gameWriteup || "").trim();
+        const titleMatch = rawWriteup.match(/^\*\*(.+?)\*\*/);
+        const writeupTitle = titleMatch ? titleMatch[1].trim() : null;
+        const writeupBody = titleMatch ? rawWriteup.slice(titleMatch[0].length).trim() : rawWriteup;
+        const heroPotg = heroGames.map((game) => {
+          const serverEntry = heroPotgData[game.id];
+          if (serverEntry) return { potg: serverEntry.potg, potgWriteup: serverEntry.potgWriteup };
+          const tA = teams.find((t) => t.id === game.teamAId);
+          const tB = teams.find((t) => t.id === game.teamBId);
+          if (game._detailLoaded) {
+            const p = getPlayerOfTheGame(game, tA, tB);
+            if (p) return { potg: p, potgWriteup: String(game.potgWriteup || "").trim() };
+          }
+          const manualId = String(game.manualPotgPlayerId || "").trim();
+          if (manualId) {
+            const player = teams.flatMap((t) => t.players || []).find((p) => p.id === manualId);
+            const playerTeam = teams.find((t) => (t.players || []).some((p) => p.id === manualId));
+            if (player) return { potg: { name: player.name, pictureUrl: player.pictureUrl || "", teamName: playerTeam?.name || "", teamColor: playerTeam?.color || "#f97316", stats: null }, potgWriteup: String(game.potgWriteup || "").trim() };
+          }
+          return { potg: null, potgWriteup: "" };
+        });
+        return /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-[1fr_260px] gap-2.5" }, /* @__PURE__ */ React.createElement("div", { className: "relative rounded-2xl overflow-hidden h-[50vh] sm:h-full" }, /* @__PURE__ */ React.createElement("style", null, `@keyframes heroZoom{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}.hero-zoom{animation:heroZoom 12s ease-in-out infinite;transform-origin:center center}`), hasCustomCover ? /* @__PURE__ */ React.createElement("img", { key: safeIdx, src: `/api/social-cover/${encodeURIComponent(hg.id)}/photo.jpg`, className: "absolute inset-0 w-full h-full object-cover hero-zoom", alt: "" }) : /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 hero-zoom", style: { background: `linear-gradient(135deg, ${colorA}55 0%, #020817 40%, #020817 60%, ${colorB}55 100%)` } }), /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 pointer-events-none", style: { background: `radial-gradient(ellipse at 28% 52%, ${colorA}70 0%, transparent 52%), radial-gradient(ellipse at 72% 52%, ${colorB}70 0%, transparent 52%)` } }), /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 pointer-events-none", style: { background: "radial-gradient(ellipse at 50% 48%, rgba(0,0,0,0.38) 0%, transparent 65%)" } }), /* @__PURE__ */ React.createElement("div", { className: "absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/70 to-transparent pointer-events-none" }), /* @__PURE__ */ React.createElement("div", { className: "absolute inset-x-0 bottom-0 h-64 pointer-events-none", style: { background: "linear-gradient(to top, rgba(0,0,0,0.97) 0%, rgba(0,0,0,0.82) 35%, rgba(0,0,0,0.45) 65%, transparent 100%)" } }), /* @__PURE__ */ React.createElement("div", { className: "absolute inset-0 flex items-center justify-center" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-8" }, /* @__PURE__ */ React.createElement("div", { className: `text-right transition-opacity ${hgWinB ? "opacity-35" : ""}` }, /* @__PURE__ */ React.createElement("p", { className: "text-xs font-black text-white uppercase tracking-widest mb-2", style: { textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorA}90` } }, hg.teamAName), /* @__PURE__ */ React.createElement("p", { className: "text-7xl font-black text-white tabular-nums leading-none", style: { textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorA}80` } }, hg.teamAScore)), /* @__PURE__ */ React.createElement("div", { className: "text-center" }, /* @__PURE__ */ React.createElement("div", { className: "w-px h-12 bg-white/20 mx-auto mb-1", style: { boxShadow: `0 0 8px rgba(255,255,255,0.15)` } }), /* @__PURE__ */ React.createElement("span", { className: "text-[8px] font-black uppercase tracking-widest", style: { color: "rgba(255,255,255,0.35)", textShadow: "0 1px 4px rgba(0,0,0,0.8)" } }, "Final")), /* @__PURE__ */ React.createElement("div", { className: `text-left transition-opacity ${hgWinA ? "opacity-35" : ""}` }, /* @__PURE__ */ React.createElement("p", { className: "text-xs font-black text-white uppercase tracking-widest mb-2", style: { textShadow: `0 1px 3px rgba(0,0,0,0.9), 0 0 20px ${colorB}90` } }, hg.teamBName), /* @__PURE__ */ React.createElement("p", { className: "text-7xl font-black text-white tabular-nums leading-none", style: { textShadow: `1px 2px 0 rgba(0,0,0,0.8), 2px 4px 0 rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.7), 0 0 60px ${colorB}80` } }, hg.teamBScore)))), /* @__PURE__ */ React.createElement("div", { className: "absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none" }, /* @__PURE__ */ React.createElement("span", { className: "text-[9px] font-bold uppercase tracking-widest text-white/50" }, String(hg.date || "").split("T")[0]), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1.5 pointer-events-auto" }, heroGames.map((_, i) => /* @__PURE__ */ React.createElement("button", { key: i, type: "button", onClick: () => setHeroCarouselIdx(i), className: `h-1 rounded-full transition-all cursor-pointer ${i === safeIdx ? "w-5 bg-white" : "w-1.5 bg-white/30 hover:bg-white/50"}` })))), /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-0 left-0 right-0 px-5 pb-4" }, writeupTitle && /* @__PURE__ */ React.createElement("p", { className: "text-sm font-black text-white mb-1 drop-shadow-lg" }, writeupTitle), writeupBody && /* @__PURE__ */ React.createElement("p", { className: "hidden sm:line-clamp-2 text-[11px] text-slate-300 leading-relaxed mb-2.5" }, writeupBody), /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => {
+              setSelectedHistoryGameId(hg.id);
+              setActiveTab("history");
+            },
+            className: "text-[10px] font-black text-orange-400 hover:text-orange-300 transition-colors cursor-pointer uppercase tracking-wider"
+          },
+          "Full Game Recap \u2192"
+        )), heroGames.length > 1 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setHeroCarouselIdx((p) => Math.max(0, p - 1)), className: `absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === 0 ? "opacity-20 pointer-events-none" : ""}` }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "m15 18-6-6 6-6" }))), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setHeroCarouselIdx((p) => Math.min(heroGames.length - 1, p + 1)), className: `absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/10 flex items-center justify-center text-white hover:bg-black/60 transition-all cursor-pointer ${safeIdx === heroGames.length - 1 ? "opacity-20 pointer-events-none" : ""}` }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.5", strokeLinecap: "round", strokeLinejoin: "round" }, /* @__PURE__ */ React.createElement("path", { d: "m9 18 6-6-6-6" }))))), /* @__PURE__ */ React.createElement("div", { className: "hidden sm:flex flex-col gap-2" }, heroGames.map((game, idx) => {
+          const { potg, potgWriteup } = heroPotg[idx] || {};
+          const tA = teams.find((t) => t.id === game.teamAId);
+          const tB = teams.find((t) => t.id === game.teamBId);
+          const isActive = idx === safeIdx;
+          const accent = potg?.teamColor || "#475569";
+          const statsLine = potg?.statsLine || (potg?.stats ? `${potg.stats.pts ?? "\u2014"} PTS \xB7 ${potg.stats.reb ?? "\u2014"} REB \xB7 ${potg.stats.ast ?? "\u2014"} AST` : null);
+          return /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              key: game.id,
+              type: "button",
+              onClick: () => setHeroCarouselIdx(idx),
+              className: "relative rounded-xl overflow-hidden text-left transition-all cursor-pointer w-full",
+              style: { background: isActive ? "#0d1424" : "#080d18", border: `1px solid ${isActive ? accent + "60" : "rgba(51,65,85,0.4)"}` }
+            },
+            /* @__PURE__ */ React.createElement("div", { className: "absolute inset-y-0 left-0 w-[3px]", style: { background: isActive ? accent : "transparent" } }),
+            /* @__PURE__ */ React.createElement("div", { className: "flex flex-col h-full px-3 py-3 gap-2" }, potg ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-xs font-black text-white leading-tight" }, potg.name), statsLine && /* @__PURE__ */ React.createElement("p", { className: "text-[9px] font-semibold mt-0.5", style: { color: accent } }, statsLine)), potgWriteup && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-slate-300 leading-relaxed line-clamp-[6] flex-1" }, potgWriteup)) : /* @__PURE__ */ React.createElement("p", { className: "text-[9px] text-slate-600 italic" }, "No writeup recorded"))
+          );
+        })));
+      })(), (() => {
+        const leaderCards = homeLeaderDefs.map((def) => {
+          const leader = eligiblePlayers.slice().sort((a, b) => parseFloat(b.avg?.[def.id] || 0) - parseFloat(a.avg?.[def.id] || 0))[0];
+          const rawVal = leader ? leader.avg?.[def.id] : null;
+          const val = rawVal == null ? "\u2014" : def.isPct ? String(rawVal) : parseFloat(rawVal).toFixed(1);
+          const team = leader ? teams.find((t) => t.id === leader.teamId) : null;
+          const hasPic = Boolean(leader && String(leader.pictureUrl || "").trim());
+          const catColor = def.color;
+          const teamColor = team?.color || "#475569";
+          return { def, leader, val, team, hasPic, catColor, teamColor };
+        });
+        const isMobileCarousel = window.innerWidth < 640;
+        const CARD_W = isMobileCarousel ? 140 : 200;
+        const GAP = isMobileCarousel ? 10 : 14;
+        const DURATION = homeLeaderDefs.length * 2.8;
+        const avatarSz = isMobileCarousel ? 52 : 72;
+        const renderCard = ({ def, leader, val, team, hasPic, catColor, teamColor }, keyPrefix) => /* @__PURE__ */ React.createElement("div", { key: `${keyPrefix}-${def.id}`, className: `relative flex flex-col items-center ${isMobileCarousel ? "pt-3 pb-3" : "pt-4 pb-4"} rounded-2xl overflow-hidden flex-shrink-0`, style: { background: "#080d18", width: `${CARD_W}px` } }, /* @__PURE__ */ React.createElement("div", { className: "absolute inset-x-0 top-0 h-40 pointer-events-none", style: { background: `radial-gradient(ellipse at 50% 30%, ${catColor}30 0%, transparent 68%)` } }), /* @__PURE__ */ React.createElement("div", { className: "relative flex items-center gap-1.5 mb-2" }, /* @__PURE__ */ React.createElement("div", { className: "h-px w-3", style: { background: catColor, opacity: 0.6 } }), /* @__PURE__ */ React.createElement("span", { className: `${isMobileCarousel ? "text-[7px]" : "text-[8px]"} font-black uppercase tracking-widest`, style: { color: catColor, opacity: 0.7 } }, "Leader"), /* @__PURE__ */ React.createElement("div", { className: "h-px w-3", style: { background: catColor, opacity: 0.6 } })), /* @__PURE__ */ React.createElement("div", { className: "relative mb-1" }, /* @__PURE__ */ React.createElement("div", { className: "rounded-full overflow-hidden", style: { width: avatarSz, height: avatarSz, boxShadow: `0 0 0 2px ${catColor}, 0 0 16px ${catColor}70, 0 0 36px ${catColor}35` } }, hasPic ? /* @__PURE__ */ React.createElement("img", { src: leader.pictureUrl, className: "w-full h-full object-cover object-top", alt: leader?.name }) : /* @__PURE__ */ React.createElement("div", { className: "w-full h-full flex items-center justify-center font-black text-white", style: { fontSize: isMobileCarousel ? 14 : 18, background: `linear-gradient(135deg, ${teamColor}80, #0d1424)` } }, (leader?.name || "?")[0]))), /* @__PURE__ */ React.createElement("p", { className: `relative ${isMobileCarousel ? "text-[10px]" : "text-[11px]"} font-black text-white text-center mt-2 leading-tight px-2 w-full truncate` }, leader?.name || "\u2014"), /* @__PURE__ */ React.createElement("div", { className: "relative mt-1 px-1.5 py-0.5 rounded-full", style: { background: `${teamColor}30`, border: `1px solid ${teamColor}50` } }, /* @__PURE__ */ React.createElement("p", { className: "text-[7px] font-bold uppercase tracking-widest", style: { color: teamColor } }, team?.name || "")), /* @__PURE__ */ React.createElement("p", { className: "relative font-black tabular-nums leading-none mt-2", style: { fontSize: isMobileCarousel ? 28 : 38, color: catColor, textShadow: `0 0 12px ${catColor}90, 0 0 32px ${catColor}60, 0 2px 8px rgba(0,0,0,0.8)` } }, val), /* @__PURE__ */ React.createElement("p", { className: `relative ${isMobileCarousel ? "text-[8px]" : "text-[10px]"} font-black uppercase tracking-wider mt-1`, style: { color: catColor, opacity: 0.85 } }, def.full));
+        return /* @__PURE__ */ React.createElement("div", { className: "overflow-hidden" }, /* @__PURE__ */ React.createElement("style", null, `@keyframes leaderScroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}.leader-track{animation:leaderScroll ${DURATION}s linear infinite}.leader-track:hover{animation-play-state:paused}`), /* @__PURE__ */ React.createElement("div", { className: "flex leader-track", style: { gap: `${GAP}px`, width: "max-content" } }, leaderCards.map((c) => renderCard(c, "a")), leaderCards.map((c) => renderCard(c, "b"))));
+      })());
+    })(), activeTab === "standings" && /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("h3", { className: "text-xl font-bold text-white font-sans" }, "Team Standings"), availableSeasons.length > 1 && /* @__PURE__ */ React.createElement("div", { className: "flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5" }, availableSeasons.map((s) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: `season-tab-${s}`,
+        onClick: () => setSelectedSeason(s),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${selectedSeason === s ? "bg-orange-500 text-white shadow" : "text-slate-400 hover:text-slate-200"}`
+      },
+      s === CURRENT_SEASON ? `S${s} \u2605` : `S${s}`
+    ))), availableSeasons.length <= 1 && /* @__PURE__ */ React.createElement("span", { className: "text-[11px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2.5 py-1 rounded-lg" }, "Season ", selectedSeason)), /* @__PURE__ */ React.createElement("div", { className: "flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5 w-fit" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setStandingsStatMode("totals"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${standingsStatMode === "totals" ? "bg-orange-500 text-white shadow" : "text-slate-400"}`
+      },
+      "Accumulated"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setStandingsStatMode("perGame"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${standingsStatMode === "perGame" ? "bg-orange-500 text-white shadow" : "text-slate-400"}`
+      },
+      "Per Game"
+    ))), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400" }, "Regular season games only. Ordered by wins, then quotient (pointsFor / pointsAgainst) for tie-breaking."), games.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-center py-8 text-xs text-slate-500 italic bg-slate-900 rounded-xl border border-slate-800" }, "No completed games yet. Standings will appear once games are logged.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full min-w-[760px] text-xs font-mono" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3 text-left" }, "Rank"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3 text-left" }, "Team"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3 text-center" }, "W"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3 text-center" }, "L"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3 text-center" }, standingsStatMode === "perGame" ? "PPG" : "PF"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3 text-center" }, standingsStatMode === "perGame" ? "PAPG" : "PA"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3 text-center" }, "Quotient"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60 bg-slate-950/20 text-slate-200" }, teamStandings.map((row, idx) => /* @__PURE__ */ React.createElement("tr", { key: `standings-${row.id}`, className: "hover:bg-slate-855/20" }, /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-3 font-black text-orange-300" }, "#", idx + 1), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-3 font-bold" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: row.color || "#94a3b8" } }), row.name)), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-3 text-center font-black text-emerald-400" }, row.wins), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-3 text-center font-black text-red-400" }, row.losses), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-3 text-center" }, standingsStatMode === "perGame" ? (row.pointsFor / Math.max(1, row.gamesPlayed || 0)).toFixed(1) : row.pointsFor), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-3 text-center" }, standingsStatMode === "perGame" ? (row.pointsAgainst / Math.max(1, row.gamesPlayed || 0)).toFixed(1) : row.pointsAgainst), /* @__PURE__ */ React.createElement("td", { className: "py-2.5 px-3 text-center font-black text-cyan-300" }, Number.isFinite(row.quotient) ? row.quotient.toFixed(3) : "INF"))))))), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-3 py-2 border-b border-slate-800 bg-slate-950/80" }, /* @__PURE__ */ React.createElement("h4", { className: "text-[11px] font-extrabold uppercase tracking-widest text-slate-300" }, "Stat Leaders By Team")), /* @__PURE__ */ React.createElement("div", { className: "p-3 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-1.5" }, standingsLeaderDefs.map((def) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: `standings-leader-tab-${def.id}`,
+        onClick: () => setSelectedStandingsLeaderStat(def.id),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer border ${selectedStandingsLeaderStat === def.id ? "bg-orange-500 text-white border-orange-400 shadow" : "bg-slate-950/80 text-slate-400 border-slate-800 hover:text-slate-200"}`
+      },
+      def.tabLabel || def.label
+    ))), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/20 p-3" }, selectedStandingsLeader ? /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "text-sm font-black text-orange-300 tracking-wide" }, selectedStandingsLeader.label), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] uppercase tracking-[0.2em] text-slate-500" }, standingsStatMode === "perGame" ? "Per Game" : "Accumulated")), /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, selectedStandingsLeader.bars.length > 0 ? selectedStandingsLeader.bars.map((team, index) => /* @__PURE__ */ React.createElement("div", { key: `leader-bar-${selectedStandingsLeader.id}-${team.id}-${standingsBarsCycle}`, className: "grid grid-cols-[1fr_auto] items-center gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "h-3 overflow-hidden rounded-full border border-slate-800 bg-slate-950/80" }, /* @__PURE__ */ React.createElement(
+      "span",
+      {
+        className: "block h-full rounded-full transition-[width] duration-700 ease-out",
+        style: {
+          width: standingsBarsVisible ? `${team.width}%` : "0%",
+          backgroundColor: team.color,
+          opacity: team.id === selectedStandingsLeader.teamId ? 1 : 0.74,
+          transitionDelay: `${index * 70}ms`
+        },
+        title: `${team.name}: ${team.value.toFixed(1)}`
+      }
+    )), /* @__PURE__ */ React.createElement("span", { className: "text-right text-[10px] font-black text-slate-300" }, team.value.toFixed(1)))) : /* @__PURE__ */ React.createElement("div", { className: "h-3 w-full rounded-full bg-slate-800/80" }))) : /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 italic" }, "No stat leaders available.")))), playoffBracket && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-4 py-3 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between" }, /* @__PURE__ */ React.createElement("h4", { className: "text-[11px] font-extrabold uppercase tracking-widest text-slate-300" }, hasPlayoffGames ? "Playoff Bracket" : "Playoff Picture"), !hasPlayoffGames && /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 italic" }, "Projected \xB7 based on current standings")), /* @__PURE__ */ React.createElement("div", { className: "p-4 space-y-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2" }, "Semifinals \xB7 Twice to Beat"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, [
+      { label: "Semi A", highSeed: playoffBracket.seeds[0], lowSeed: playoffBracket.seeds[3], series: playoffBracket.semiA },
+      { label: "Semi B", highSeed: playoffBracket.seeds[1], lowSeed: playoffBracket.seeds[2], series: playoffBracket.semiB }
+    ].map(({ label, highSeed, lowSeed, series }) => {
+      if (!highSeed || !lowSeed) return null;
+      const highIdx = teamStandings.findIndex((t) => t.id === highSeed.id);
+      const lowIdx = teamStandings.findIndex((t) => t.id === lowSeed.id);
+      const highAdvanced = series?.winnerId === highSeed.id;
+      const lowAdvanced = series?.winnerId === lowSeed.id;
+      const isComplete = Boolean(series?.winnerId);
+      return /* @__PURE__ */ React.createElement("div", { key: label, className: "bg-slate-950/60 rounded-xl border border-slate-800 overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-3 py-1.5 bg-slate-950/80 border-b border-slate-800" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-bold uppercase tracking-widest text-slate-500" }, label)), [
+        { team: highSeed, idx: highIdx, wins: series?.highWins || 0, winsNeeded: 1, advanced: highAdvanced, isHigh: true },
+        { team: lowSeed, idx: lowIdx, wins: series?.lowWins || 0, winsNeeded: 2, advanced: lowAdvanced, isHigh: false }
+      ].map(({ team, idx, wins, winsNeeded, advanced, isHigh }) => /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: team.id,
+          className: `flex items-center justify-between px-3 py-2.5 gap-2 border-b border-slate-800/50 last:border-b-0 ${advanced ? "bg-emerald-500/5" : isComplete && !advanced ? "opacity-40" : ""}`
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 min-w-0" }, /* @__PURE__ */ React.createElement("span", { className: `text-[10px] font-black ${isHigh ? "text-orange-300" : "text-slate-500"}` }, "#", idx + 1), /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: team.color || "#94a3b8" } }), /* @__PURE__ */ React.createElement("span", { className: "text-xs font-bold text-slate-200 truncate" }, team.name), isHigh && !hasPlayoffGames && /* @__PURE__ */ React.createElement("span", { className: "text-[9px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded" }, "2\xD7BEAT"), advanced && /* @__PURE__ */ React.createElement("span", { className: "text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded" }, "ADV")),
+        hasPlayoffGames ? /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1 flex-shrink-0" }, Array.from({ length: winsNeeded }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: `w-3 h-3 rounded-full border ${i < wins ? "bg-emerald-500 border-emerald-400" : "bg-transparent border-slate-600"}` })), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-300 ml-1" }, wins)) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 flex-shrink-0" }, "needs ", winsNeeded, "W")
+      )), hasPlayoffGames && series?.results?.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "px-3 pb-2 pt-1 flex flex-col gap-0.5" }, series.results.map((r, i) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: r.id || i,
+          onClick: () => {
+            if (r.id) {
+              setSelectedHistoryGameId(r.id);
+              setActiveTab("history");
+            }
+          },
+          className: `text-[10px] flex justify-between w-full px-1.5 py-0.5 rounded transition-colors ${r.id ? "text-slate-400 hover:text-orange-300 hover:bg-slate-800/60 cursor-pointer" : "text-slate-500 cursor-default"}`
+        },
+        /* @__PURE__ */ React.createElement("span", null, "Game ", i + 1),
+        /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, r.highScore, "\u2013", r.lowScore)
+      ))));
+    }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2" }, "Finals \xB7 Best of 3"), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/60 rounded-xl border border-slate-700 overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-3 py-1.5 bg-slate-950/80 border-b border-slate-800" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-bold uppercase tracking-widest text-orange-400" }, "Championship")), (() => {
+      const t1 = playoffBracket.finalTeam1;
+      const t2 = playoffBracket.finalTeam2;
+      const fs = playoffBracket.finalSeries;
+      const t1Wins = fs?.highWins || 0;
+      const t2Wins = fs?.lowWins || 0;
+      const champion = fs?.winnerId ? teamStandings.find((t) => t.id === fs.winnerId) : null;
+      const isReady = hasPlayoffGames && (playoffBracket.semiA?.winnerId || playoffBracket.semiB?.winnerId);
+      return /* @__PURE__ */ React.createElement(React.Fragment, null, [
+        { team: t1, wins: t1Wins, isChamp: champion?.id === t1?.id },
+        { team: t2, wins: t2Wins, isChamp: champion?.id === t2?.id }
+      ].map(({ team, wins, isChamp }) => team && /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: team.id,
+          className: `flex items-center justify-between px-3 py-3 gap-2 border-b border-slate-800/50 last:border-b-0 ${isChamp ? "bg-yellow-500/5" : fs?.winnerId && !isChamp ? "opacity-40" : ""}`
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 min-w-0" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full flex-shrink-0", style: { backgroundColor: team.color || "#94a3b8" } }), /* @__PURE__ */ React.createElement("span", { className: `text-xs font-bold truncate ${isChamp ? "text-yellow-300" : "text-slate-200"}` }, team.name), !isReady && !hasPlayoffGames && /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-600 italic" }, "(projected)"), isChamp && /* @__PURE__ */ React.createElement("span", { className: "text-[9px] font-black text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 px-1.5 py-0.5 rounded" }, "CHAMPION")),
+        hasPlayoffGames && /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1 flex-shrink-0" }, Array.from({ length: 2 }).map((_, i) => /* @__PURE__ */ React.createElement("span", { key: i, className: `w-3 h-3 rounded-full border ${i < wins ? "bg-yellow-500 border-yellow-400" : "bg-transparent border-slate-600"}` })), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-300 ml-1" }, wins))
+      )), hasPlayoffGames && fs?.results?.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "px-3 pb-2 pt-1 flex flex-col gap-0.5" }, fs.results.map((r, i) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: r.id || i,
+          onClick: () => {
+            if (r.id) {
+              setSelectedHistoryGameId(r.id);
+              setActiveTab("history");
+            }
+          },
+          className: `text-[10px] flex justify-between w-full px-1.5 py-0.5 rounded transition-colors ${r.id ? "text-slate-400 hover:text-orange-300 hover:bg-slate-800/60 cursor-pointer" : "text-slate-500 cursor-default"}`
+        },
+        /* @__PURE__ */ React.createElement("span", null, "Game ", i + 1),
+        /* @__PURE__ */ React.createElement("span", { className: "font-mono" }, r.highScore, "\u2013", r.lowScore)
+      ))));
+    })())))))), activeTab === "history" && /* @__PURE__ */ React.createElement("div", { className: "space-y-6" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-xl font-bold text-white font-sans" }, "Game Summary Browser"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400" }, selectedHistoryGameId ? "Focused game detail view." : "Select a game below to open the detailed summary box score.")), !selectedHistoryGameId && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/65 rounded-2xl border border-slate-800 p-4 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3" }, /* @__PURE__ */ React.createElement("h4", { className: "text-sm font-extrabold text-white uppercase tracking-wide" }, "History"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 flex-wrap" }, /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-400 font-mono" }, homepageGameSummaries.length, " game(s)"), isLoggedIn && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setIsScheduleModalOpen(true),
+        className: "px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-bold cursor-pointer"
+      },
+      "+ Schedule Game"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => gameLogImportInputRef.current?.click(),
+        className: "px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold cursor-pointer"
+      },
+      "Import Game Log"
+    ), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        ref: gameLogImportInputRef,
+        type: "file",
+        accept: ".json,application/json",
+        className: "hidden",
+        onChange: handleImportGameLog
+      }
+    )))), homepageGameSummaries.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 italic text-center py-6" }, "No games yet. Start and finish a match to record your first result.") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2 max-h-[calc(100vh-240px)] overflow-y-auto pr-1" }, homepageGameSummaries.map((game) => {
+      const winner = game.homeScore === game.awayScore ? "Draw" : game.homeScore > game.awayScore ? game.homeTeam : game.awayTeam;
+      const isSelected = selectedHistoryGameId === game.id;
+      return /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: game.id,
+          role: "button",
+          tabIndex: 0,
+          onClick: () => {
+            if (game.status === "LIVE") {
+              setActiveTab("live");
+              showToast("Opened active game. Continue adding stats from Games.", "info");
+              return;
+            }
+            openHistoryGame(game.id);
+          },
+          onKeyDown: (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            if (game.status === "LIVE") {
+              setActiveTab("live");
+              showToast("Opened active game. Continue adding stats from Games.", "info");
+              return;
+            }
+            openHistoryGame(game.id);
+          },
+          className: `w-full text-left bg-slate-950/60 border rounded-xl p-3 cursor-pointer transition-colors ${isSelected ? "border-orange-400/70" : "border-slate-800 hover:border-orange-400/60"}`
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: `px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${game.status === "LIVE" ? "bg-orange-500/20 text-orange-300 border border-orange-500/40" : game.status === "UPCOMING" ? "bg-sky-500/15 text-sky-300 border border-sky-500/30" : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"}` }, game.status), game.status === "ENDED" && Boolean(game.underReview) && /* @__PURE__ */ React.createElement("span", { className: "px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/40" }, "Stats Review Pending")), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono truncate" }, game.date)),
+        /* @__PURE__ */ React.createElement("div", { className: "mt-2 text-sm font-extrabold text-white" }, game.homeTeam, " ", /* @__PURE__ */ React.createElement("span", { className: "text-orange-400" }, game.homeScore), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono text-xs mx-1" }, "vs"), game.awayTeam, " ", /* @__PURE__ */ React.createElement("span", { className: "text-orange-400" }, game.awayScore)),
+        /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[11px] text-slate-400" }, "Home: ", game.homeTeam, " | Away: ", game.awayTeam, " | Winner: ", /* @__PURE__ */ React.createElement("span", { className: "text-slate-300 font-bold" }, winner)),
+        game.status === "ENDED" && game.writeupSnippet ? /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 text-[11px] text-slate-500 italic line-clamp-2" }, game.writeupSnippet, game.writeupSnippet.length >= 140 ? "..." : "") : null
+      );
+    }))), selectedHistoryGameId && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900/65 rounded-2xl border border-slate-800 p-3 shadow-2xl flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setSelectedHistoryGameId(null),
+        className: "px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-[11px] font-bold cursor-pointer"
+      },
+      "Back to Game List"
+    ), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 flex-wrap justify-end" }, isLoggedIn && /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => handleExportGameLog(selectedHistoryGame),
+        className: "px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold cursor-pointer"
+      },
+      "Export Game Log"
+    ))), !selectedHistoryGameId ? /* @__PURE__ */ React.createElement("p", { className: "text-center py-8 text-xs text-slate-500 italic bg-slate-900 rounded-xl border border-slate-800" }, "Pick a finished game from History to view details.") : games.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-center py-12 text-xs text-slate-500 italic bg-slate-900 rounded-xl border border-slate-800" }, "No official game box scores archived yet.") : !selectedHistoryGame ? /* @__PURE__ */ React.createElement("p", { className: "text-center py-8 text-xs text-slate-500 italic bg-slate-900 rounded-xl border border-slate-800" }, "Selected game is still live and has no detailed box score yet.") : [selectedHistoryGame].map((game) => {
+      const teamAObj = teams.find((t) => t.id === game.teamAId);
+      const teamBObj = teams.find((t) => t.id === game.teamBId);
+      const teamATotals = summarizeGameTeamStats(teamAObj, game);
+      const teamBTotals = summarizeGameTeamStats(teamBObj, game);
+      const teamAFgMade = (Number(teamATotals.fg2m) || 0) + (Number(teamATotals.fg3m) || 0);
+      const teamBFgMade = (Number(teamBTotals.fg2m) || 0) + (Number(teamBTotals.fg3m) || 0);
+      const teamAFgMiss = (Number(teamATotals.fg2m_miss) || 0) + (Number(teamATotals.fg3m_miss) || 0);
+      const teamBFgMiss = (Number(teamBTotals.fg2m_miss) || 0) + (Number(teamBTotals.fg3m_miss) || 0);
+      const teamAFgAtt = teamAFgMade + teamAFgMiss;
+      const teamBFgAtt = teamBFgMade + teamBFgMiss;
+      const teamA3PMade = Number(teamATotals.fg3m) || 0;
+      const teamB3PMade = Number(teamBTotals.fg3m) || 0;
+      const teamA3PMiss = Number(teamATotals.fg3m_miss) || 0;
+      const teamB3PMiss = Number(teamBTotals.fg3m_miss) || 0;
+      const teamA3PAtt = teamA3PMade + teamA3PMiss;
+      const teamB3PAtt = teamB3PMade + teamB3PMiss;
+      const teamAFtMade = Number(teamATotals.ftm) || 0;
+      const teamBFtMade = Number(teamBTotals.ftm) || 0;
+      const teamAFtMiss = Number(teamATotals.ft_miss) || 0;
+      const teamBFtMiss = Number(teamBTotals.ft_miss) || 0;
+      const teamAFtAtt = teamAFtMade + teamAFtMiss;
+      const teamBFtAtt = teamBFtMade + teamBFtMiss;
+      const historyComparisonRows = [
+        { label: "PTS", teamAValue: Math.round(Number(teamATotals.pts) || 0), teamBValue: Math.round(Number(teamBTotals.pts) || 0), teamACompare: Number(teamATotals.pts) || 0, teamBCompare: Number(teamBTotals.pts) || 0 },
+        { label: "FG", teamAValue: formatMadeAttempts(teamAFgMade, teamAFgAtt), teamBValue: formatMadeAttempts(teamBFgMade, teamBFgAtt), teamACompare: teamAFgMade, teamBCompare: teamBFgMade },
+        { label: "FG%", teamAValue: formatPercentOrNA(teamAFgMade, teamAFgAtt), teamBValue: formatPercentOrNA(teamBFgMade, teamBFgAtt), teamACompare: toPercent(teamAFgMade, teamAFgAtt), teamBCompare: toPercent(teamBFgMade, teamBFgAtt) },
+        { label: "3PT", teamAValue: formatMadeAttempts(teamA3PMade, teamA3PAtt), teamBValue: formatMadeAttempts(teamB3PMade, teamB3PAtt), teamACompare: teamA3PMade, teamBCompare: teamB3PMade },
+        { label: "3P%", teamAValue: formatPercentOrNA(teamA3PMade, teamA3PAtt), teamBValue: formatPercentOrNA(teamB3PMade, teamB3PAtt), teamACompare: toPercent(teamA3PMade, teamA3PAtt), teamBCompare: toPercent(teamB3PMade, teamB3PAtt) },
+        { label: "FT", teamAValue: formatMadeAttempts(teamAFtMade, teamAFtAtt), teamBValue: formatMadeAttempts(teamBFtMade, teamBFtAtt), teamACompare: teamAFtMade, teamBCompare: teamBFtMade },
+        { label: "REB", teamAValue: Math.round(Number(teamATotals.reb) || 0), teamBValue: Math.round(Number(teamBTotals.reb) || 0), teamACompare: Number(teamATotals.reb) || 0, teamBCompare: Number(teamBTotals.reb) || 0 },
+        { label: "AST", teamAValue: Math.round(Number(teamATotals.ast) || 0), teamBValue: Math.round(Number(teamBTotals.ast) || 0), teamACompare: Number(teamATotals.ast) || 0, teamBCompare: Number(teamBTotals.ast) || 0 },
+        { label: "STL", teamAValue: Math.round(Number(teamATotals.stl) || 0), teamBValue: Math.round(Number(teamBTotals.stl) || 0), teamACompare: Number(teamATotals.stl) || 0, teamBCompare: Number(teamBTotals.stl) || 0 },
+        { label: "BLK", teamAValue: Math.round(Number(teamATotals.blk) || 0), teamBValue: Math.round(Number(teamBTotals.blk) || 0), teamACompare: Number(teamATotals.blk) || 0, teamBCompare: Number(teamBTotals.blk) || 0 },
+        { label: "TO", teamAValue: Math.round(Number(teamATotals.to) || 0), teamBValue: Math.round(Number(teamBTotals.to) || 0), teamACompare: Number(teamATotals.to) || 0, teamBCompare: Number(teamBTotals.to) || 0 },
+        { label: "PF", teamAValue: Math.round(Number(teamATotals.pf) || 0), teamBValue: Math.round(Number(teamBTotals.pf) || 0), teamACompare: Number(teamATotals.pf) || 0, teamBCompare: Number(teamBTotals.pf) || 0 }
+      ];
+      const hasFrozenQuarterSnapshots = Array.isArray(game.periodSnapshots) && game.periodSnapshots.length > 0;
+      const historyFrozenQuarterStatsByQuarter = new Map((game.periodSnapshots || []).map((snapshot) => [Number(snapshot?.quarter || 0), snapshot]));
+      const historyLogQuarterStats = computeQuarterTeamStatsFromLog(game.gameLog || []);
+      const historyMaxQuarter = Math.max(
+        4,
+        ...historyLogQuarterStats.map((row) => Number(row?.quarter || 0)),
+        ...Array.from(historyFrozenQuarterStatsByQuarter.keys())
+      );
+      const quarterStats = Array.from({ length: historyMaxQuarter }, (_, idx) => idx + 1).map((quarter) => {
+        const frozen = historyFrozenQuarterStatsByQuarter.get(quarter) || null;
+        if (frozen?.quarterStats) {
+          return {
+            quarter,
+            teamA: cloneQuarterStats(frozen.quarterStats.teamA),
+            teamB: cloneQuarterStats(frozen.quarterStats.teamB)
+          };
+        }
+        const logRow = historyLogQuarterStats.find((row) => Number(row.quarter) === quarter) || null;
+        const baseTeamA = cloneQuarterStats(logRow?.teamA || createEmptyQuarterStats());
+        const baseTeamB = cloneQuarterStats(logRow?.teamB || createEmptyQuarterStats());
+        return {
+          quarter,
+          teamA: baseTeamA,
+          teamB: baseTeamB
+        };
+      });
+      const playerOfTheGame = getPlayerOfTheGame(game, teamAObj, teamBObj);
+      const topTeamAPerformers = getTopTeamPerformers(teamAObj, game, 3);
+      const topTeamBPerformers = getTopTeamPerformers(teamBObj, game, 3);
+      const teamALeaders = getGameTeamLeaders(teamAObj, game);
+      const teamBLeaders = getGameTeamLeaders(teamBObj, game);
+      const videoEmbedUrl = getYouTubeEmbedUrl(game.youtubeUrl || "");
+      const tabButtons = [
+        ...playerOfTheGame ? [{ id: "potg", label: "POTG" }] : [],
+        { id: "scoring", label: "Scoring" },
+        { id: "comparison", label: "Comparison" },
+        { id: "leaders", label: "Leaders" },
+        { id: "home", label: game.teamAName },
+        { id: "away", label: game.teamBName },
+        { id: "video", label: "Video" },
+        { id: "pbp", label: "Play-by-Play" },
+        ...canOperateLive ? [{ id: "game-info", label: "Game Info" }] : []
+      ];
+      return /* @__PURE__ */ React.createElement("div", { key: game.id, className: "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl p-4 space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-950 p-3.5 rounded-xl border border-slate-855 gap-2" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "font-extrabold text-xl md:text-2xl text-white block leading-tight" }, game.teamAName, " ", /* @__PURE__ */ React.createElement("span", { className: "text-orange-400 text-2xl md:text-3xl mx-1" }, game.teamAScore), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono text-sm md:text-base mx-1 align-middle" }, "vs"), game.teamBName, " ", /* @__PURE__ */ React.createElement("span", { className: "text-orange-400 text-2xl md:text-3xl mx-1" }, game.teamBScore)), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono mt-0.5 block" }, "Match ID: ", game.id)), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end" }, isLoggedIn && editingInlineDateId === game.id ? /* @__PURE__ */ React.createElement("form", { onSubmit: async (e) => {
+        e.preventDefault();
+        const newDate = editingInlineDateVal.trim();
+        if (!newDate) {
+          setEditingInlineDateId(null);
+          return;
+        }
+        try {
+          await apiRequest(`/api/games/${encodeURIComponent(game.id)}`, { method: "PATCH", body: JSON.stringify({ date: newDate }) });
+          setGames((prev) => prev.map((g) => g.id === game.id ? { ...g, date: newDate } : g));
+          setEditingInlineDateId(null);
+          showToast("Date updated.", "success");
+        } catch (err) {
+          showToast(err.message, "error");
+        }
+      }, className: "flex items-center gap-1" }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          autoFocus: true,
+          type: "date",
+          value: editingInlineDateVal,
+          onChange: (e) => setEditingInlineDateVal(e.target.value),
+          onKeyDown: (e) => e.key === "Escape" && setEditingInlineDateId(null),
+          className: "font-mono text-xs text-white bg-slate-950 border border-orange-500/50 rounded px-2 py-1"
+        }
+      ), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "text-emerald-400 font-bold text-xs px-1.5 py-1 rounded hover:bg-emerald-500/10 cursor-pointer" }, "\u2713"), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setEditingInlineDateId(null), className: "text-slate-500 text-xs px-1.5 py-1 rounded hover:bg-slate-800 cursor-pointer" }, "\u2715")) : /* @__PURE__ */ React.createElement(
+        "span",
+        {
+          className: `font-mono text-xs font-bold text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg ${isLoggedIn ? "cursor-pointer hover:border-slate-600 hover:text-slate-300" : ""}`,
+          onClick: isLoggedIn ? () => {
+            setEditingInlineDateId(game.id);
+            setEditingInlineDateVal(parseDateForInput(game.date));
+          } : void 0,
+          title: isLoggedIn ? "Click to edit date" : void 0
+        },
+        game.date
+      ), Boolean(game.underReview) && /* @__PURE__ */ React.createElement("span", { className: "font-mono text-xs font-bold text-amber-200 bg-amber-500/15 border border-amber-500/45 px-2.5 py-1 rounded-lg" }, "Stats Review Pending"), isLoggedIn && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleToggleGameUnderReview(game.id),
+          className: `px-2.5 py-1 font-bold text-xs rounded-lg cursor-pointer transition-colors border ${game.underReview ? "bg-emerald-500/12 hover:bg-emerald-500/22 border-emerald-500/40 text-emerald-300" : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/35 text-amber-300"}`,
+          title: game.underReview ? "Mark this game log as review complete after stats validation" : "Mark this game log for stats validation and missing-stat checks"
+        },
+        game.underReview ? "Mark Review Complete" : "Mark Stats Review Pending"
+      ), game.scheduled ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => {
+            const fullGame = games.find((g) => g.id === game.id) || game;
+            setImportResultsState({ step: "input", scheduledGame: fullGame, jsonData: null });
+            importResultsJsonInputRef.current?.click();
+          },
+          className: "px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
+        },
+        "Attach Game Log"
+      ), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          ref: importResultsJsonInputRef,
+          type: "file",
+          accept: ".json,application/json",
+          className: "hidden",
+          onChange: (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file || !importResultsState) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              try {
+                const parsed = JSON.parse(ev.target.result);
+                if (!Array.isArray(parsed?.gameLog) && !parsed?.game) {
+                  showToast("Not a valid WKND game log file.", "error");
+                  setImportResultsState(null);
+                  return;
+                }
+                setImportResultsState((s) => ({ ...s, step: "preview", jsonData: parsed }));
+              } catch {
+                showToast("Failed to parse JSON file.", "error");
+                setImportResultsState(null);
+              }
+            };
+            reader.readAsText(file);
+          }
+        }
+      )) : /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => {
+            setEditingGame(game);
+            setEditingGameDate(parseDateForInput(game.date));
+            setEditStatsTemp(JSON.parse(JSON.stringify(game.playerStats)));
+            setExpandedEditPlayerId(null);
+          },
+          className: "px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
+        },
+        "Edit Box Score"
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => handleDeleteGame(game.id),
+          className: "p-2 bg-red-650/10 hover:bg-red-650/20 border border-red-500/30 text-red-400 rounded-lg cursor-pointer transition-all duration-200",
+          title: "Delete Game Record"
+        },
+        /* @__PURE__ */ React.createElement(Icons.Trash, null)
+      )))), isLoggedIn && (canOperateLive || String(game.gameWriteup || "").trim()) && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl overflow-hidden" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => setShowShareTools((v) => !v),
+          className: "w-full flex items-center justify-between px-3 py-2.5 text-left select-none cursor-pointer hover:bg-slate-900/60 transition-colors"
+        },
+        /* @__PURE__ */ React.createElement("span", { className: "flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300" }, /* @__PURE__ */ React.createElement(Icons.Share, null), "Share & Publish"),
+        /* @__PURE__ */ React.createElement("span", { className: `text-slate-500 transition-transform duration-200 ${showShareTools ? "rotate-180" : ""}` }, /* @__PURE__ */ React.createElement(Icons.ChevronDown, null))
+      ), showShareTools && /* @__PURE__ */ React.createElement("div", { className: "px-3 pb-3 space-y-3 border-t border-slate-800 pt-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          readOnly: true,
+          value: buildShareableGameLogUrl(game.id),
+          className: "flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[10px] font-mono text-slate-300 focus:outline-none truncate"
+        }
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleCopyGameLogShareLink(game.id),
+          className: "shrink-0 px-2.5 py-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 text-sky-200 text-[10px] font-bold hover:bg-sky-500/20 cursor-pointer"
+        },
+        "Copy Link"
+      )), /* @__PURE__ */ React.createElement("div", { className: "flex items-start gap-3 bg-slate-900/60 border border-slate-800 rounded-xl p-3" }, /* @__PURE__ */ React.createElement("div", { className: "shrink-0 w-[180px] h-[95px] rounded-lg overflow-hidden border border-slate-700 bg-slate-950 relative" }, /* @__PURE__ */ React.createElement(
+        "img",
+        {
+          key: `${game.id}-${game.socialCoverLen || game.socialCoverDataUrl?.length ? `c${game.socialCoverLen || game.socialCoverDataUrl.length}` : "auto"}`,
+          src: `/api/social-cover/${encodeURIComponent(game.id)}.png?v=${game.socialCoverLen || game.socialCoverDataUrl?.length ? `c${game.socialCoverLen || game.socialCoverDataUrl.length}` : "auto"}`,
+          alt: "Social cover preview",
+          className: "w-full h-full object-cover",
+          onError: (e) => {
+            e.currentTarget.style.display = "none";
+          }
+        }
+      ), (game.socialCoverLen > 0 || game.socialCoverDataUrl) && /* @__PURE__ */ React.createElement("div", { className: "absolute bottom-1 right-1 bg-amber-500/80 text-[7px] font-bold text-black px-1 py-0.5 rounded leading-none" }, "CUSTOM")), /* @__PURE__ */ React.createElement("div", { className: "flex-1 min-w-0" }, /* @__PURE__ */ React.createElement("p", { className: "text-[10px] font-bold text-slate-200 mb-0.5" }, "Social Cover Image"), /* @__PURE__ */ React.createElement("p", { className: "text-[9px] text-slate-500 leading-snug mb-2" }, "1200 \xD7 630 PNG \u2014 ready for Twitter/X, Facebook, and WhatsApp link previews. Uses blended 2D player art automatically when generated."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, /* @__PURE__ */ React.createElement("label", { className: "inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-[10px] font-bold cursor-pointer hover:bg-slate-900" }, /* @__PURE__ */ React.createElement(Icons.Image, null), "Upload Custom Cover", /* @__PURE__ */ React.createElement("input", { type: "file", accept: "image/*", onChange: (event) => handleCustomCoverUpload(game.id, event), className: "hidden" })), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleDownloadCoverImage({ game, teamAObj, teamBObj, playerOfTheGame, generatedPlayerArtDataUrl: playerArtOutputDataUrl }),
+          className: "inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/25 cursor-pointer"
+        },
+        /* @__PURE__ */ React.createElement(Icons.Image, null),
+        "Download Cover"
+      ), (game.socialCoverLen > 0 || game.socialCoverDataUrl) && /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleClearCustomCover(game.id),
+          className: "inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-500/40 bg-red-500/15 text-red-300 text-[10px] font-bold hover:bg-red-500/25 cursor-pointer"
+        },
+        /* @__PURE__ */ React.createElement(Icons.Trash, null),
+        "Remove Custom Cover"
+      )))))), (canOperateLive || String(game.gameWriteup || "").trim()) && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl overflow-hidden" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => setShowGameRecapTools((v) => !v),
+          className: "w-full flex items-center justify-between px-3 py-2.5 text-left select-none cursor-pointer hover:bg-slate-900/60 transition-colors"
+        },
+        /* @__PURE__ */ React.createElement("span", { className: "flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-300" }, /* @__PURE__ */ React.createElement(Icons.Edit, null), "Game Recap"),
+        /* @__PURE__ */ React.createElement("span", { className: `text-slate-500 transition-transform duration-200 ${showGameRecapTools ? "rotate-180" : ""}` }, /* @__PURE__ */ React.createElement(Icons.ChevronDown, null))
+      ), showGameRecapTools && /* @__PURE__ */ React.createElement("div", { className: "px-3 pb-3 space-y-2 border-t border-slate-800 pt-3" }, canOperateLive ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(
+        "textarea",
+        {
+          value: historyWriteupInput,
+          onChange: (e) => setHistoryWriteupInput(e.target.value),
+          placeholder: "Add a quick game recap...",
+          rows: 4,
+          className: "w-full resize-y bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+        }
+      ), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end gap-2" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleGenerateGameWriteup({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers }),
+          disabled: generatingWriteupGameId === game.id,
+          className: "px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+        },
+        generatingWriteupGameId === game.id ? "Generating..." : "Generate Recap"
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleSaveGameWriteup(game.id),
+          className: "px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+        },
+        "Save Recap"
+      ))) : /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-300 whitespace-pre-wrap leading-relaxed" }, game.gameWriteup))), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/60 border border-slate-800 rounded-xl p-2 flex flex-wrap gap-2" }, tabButtons.map((tab) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: tab.id,
+          type: "button",
+          onClick: () => setHistoryDetailTab(tab.id),
+          className: `px-3 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer transition-colors ${historyDetailTab === tab.id ? "bg-orange-500/20 text-orange-300 border-orange-400/60" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`
+        },
+        tab.label
+      ))), historyDetailTab === "video" && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-3" }, canOperateLive && /* @__PURE__ */ React.createElement("div", { className: "flex flex-col md:flex-row md:items-end gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex-1" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1" }, "YouTube Game Video"), /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "url",
+          value: historyVideoInput,
+          onChange: (e) => setHistoryVideoInput(e.target.value),
+          placeholder: "https://www.youtube.com/watch?v=...",
+          className: "w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+        }
+      )), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleSaveGameVideoLink(game.id),
+          className: "px-3 py-2 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+        },
+        "Save Video Link"
+      )), videoEmbedUrl ? /* @__PURE__ */ React.createElement("div", { className: "rounded-xl overflow-hidden border border-slate-800 bg-black" }, /* @__PURE__ */ React.createElement(
+        "iframe",
+        {
+          src: videoEmbedUrl,
+          title: `Game video ${game.id}`,
+          className: "w-full aspect-video",
+          allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
+          allowFullScreen: true
+        }
+      )) : /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-500" }, "No video attached for this game yet.")), historyDetailTab === "potg" && playerOfTheGame && /* @__PURE__ */ React.createElement("div", { className: "space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1 max-w-full sm:max-w-[68%]" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] uppercase tracking-widest text-amber-400 font-bold mb-1" }, "Player of the Game"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: "w-11 h-11 rounded-full overflow-hidden border border-slate-700 bg-slate-950 flex items-center justify-center shrink-0" }, playerOfTheGame.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: playerOfTheGame.pictureUrl, alt: playerOfTheGame.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-sm font-black text-slate-200 font-mono" }, (playerOfTheGame.name || "?").slice(0, 1).toUpperCase())), /* @__PURE__ */ React.createElement("div", { className: "text-sm font-extrabold text-white" }, "#", playerOfTheGame.number, " ", playerOfTheGame.name, /* @__PURE__ */ React.createElement("span", { className: "ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full border", style: { color: playerOfTheGame.teamColor || "#fff", borderColor: `${playerOfTheGame.teamColor || "#fff"}55` } }, playerOfTheGame.teamName))), /* @__PURE__ */ React.createElement("div", { className: "text-[11px] text-slate-400 mt-1 whitespace-pre-wrap break-words overflow-hidden" }, String(game.potgWriteup || "").trim() ? game.potgWriteup : generatingPotgWriteupGameId === game.id ? "Generating player spotlight..." : `PER-style game rating ${Number(playerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.`), isLoggedIn && /* @__PURE__ */ React.createElement("div", { className: "mt-2" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleGeneratePotgWriteup({ game, playerOfTheGame }),
+          disabled: generatingPotgWriteupGameId === game.id,
+          title: "Generate or regenerate POTG writeup",
+          className: "w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-bold border border-cyan-500/40 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+        },
+        generatingPotgWriteupGameId === game.id ? "Generating POTG Writeup..." : String(game.potgWriteup || "").trim() ? "Regenerate POTG Writeup" : "Generate POTG Writeup"
+      ))), (() => {
+        const displayedStats = [
+          ["PTS", Number(playerOfTheGame.stats?.pts || 0)],
+          ["REB", Number(playerOfTheGame.stats?.reb || 0)],
+          ["AST", Number(playerOfTheGame.stats?.ast || 0)],
+          ["STL", Number(playerOfTheGame.stats?.stl || 0)],
+          ["BLK", Number(playerOfTheGame.stats?.blk || 0)],
+          ["TO", Number(playerOfTheGame.stats?.to || 0)],
+          ["PER", Math.round(Number(playerOfTheGame.perScore || 0))]
+        ].filter(([label, value]) => label === "PER" || value !== 0);
+        const maxValue = displayedStats.reduce((best, [, value]) => Math.max(best, Number(value || 0)), 0);
+        return /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            className: "grid gap-2 font-mono text-slate-300 shrink-0",
+            style: { gridTemplateColumns: `repeat(${Math.max(displayedStats.length, 1)}, minmax(0, 1fr))` }
+          },
+          displayedStats.map(([label, value]) => {
+            const isOutstanding = label === "PER" || Number(value) === maxValue && maxValue > 0;
+            return /* @__PURE__ */ React.createElement(
+              "div",
+              {
+                key: `history-potg-stat-${label}`,
+                className: `rounded-md px-2.5 py-1.5 text-center min-h-[52px] h-full flex flex-col justify-between border ${isOutstanding ? "bg-amber-500/15 border-amber-400/70 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]" : "bg-slate-900/80 border-slate-800"}`
+              },
+              /* @__PURE__ */ React.createElement("div", { className: `text-[9px] uppercase tracking-wider font-bold leading-none ${isOutstanding ? "text-amber-200" : "text-slate-400"}` }, label),
+              /* @__PURE__ */ React.createElement("div", { className: `mt-1 font-mono font-black text-lg md:text-xl leading-none ${isOutstanding ? "text-amber-100" : "text-white"}` }, value)
+            );
+          })
+        );
+      })()), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/35 border border-slate-800/60 rounded-xl p-3" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2" }, "Top Performers Boxscore"), (() => {
+        const selectedManualPotgPlayerId = String(game.manualPotgPlayerId || "").trim();
+        const defaultPlayerOfTheGame = getPlayerOfTheGame({ ...game, manualPotgPlayerId: "" }, teamAObj, teamBObj);
+        const selectedPlayerOfTheGame = getPlayerOfTheGame(game, teamAObj, teamBObj);
+        const baseTopPerformers = [...topTeamAPerformers || [], ...topTeamBPerformers || []].map((entry) => ({
+          ...entry,
+          teamName: teamAObj?.players?.some((player) => player.id === entry.id) ? game.teamAName : game.teamBName,
+          teamColor: teamAObj?.players?.some((player) => player.id === entry.id) ? teamAObj?.color || "#10b981" : teamBObj?.color || "#ef4444"
+        })).sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0));
+        const specialPotgEntries = [defaultPlayerOfTheGame, selectedPlayerOfTheGame].filter(Boolean).filter((entry, index, allEntries) => allEntries.findIndex((candidate) => candidate?.id === entry?.id) === index).map((entry) => ({
+          ...entry,
+          stats: entry.stats || {},
+          perScore: Number(entry.perScore || 0),
+          teamName: entry.teamName,
+          teamColor: entry.teamColor
+        }));
+        const mergedTopPerformers = [...baseTopPerformers];
+        specialPotgEntries.forEach((entry) => {
+          if (!mergedTopPerformers.some((existingEntry) => existingEntry.id === entry.id)) {
+            mergedTopPerformers.push(entry);
+          }
+        });
+        return /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-xl border border-slate-850 bg-slate-950/20" }, /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-xs min-w-[920px]" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center" }, "#"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3" }, "Player"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400 font-bold" }, "FG M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-cyan-400 font-bold" }, "3PT M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-pink-400 font-bold" }, "FT%"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-blue-400" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-teal-400" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-violet-400" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-amber-500" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-red-400" }, "PF"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-slate-200" }, "PER"), isLoggedIn && /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-amber-300" }, "POTG"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300" }, mergedTopPerformers.length === 0 ? /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-slate-600 italic", colSpan: isLoggedIn ? 14 : 13 }, "No qualifying performers")) : mergedTopPerformers.map((entry, idx) => {
+          const shooting = computeShootingPercentages(entry.stats || {}, { showNAWhenNoAttempts: true });
+          const isManualPotg = selectedManualPotgPlayerId === String(entry.id || "");
+          const isDefaultPotg = !isManualPotg && String(defaultPlayerOfTheGame?.id || "") === String(entry.id || "");
+          const entryTeamId = teamAObj?.players?.some((player) => player.id === entry.id) ? String(game.teamAId || "") : String(game.teamBId || "");
+          const winningTeamId = Number(game.teamAScore || 0) === Number(game.teamBScore || 0) ? "" : Number(game.teamAScore || 0) > Number(game.teamBScore || 0) ? String(game.teamAId || "") : String(game.teamBId || "");
+          const isWinningTeam = !winningTeamId || entryTeamId === winningTeamId;
+          return /* @__PURE__ */ React.createElement("tr", { key: `potg-top-merged-${entry.id}`, className: "hover:bg-slate-855/20" }, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center font-bold text-slate-500" }, "#", idx + 1), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 text-white font-bold font-sans" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2 h-2 rounded-full shrink-0", style: { backgroundColor: entry.teamColor || "#94a3b8" } }), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono mr-1.5 text-[10px]" }, "#", entry.number), entry.name))), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-orange-400 font-black" }, entry.stats?.pts || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, shooting.fgMadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, shooting.fg3MadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-pink-400 font-bold" }, shooting.ftPct), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400" }, entry.stats?.reb || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-blue-400" }, entry.stats?.ast || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-teal-400 font-mono" }, entry.stats?.stl || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-violet-400 font-mono" }, entry.stats?.blk || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-amber-500 font-mono" }, entry.stats?.to || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-red-400 font-mono" }, entry.stats?.pf || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center font-black text-slate-100" }, Number(entry.perScore || 0).toFixed(1)), isLoggedIn && /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, /* @__PURE__ */ React.createElement(
+            "button",
+            {
+              type: "button",
+              disabled: !canOperateLive || !isWinningTeam,
+              onClick: () => handleSetManualPotg(game.id, entry.id),
+              className: `px-2.5 py-1 rounded text-[9px] font-black border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isManualPotg ? "bg-amber-500/20 text-amber-200 border-amber-500/60" : "bg-slate-950/80 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500"}`,
+              title: !isWinningTeam ? "Manual POTG must be from the winning team" : isManualPotg ? "Clear manual POTG" : "Set as manual POTG"
+            },
+            isManualPotg ? "POTG" : isDefaultPotg ? "Default" : "Make POTG"
+          )));
+        })))));
+      })())), historyDetailTab === "leaders" && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, "Top Performers"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "Best single-game outputs by team")), /* @__PURE__ */ React.createElement("div", { className: "rounded-lg border border-slate-800 bg-slate-950/30 p-3 md:p-4 space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-[10px] font-bold uppercase tracking-wider" }, /* @__PURE__ */ React.createElement("span", { className: "text-right", style: { color: teamAObj?.color || "#10b981" } }, game.teamAName), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "Leader"), /* @__PURE__ */ React.createElement("span", { style: { color: teamBObj?.color || "#ef4444" } }, game.teamBName)), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800/70 overflow-hidden" }, [
+        ["PTS", teamALeaders.find((item) => item.label === "PTS"), teamBLeaders.find((item) => item.label === "PTS")],
+        ["REB", teamALeaders.find((item) => item.label === "REB"), teamBLeaders.find((item) => item.label === "REB")],
+        ["AST", teamALeaders.find((item) => item.label === "AST"), teamBLeaders.find((item) => item.label === "AST")],
+        ["STL", teamALeaders.find((item) => item.label === "STL"), teamBLeaders.find((item) => item.label === "STL")],
+        ["BLK", teamALeaders.find((item) => item.label === "BLK"), teamBLeaders.find((item) => item.label === "BLK")],
+        ["TO", teamALeaders.find((item) => item.label === "TO"), teamBLeaders.find((item) => item.label === "TO")]
+      ].map(([label, teamALeader, teamBLeader]) => {
+        const aValue = Number(teamALeader?.value || 0);
+        const bValue = Number(teamBLeader?.value || 0);
+        const aLeaders = teamALeader?.leaders || [];
+        const bLeaders = teamBLeader?.leaders || [];
+        const hasALeader = aValue > 0;
+        const hasBLeader = bValue > 0;
+        if (!hasALeader && !hasBLeader) return null;
+        const totalValue = Math.max(aValue + bValue, 1);
+        const aWidth = `${Math.min(100, aValue / totalValue * 100)}%`;
+        const bWidth = `${Math.min(100, bValue / totalValue * 100)}%`;
+        return /* @__PURE__ */ React.createElement("div", { key: `history-leader-${label}`, className: "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45" }, /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0 flex justify-end" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-left border-b", style: { width: aWidth, backgroundColor: `${teamAObj?.color || "#10b981"}0c`, borderBottomColor: `${teamAObj?.color || "#10b981"}aa` } })), /* @__PURE__ */ React.createElement("div", { className: "relative z-10 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-end gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-end" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center -space-x-2" }, hasALeader ? aLeaders.slice(0, 2).map((leader) => /* @__PURE__ */ React.createElement("span", { key: `history-leader-a-avatar-${label}-${leader.id}`, className: "w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center" }, leader.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: leader.pictureUrl, alt: leader.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-200" }, (leader.name || "?").slice(0, 1).toUpperCase()))) : null), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[10px] text-slate-400 truncate max-w-[170px]" }, hasALeader ? aLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(" / ") : "-")), /* @__PURE__ */ React.createElement("div", { className: "text-base font-black text-slate-100" }, hasALeader ? teamALeader.value : "-")))), /* @__PURE__ */ React.createElement("span", { className: "inline-flex h-full flex-col items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5 gap-1" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100" }, label)), /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-right border-b", style: { width: bWidth, backgroundColor: `${teamBObj?.color || "#ef4444"}0c`, borderBottomColor: `${teamBObj?.color || "#ef4444"}aa` } })), /* @__PURE__ */ React.createElement("div", { className: "relative z-10 text-left" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-start gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "text-base font-black text-slate-100" }, hasBLeader ? teamBLeader.value : "-"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-start" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center -space-x-2" }, hasBLeader ? bLeaders.slice(0, 2).map((leader) => /* @__PURE__ */ React.createElement("span", { key: `history-leader-b-avatar-${label}-${leader.id}`, className: "w-8 h-8 rounded-full overflow-hidden border-2 border-slate-500 bg-slate-950 shadow-[0_0_14px_rgba(15,23,42,0.6)] flex items-center justify-center" }, leader.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: leader.pictureUrl, alt: leader.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black text-slate-200" }, (leader.name || "?").slice(0, 1).toUpperCase()))) : null), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[10px] text-slate-400 truncate max-w-[170px]" }, hasBLeader ? bLeaders.map((leader) => `#${leader.number} ${leader.name}`).join(" / ") : "-"))))));
+      })))), historyDetailTab === "scoring" && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, "Scoring by Quarter"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "Points only")), /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-lg border border-slate-800" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-xs min-w-[520px] font-mono" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2 px-3 text-left" }, "Team"), quarterStats.map((row) => /* @__PURE__ */ React.createElement("th", { key: `hist-quarter-head-${game.id}-${row.quarter}`, className: "py-2 px-3 text-center" }, getPeriodLabel(row.quarter))))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60 text-slate-200" }, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 font-bold", style: { color: teamAObj?.color || "#10b981" } }, game.teamAName), quarterStats.map((row) => /* @__PURE__ */ React.createElement("td", { key: `hist-quarter-a-${game.id}-${row.quarter}`, className: "py-2 px-3 text-center font-black" }, row.teamA.pts))), /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 font-bold", style: { color: teamBObj?.color || "#ef4444" } }, game.teamBName), quarterStats.map((row) => /* @__PURE__ */ React.createElement("td", { key: `hist-quarter-b-${game.id}-${row.quarter}`, className: "py-2 px-3 text-center font-black" }, row.teamB.pts))))))), historyDetailTab === "comparison" && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, "Team Total Comparison"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "All totals for this game")), /* @__PURE__ */ React.createElement("div", { className: "rounded-lg border border-slate-800 bg-slate-950/30 p-3 md:p-4 space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-[10px] font-bold uppercase tracking-wider" }, /* @__PURE__ */ React.createElement("span", { className: "text-right", style: { color: teamAObj?.color || "#10b981" } }, game.teamAName), /* @__PURE__ */ React.createElement("span", { className: "text-slate-500" }, "Stat"), /* @__PURE__ */ React.createElement("span", { style: { color: teamBObj?.color || "#ef4444" } }, game.teamBName)), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800/70 overflow-hidden" }, historyComparisonRows.map((row) => {
+        const aNum = Number(row.teamACompare) || 0;
+        const bNum = Number(row.teamBCompare) || 0;
+        const totalValue = Math.max(aNum + bNum, 1);
+        const aWidth = `${Math.min(100, aNum / totalValue * 100)}%`;
+        const bWidth = `${Math.min(100, bNum / totalValue * 100)}%`;
+        return /* @__PURE__ */ React.createElement("div", { key: row.label, className: "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-0 overflow-hidden border-b border-slate-800 last:border-b-0 font-mono bg-slate-950/45" }, /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden border-r border-slate-800 px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0 flex justify-end" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-left border-b", style: { width: aWidth, backgroundColor: `${teamAObj?.color || "#10b981"}0c`, borderBottomColor: `${teamAObj?.color || "#10b981"}aa` } })), /* @__PURE__ */ React.createElement("span", { className: "relative z-10 block text-right text-xl leading-none font-black text-slate-100" }, row.teamAValue)), /* @__PURE__ */ React.createElement("span", { className: "inline-flex h-full items-center justify-center border-r border-slate-800 bg-slate-950/85 px-2 py-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex min-w-[34px] items-center justify-center text-[9px] leading-none font-black tracking-wide text-slate-100" }, row.label)), /* @__PURE__ */ React.createElement("div", { className: "relative min-w-0 overflow-hidden px-3 py-2" }, /* @__PURE__ */ React.createElement("div", { className: "pointer-events-none absolute inset-0" }, /* @__PURE__ */ React.createElement("div", { className: "h-full leader-bg-fill leader-bg-fill-right border-b", style: { width: bWidth, backgroundColor: `${teamBObj?.color || "#ef4444"}0c`, borderBottomColor: `${teamBObj?.color || "#ef4444"}aa` } })), /* @__PURE__ */ React.createElement("span", { className: "relative z-10 block text-left text-xl leading-none font-black text-slate-100" }, row.teamBValue)));
+      })))), historyDetailTab === "home" && /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: teamAObj?.color || "#10b981" } }), /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, game.teamAName, " Statline")), /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-xl border border-slate-850" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-xs min-w-[750px]" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3" }, "Player"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-rose-300" }, "Status"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400 font-bold" }, "FG M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-cyan-400 font-bold" }, "3PT M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-pink-400 font-bold" }, "FT%"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-blue-400" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-teal-400" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-violet-400" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-amber-500" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-red-400" }, "PF"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300" }, teamAObj?.players.map((player) => {
+        const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+        const pPct = computeShootingPercentages(pstats, { showNAWhenNoAttempts: true });
+        const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
+        const hasSavedRow = Boolean(game.playerStats?.[player.id]);
+        const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(pstats[field] || 0) > 0);
+        const isDnp = isExplicitDnp || !hasSavedRow;
+        return { player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp };
+      }).sort((a, b) => {
+        if (a.isDnp !== b.isDnp) return Number(a.isDnp) - Number(b.isDnp);
+        return Number(a.player.number || 0) - Number(b.player.number || 0);
+      }).map(({ player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp }) => {
+        const canSetDnp = !isExplicitDnp && !hasTrackedStats;
+        return /* @__PURE__ */ React.createElement("tr", { key: player.id, className: `hover:bg-slate-855/20 ${isDnp ? "opacity-70" : ""}` }, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 text-white font-bold font-sans" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono mr-1.5 text-[10px]" }, "#", player.number), player.name), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "inline-flex items-center gap-1.5" }, isDnp ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex px-1.5 py-0.5 rounded border border-rose-500/60 bg-rose-500/15 text-rose-300 text-[10px] font-black uppercase tracking-wide" }, "DNP") : /* @__PURE__ */ React.createElement("span", { className: "inline-flex px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px] font-black uppercase tracking-wide" }, "Played"), isLoggedIn && hasSavedRow && canSetDnp && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => handleToggleHistoricDnp(game.id, player.id),
+            className: "inline-flex px-1.5 py-0.5 rounded border text-[10px] font-black uppercase tracking-wide transition-colors border-rose-500/45 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 cursor-pointer",
+            title: "Set this player to DNP for this game"
+          },
+          "Set DNP"
+        ))), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-orange-400 font-black" }, isDnp ? "\u2014" : pstats.pts), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, isDnp ? "\u2014" : pPct.fgMadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, isDnp ? "\u2014" : pPct.fg3MadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-pink-400 font-bold" }, isDnp ? "\u2014" : pPct.ftPct), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400" }, isDnp ? "\u2014" : pstats.reb), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-blue-400" }, isDnp ? "\u2014" : pstats.ast), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-teal-400 font-mono" }, isDnp ? "\u2014" : pstats.stl || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-violet-400 font-mono" }, isDnp ? "\u2014" : pstats.blk || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-amber-500 font-mono" }, isDnp ? "\u2014" : pstats.to || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-red-400 font-mono" }, isDnp ? "\u2014" : pstats.pf));
+      }))))), historyDetailTab === "away" && /* @__PURE__ */ React.createElement("div", { className: "space-y-2 mt-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full", style: { backgroundColor: teamBObj?.color || "#ef4444" } }), /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, game.teamBName, " Statline")), /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto rounded-xl border border-slate-850" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-xs min-w-[750px]" }, /* @__PURE__ */ React.createElement("thead", null, /* @__PURE__ */ React.createElement("tr", { className: "bg-slate-950/80 text-slate-400 font-mono text-[10px] border-b border-slate-800" }, /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-3" }, "Player"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-rose-300" }, "Status"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-orange-400" }, "PTS"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400 font-bold" }, "FG M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-cyan-400 font-bold" }, "3PT M/A"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-pink-400 font-bold" }, "FT%"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-emerald-400" }, "REB"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-blue-400" }, "AST"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-teal-400" }, "STL"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-violet-400" }, "BLK"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-amber-500" }, "TO"), /* @__PURE__ */ React.createElement("th", { className: "py-2.5 px-2 text-center text-red-400" }, "PF"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300" }, teamBObj?.players.map((player) => {
+        const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+        const pPct = computeShootingPercentages(pstats, { showNAWhenNoAttempts: true });
+        const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
+        const hasSavedRow = Boolean(game.playerStats?.[player.id]);
+        const hasTrackedStats = PLAYER_STAT_FIELDS.some((field) => Number(pstats[field] || 0) > 0);
+        const isDnp = isExplicitDnp || !hasSavedRow;
+        return { player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp };
+      }).sort((a, b) => {
+        if (a.isDnp !== b.isDnp) return Number(a.isDnp) - Number(b.isDnp);
+        return Number(a.player.number || 0) - Number(b.player.number || 0);
+      }).map(({ player, pstats, pPct, isExplicitDnp, hasSavedRow, hasTrackedStats, isDnp }) => {
+        const canSetDnp = !isExplicitDnp && !hasTrackedStats;
+        return /* @__PURE__ */ React.createElement("tr", { key: player.id, className: `hover:bg-slate-855/20 ${isDnp ? "opacity-70" : ""}` }, /* @__PURE__ */ React.createElement("td", { className: "py-2 px-3 text-white font-bold font-sans" }, /* @__PURE__ */ React.createElement("span", { className: "text-slate-500 font-mono mr-1.5 text-[10px]" }, "#", player.number), player.name), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center" }, /* @__PURE__ */ React.createElement("div", { className: "inline-flex items-center gap-1.5" }, isDnp ? /* @__PURE__ */ React.createElement("span", { className: "inline-flex px-1.5 py-0.5 rounded border border-rose-500/60 bg-rose-500/15 text-rose-300 text-[10px] font-black uppercase tracking-wide" }, "DNP") : /* @__PURE__ */ React.createElement("span", { className: "inline-flex px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px] font-black uppercase tracking-wide" }, "Played"), isLoggedIn && hasSavedRow && canSetDnp && /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => handleToggleHistoricDnp(game.id, player.id),
+            className: "inline-flex px-1.5 py-0.5 rounded border text-[10px] font-black uppercase tracking-wide transition-colors border-rose-500/45 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 cursor-pointer",
+            title: "Set this player to DNP for this game"
+          },
+          "Set DNP"
+        ))), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-orange-400 font-black" }, isDnp ? "\u2014" : pstats.pts), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400 font-bold" }, isDnp ? "\u2014" : pPct.fgMadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-cyan-400 font-bold" }, isDnp ? "\u2014" : pPct.fg3MadeAtt), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-pink-400 font-bold" }, isDnp ? "\u2014" : pPct.ftPct), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-emerald-400" }, isDnp ? "\u2014" : pstats.reb), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-blue-400" }, isDnp ? "\u2014" : pstats.ast), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-teal-400" }, isDnp ? "\u2014" : pstats.stl || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-violet-400" }, isDnp ? "\u2014" : pstats.blk || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-amber-500" }, isDnp ? "\u2014" : pstats.to || 0), /* @__PURE__ */ React.createElement("td", { className: "py-2 px-2 text-center text-red-400" }, isDnp ? "\u2014" : pstats.pf));
+      }))))), historyDetailTab === "game-info" && canOperateLive && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-4" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5" }, "Season"), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1 flex-wrap" }, [1, 2, 3, 4, 5].map((s) => /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          key: s,
+          type: "button",
+          onClick: () => setGameMetaSeason(s),
+          className: `px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${gameMetaSeason === s ? "bg-orange-500 text-white border-orange-400" : "bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200"}`
+        },
+        "S",
+        s
+      )))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5" }, "Playoff Series"), /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          value: gameMetaSeriesId,
+          onChange: (e) => setGameMetaSeriesId(e.target.value),
+          className: "w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none cursor-pointer"
+        },
+        PLAYOFF_SERIES_OPTIONS.map((opt) => /* @__PURE__ */ React.createElement("option", { key: opt.value, value: opt.value }, opt.label))
+      ))), gameMetaSeriesId && /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-orange-300 bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-1.5" }, "This game will count as a ", /* @__PURE__ */ React.createElement("strong", null, "playoff game"), " and appear in the bracket under ", PLAYOFF_SERIES_OPTIONS.find((o) => o.value === gameMetaSeriesId)?.label, "."), /* @__PURE__ */ React.createElement("div", { className: "flex justify-end" }, /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => handleSaveGameMeta(game.id),
+          className: "px-4 py-2 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
+        },
+        "Save Game Info"
+      ))), historyDetailTab === "pbp" && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3 mt-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2" }, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-bold uppercase tracking-wider text-slate-200" }, "Play-by-Play"), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono" }, "Includes substitutions and scoring notes")), Array.isArray(game.gameLog) && game.gameLog.length > 0 ? /* @__PURE__ */ React.createElement("div", { className: "space-y-1.5 text-xs md:text-sm max-h-72 overflow-auto pr-1" }, (game.gameLog || []).filter((log, idx, allLogs) => {
+        if (log?.hiddenFromLog) return false;
+        const text = String(log?.text || "").trim().toLowerCase();
+        if (log?.metaType === "manualPause") return false;
+        if (text === "manual pause" || text === "pause game" || text === "pause") return false;
+        const isPlayResume = log?.metaType === "playResume" || text.startsWith("play resumed");
+        if (isPlayResume) {
+          let precedingPauseType = "";
+          for (let cursor = idx + 1; cursor < allLogs.length; cursor += 1) {
+            const prior = allLogs[cursor];
+            const priorMetaType = String(prior?.metaType || "").trim();
+            if (!priorMetaType) continue;
+            if (priorMetaType === "manualPause" || priorMetaType === "timeout" || priorMetaType === "officialsTimeout" || priorMetaType === "foulPause") {
+              precedingPauseType = priorMetaType;
+              break;
+            }
+            if (priorMetaType === "playResume" || priorMetaType === "timeoutResume" || priorMetaType === "quarterStart" || priorMetaType === "matchStart" || priorMetaType === "hardReset") {
+              break;
+            }
+          }
+          if (precedingPauseType === "manualPause") return false;
+        }
+        return true;
+      }).map((log, idx) => {
+        const isSubEvent = typeof log.text === "string" && log.text.includes("SUB:");
+        const isHomeEvent = log.isTeamA === true;
+        const isAwayEvent = log.isTeamA === false;
+        const isNeutralEvent = !isHomeEvent && !isAwayEvent;
+        return /* @__PURE__ */ React.createElement(
+          "div",
+          {
+            key: `${log.time || "event"}-${idx}`,
+            className: `rounded-lg border px-3 py-2 ${isSubEvent ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-slate-800 bg-slate-900/70 text-slate-300"}`
+          },
+          /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-[1fr_auto_1fr] items-center gap-3" }, /* @__PURE__ */ React.createElement("div", { className: `min-w-0 ${isHomeEvent ? "text-right" : "text-right text-slate-600/70"}` }, isHomeEvent ? /* @__PURE__ */ React.createElement("span", { className: "font-medium break-words", style: { color: teamAObj?.color || "#10b981" } }, log.text) : /* @__PURE__ */ React.createElement("span", null, "\xA0")), /* @__PURE__ */ React.createElement("div", { className: "text-center" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center justify-center rounded-full border border-slate-700 bg-slate-950/95 px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-widest text-slate-400" }, getPeriodLabel(log.quarter || 1), " ", log.clockRemaining || "--:--")), /* @__PURE__ */ React.createElement("div", { className: `min-w-0 ${isAwayEvent ? "text-left" : "text-left text-slate-600/70"}` }, isAwayEvent ? /* @__PURE__ */ React.createElement("span", { className: "font-medium break-words", style: { color: teamBObj?.color || "#ef4444" } }, log.text) : /* @__PURE__ */ React.createElement("span", null, "\xA0"))),
+          isNeutralEvent && /* @__PURE__ */ React.createElement("div", { className: "mt-2 text-center text-slate-300 font-medium break-words" }, log.text)
+        );
+      })) : /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-500 italic py-2" }, "No play-by-play entries for this game.")));
+    })), activeTab === "awards" && !canViewAwardsPage && /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "max-w-xl mx-auto text-center space-y-3" }, /* @__PURE__ */ React.createElement("div", { className: "inline-flex items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-amber-300" }, "Private Page"), /* @__PURE__ */ React.createElement("h4", { className: "text-lg font-black text-white" }, "Log in to view the awards page"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-400" }, "An admin can enable public access from the Awards page after logging in."), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => setShowAuthModal(true),
+        className: "inline-flex items-center justify-center rounded-lg border border-orange-500/40 bg-orange-500/15 px-4 py-2 text-xs font-black uppercase tracking-wide text-orange-300 hover:bg-orange-500/25 cursor-pointer"
+      },
+      "Login"
+    ))), activeTab === "awards" && canViewAwardsPage && /* @__PURE__ */ React.createElement("div", { className: "space-y-6" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-xl font-bold text-white font-sans" }, "All WKND Awards"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400" }, "MVP and All WKND teams for the current tournament run.")), authRole === "admin" && /* @__PURE__ */ React.createElement("div", { className: "w-full sm:w-auto" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: handleToggleAwardsPagePublic,
+        className: `inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold border cursor-pointer transition-all ${awardsPagePublicEnabled ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20" : "border-slate-700 text-slate-200 hover:bg-slate-900"}`
+      },
+      "Awards Visibility: ",
+      awardsPagePublicEnabled ? "Public: ON" : "Public: OFF"
+    ))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 gap-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "font-extrabold text-sm uppercase tracking-wide text-white" }, "MVP Candidates"), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-slate-500 mt-0.5" }, "Ranked by season PER-style production from completed games.")), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black uppercase tracking-widest text-orange-300 bg-orange-500/10 border border-orange-500/20 px-2 py-1 rounded-lg" }, "Top 10")), leagueMvpCandidates.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-500 italic" }, "No player stats yet") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-orange-500/40 bg-orange-500/10 px-3 py-2 grid grid-cols-[auto_auto_1fr_auto] items-center gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono font-black text-xs w-7 text-center text-orange-300" }, "#1"), leagueMvpCandidates[0].pictureUrl ? /* @__PURE__ */ React.createElement(
+      "img",
+      {
+        src: leagueMvpCandidates[0].pictureUrl,
+        alt: leagueMvpCandidates[0].name,
+        className: "w-10 h-10 rounded-full border border-slate-700 object-cover shrink-0"
+      }
+    ) : /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0" }, "IMG"), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "truncate text-white font-extrabold text-sm" }, leagueMvpCandidates[0].name), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 truncate mt-0.5 flex flex-wrap items-center gap-1" }, /* @__PURE__ */ React.createElement("span", null, leagueMvpCandidates[0].team), /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "\u2022"), /* @__PURE__ */ React.createElement("span", null, normalizePlayerPositions(leagueMvpCandidates[0]).join("/") || "N/A"), /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "\u2022"), /* @__PURE__ */ React.createElement("span", null, leagueMvpCandidates[0].gamesPlayed || 0, " GP"))), /* @__PURE__ */ React.createElement("div", { className: "text-right shrink-0" }, /* @__PURE__ */ React.createElement("div", { className: "font-mono font-black text-xl text-orange-300" }, Number(leagueMvpCandidates[0].perStyleScore || 0).toFixed(1)), /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500 uppercase tracking-widest" }, "PER"))), /* @__PURE__ */ React.createElement("div", { className: "space-y-2 max-h-[420px] overflow-y-auto pr-1" }, leagueMvpCandidates.slice(1).map((player, idx) => /* @__PURE__ */ React.createElement(
+      "div",
+      {
+        key: `mvp-candidate-${player.id}`,
+        className: "rounded-xl border border-slate-800 bg-slate-950/45 px-3 py-2 grid grid-cols-[auto_auto_1fr_auto] items-center gap-3"
+      },
+      /* @__PURE__ */ React.createElement("span", { className: "font-mono font-black text-xs w-7 text-center text-slate-500" }, "#", idx + 2),
+      player.pictureUrl ? /* @__PURE__ */ React.createElement(
+        "img",
+        {
+          src: player.pictureUrl,
+          alt: player.name,
+          className: "w-10 h-10 rounded-full border border-slate-700 object-cover shrink-0"
+        }
+      ) : /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0" }, "IMG"),
+      /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "truncate text-white font-extrabold text-sm" }, player.name), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 truncate mt-0.5 flex flex-wrap items-center gap-1" }, /* @__PURE__ */ React.createElement("span", null, player.team), /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "\u2022"), /* @__PURE__ */ React.createElement("span", null, normalizePlayerPositions(player).join("/") || "N/A"), /* @__PURE__ */ React.createElement("span", { className: "text-slate-600" }, "\u2022"), /* @__PURE__ */ React.createElement("span", null, player.gamesPlayed || 0, " GP"))),
+      /* @__PURE__ */ React.createElement("div", { className: "text-right shrink-0" }, /* @__PURE__ */ React.createElement("div", { className: "font-mono font-black text-xl text-orange-300" }, Number(player.perStyleScore || 0).toFixed(1)), /* @__PURE__ */ React.createElement("div", { className: "text-[9px] text-slate-500 uppercase tracking-widest" }, "PER"))
+    ))))), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "font-extrabold text-sm uppercase tracking-wide text-white" }, "All WKND First Team"), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-slate-500 mt-0.5" }, "First-team style lineup by position and PER-style value.")), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black uppercase tracking-widest text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2 py-1 rounded-lg" }, "First Team")), allWKNDFirstTeam.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-500 italic" }, "No eligible players yet") : /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-5 gap-2" }, allWKNDFirstTeam.map(({ slot, player }) => /* @__PURE__ */ React.createElement("div", { key: `mythical-${slot}-${player.id}`, className: "rounded-xl border border-slate-800 bg-slate-950/45 p-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 mb-2" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] font-black tracking-wider text-slate-100 shrink-0" }, slot), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black uppercase tracking-widest text-slate-500" }, "PER ", Number(player.perStyleScore || 0).toFixed(1))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, player.pictureUrl ? /* @__PURE__ */ React.createElement(
+      "img",
+      {
+        src: player.pictureUrl,
+        alt: player.name,
+        className: "w-11 h-11 rounded-full border border-slate-700 object-cover shrink-0"
+      }
+    ) : /* @__PURE__ */ React.createElement("div", { className: "w-11 h-11 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0" }, "IMG"), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "truncate text-white font-extrabold text-sm" }, player.name), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 truncate mt-0.5" }, player.team), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[10px] text-slate-400 flex flex-wrap gap-2" }, /* @__PURE__ */ React.createElement("span", null, player.gamesPlayed || 0, " GP"), /* @__PURE__ */ React.createElement("span", null, "PTS ", Number(getAverages(player).pts || 0).toFixed(1)), /* @__PURE__ */ React.createElement("span", null, "REB ", Number(getAverages(player).reb || 0).toFixed(1)), /* @__PURE__ */ React.createElement("span", null, "AST ", Number(getAverages(player).ast || 0).toFixed(1))))))))), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "font-extrabold text-sm uppercase tracking-wide text-white" }, "All WKND Second Team"), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-slate-500 mt-0.5" }, "Next-best eligible players by position and PER-style value.")), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black uppercase tracking-widest text-violet-300 bg-violet-500/10 border border-violet-500/20 px-2 py-1 rounded-lg" }, "Second Team")), allWKNDSecondTeam.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-500 italic" }, "No second-team players yet") : /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-5 gap-2" }, allWKNDSecondTeam.map(({ slot, player }) => /* @__PURE__ */ React.createElement("div", { key: `mythical-second-${slot}-${player.id}`, className: "rounded-xl border border-slate-800 bg-slate-950/45 p-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 mb-2" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] font-black tracking-wider text-slate-100 shrink-0" }, slot), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] font-black uppercase tracking-widest text-slate-500" }, "PER ", Number(player.perStyleScore || 0).toFixed(1))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, player.pictureUrl ? /* @__PURE__ */ React.createElement(
+      "img",
+      {
+        src: player.pictureUrl,
+        alt: player.name,
+        className: "w-11 h-11 rounded-full border border-slate-700 object-cover shrink-0"
+      }
+    ) : /* @__PURE__ */ React.createElement("div", { className: "w-11 h-11 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0" }, "IMG"), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "truncate text-white font-extrabold text-sm" }, player.name), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 truncate mt-0.5" }, player.team), /* @__PURE__ */ React.createElement("div", { className: "mt-1 text-[10px] text-slate-400 flex flex-wrap gap-2" }, /* @__PURE__ */ React.createElement("span", null, player.gamesPlayed || 0, " GP"), /* @__PURE__ */ React.createElement("span", null, "PTS ", Number(getAverages(player).pts || 0).toFixed(1)), /* @__PURE__ */ React.createElement("span", null, "REB ", Number(getAverages(player).reb || 0).toFixed(1)), /* @__PURE__ */ React.createElement("span", null, "AST ", Number(getAverages(player).ast || 0).toFixed(1))))))))))), activeTab === "leaders" && /* @__PURE__ */ React.createElement("div", { className: "space-y-6" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-xl font-bold text-white font-sans" }, "League Leaders"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400" }, "Displaying performance standings across all active league roster fields.")), /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3" }, /* @__PURE__ */ React.createElement("h4", { className: "font-extrabold text-sm uppercase tracking-wide text-white" }, "Category Leaders"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex bg-slate-900 p-1 rounded-xl border border-slate-800 gap-0.5" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setLeadersStatMode("perGame"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${leadersStatMode === "perGame" ? "bg-orange-500 text-white shadow" : "text-slate-400"}`
+      },
+      "Per Game"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setLeadersStatMode("totals"),
+        className: `px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${leadersStatMode === "totals" ? "bg-orange-500 text-white shadow" : "text-slate-400"}`
+      },
+      "Accumulated"
+    )))), (() => {
+      const leaderDefs = [
+        { id: "pts", title: "Scoring", statLabel: "PTS", valueKey: "pts", colorClass: "text-orange-400" },
+        { id: "reb", title: "Rebounds", statLabel: "REB", valueKey: "reb", colorClass: "text-emerald-400" },
+        { id: "ast", title: "Assists", statLabel: "AST", valueKey: "ast", colorClass: "text-blue-400" },
+        { id: "stl", title: "Steals", statLabel: "STL", valueKey: "stl", colorClass: "text-teal-400" },
+        { id: "blk", title: "Blocks", statLabel: "BLK", valueKey: "blk", colorClass: "text-violet-400" },
+        { id: "fg3m", title: "3-Pointers Made", statLabel: "3PM", valueKey: "fg3m", colorClass: "text-sky-400" },
+        { id: "ftm", title: "Free Throws Made", statLabel: "FTM", valueKey: "ftm", colorClass: "text-pink-400" },
+        { id: "to", title: "Turnovers", statLabel: "TO", valueKey: "to", colorClass: "text-red-400" },
+        { id: "fgPct", title: "FG Accuracy", statLabel: "FG%", valueKey: "fgPct", colorClass: "text-cyan-400" },
+        { id: "fg3Pct", title: "3PT Accuracy", statLabel: "3P%", valueKey: "fg3Pct", colorClass: "text-sky-300" },
+        { id: "ftPct", title: "FT Accuracy", statLabel: "FT%", valueKey: "ftPct", colorClass: "text-fuchsia-400" },
+        { id: "pf", title: "Fouls", statLabel: "PF", valueKey: "pf", colorClass: "text-rose-400" }
+      ];
+      const leaders = leaderDefs.map((def) => {
+        const ranked = leaguePlayerPool.slice().sort((a, b) => getLeaderMetric(b, def.valueKey, leadersStatMode) - getLeaderMetric(a, def.valueKey, leadersStatMode));
+        return {
+          ...def,
+          ranked
+        };
+      });
+      return /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3" }, leaders.map((entry) => /* @__PURE__ */ React.createElement("div", { key: entry.id, className: "rounded-xl border border-slate-800 bg-slate-950/40 px-3 py-3" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-between gap-2 border-b border-slate-800 pb-2 mb-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 min-w-0" }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] font-black tracking-wider text-slate-100 shrink-0" }, entry.statLabel), /* @__PURE__ */ React.createElement("div", { className: "text-xs font-bold text-slate-200 truncate" }, entry.title)), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 shrink-0" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 font-bold" }, leadersStatMode === "perGame" ? "Per Game" : "Totals"), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => shareLeaderBlock(entry, leadersStatMode, "download"),
+          className: "text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-0.5",
+          title: `Download ${entry.title} leaders image`
+        },
+        /* @__PURE__ */ React.createElement(Icons.Download, null)
+      ), /* @__PURE__ */ React.createElement(
+        "button",
+        {
+          onClick: () => shareLeaderBlock(entry, leadersStatMode),
+          className: "text-slate-500 hover:text-slate-300 transition-colors cursor-pointer p-0.5",
+          title: `Share ${entry.title} leaders`
+        },
+        /* @__PURE__ */ React.createElement(Icons.Share, null)
+      ))), entry.ranked.length === 0 ? /* @__PURE__ */ React.createElement("div", { className: "text-xs text-slate-500 italic" }, "No players yet") : /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, /* @__PURE__ */ React.createElement("div", { className: "rounded-lg border border-orange-500/40 bg-orange-500/10 px-3 py-2 grid grid-cols-[auto_auto_1fr_auto] items-center gap-3" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono font-black text-orange-300 text-xs w-7 text-center" }, "#1"), entry.ranked[0].pictureUrl ? /* @__PURE__ */ React.createElement(
+        "img",
+        {
+          src: entry.ranked[0].pictureUrl,
+          alt: entry.ranked[0].name,
+          className: "w-10 h-10 rounded-full border border-slate-700 object-cover shrink-0"
+        }
+      ) : /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 rounded-full border border-slate-700 bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0" }, "IMG"), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "truncate text-white font-extrabold text-sm" }, entry.ranked[0].name), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 truncate mt-0.5" }, entry.ranked[0].team)), /* @__PURE__ */ React.createElement("div", { className: `font-mono font-black text-xl ${entry.colorClass} shrink-0` }, formatLeaderMetric(entry.ranked[0], entry.valueKey, leadersStatMode))), /* @__PURE__ */ React.createElement("div", { className: "space-y-1 max-h-[260px] overflow-y-auto pr-1" }, entry.ranked.slice(1).map((player, idx) => /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          key: `${entry.id}-${player.id}`,
+          className: "rounded-lg border px-2 py-1.5 flex items-center justify-between gap-2 bg-slate-900/70 border-slate-800"
+        },
+        /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 min-w-0" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono font-black w-6 text-center text-slate-500 text-[11px]" }, "#", idx + 2), /* @__PURE__ */ React.createElement("div", { className: "min-w-0" }, /* @__PURE__ */ React.createElement("div", { className: "truncate text-slate-200 font-bold text-xs" }, player.name), /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 truncate" }, player.team))),
+        /* @__PURE__ */ React.createElement("div", { className: `font-mono font-black text-sm ${entry.colorClass}` }, formatLeaderMetric(player, entry.valueKey, leadersStatMode))
+      )))))));
+    })()))), /* @__PURE__ */ React.createElement("footer", { className: "mt-16 pt-5 border-t border-slate-850 text-center text-[11px] text-slate-500 font-semibold uppercase tracking-wider font-mono" }, /* @__PURE__ */ React.createElement("p", null, "\xA9 2021-2026 WKND Basketaball.")), showStickyMobileActionsUi && activeTab === "live" && canOperateLive && isGameLive && /* @__PURE__ */ React.createElement("div", { className: "md:hidden fixed bottom-3 left-3 right-3 z-40" }, /* @__PURE__ */ React.createElement("div", { className: "rounded-2xl border border-slate-700 bg-slate-950/95 backdrop-blur-md shadow-2xl p-2.5" }, /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 gap-2" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: handleUndo,
+        disabled: !canUndoLatest,
+        className: "inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 py-2 text-[10px] font-black uppercase tracking-wide text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+      },
+      /* @__PURE__ */ React.createElement(Icons.Undo, null),
+      "Undo"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          if (recentActionIds.length > 0) {
+            const recentAction = liveActionById.get(recentActionIds[0]);
+            if (recentAction) {
+              openActionForTeam(recentAction, effectiveOperatorFocus === "away" ? false : true);
+            }
+          }
+        },
+        disabled: recentActionIds.length === 0,
+        className: "inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed"
+      },
+      /* @__PURE__ */ React.createElement(Icons.Zap, null),
+      recentActionIds.length > 0 ? "Repeat" : "Action"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: canFinalizeGame ? openEndGameConfirm : openFinalizePeriodConfirm,
+        disabled: canFinalizeGame ? false : !canEndCurrentPeriod,
+        className: "inline-flex items-center justify-center gap-1.5 rounded-xl border border-orange-500/45 bg-orange-500/15 py-2 text-[10px] font-black uppercase tracking-wide text-orange-200 disabled:opacity-40 disabled:cursor-not-allowed"
+      },
+      /* @__PURE__ */ React.createElement(Icons.Stop, null),
+      canFinalizeGame ? "End Match" : "End Period"
+    )))), editingGame && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-3xl shadow-2xl relative my-0 md:my-auto flex flex-col max-h-[85vh]" }, /* @__PURE__ */ React.createElement("div", { className: "border-b border-slate-800 pb-3 mb-4 flex-shrink-0" }, /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-black text-white" }, "Edit Game Box Score"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 mt-1.5" }, /* @__PURE__ */ React.createElement("label", { className: "text-[10px] text-slate-400 font-mono shrink-0" }, "Date:"), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "date",
+        value: editingGameDate,
+        onChange: (e) => setEditingGameDate(e.target.value),
+        className: "bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs text-white font-mono"
+      }
+    ), /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-500 font-mono truncate" }, "ID: ", editingGame.id))), /* @__PURE__ */ React.createElement("form", { onSubmit: handleSaveHistoricEdit, className: "space-y-4 overflow-y-auto flex-1 pr-1" }, /* @__PURE__ */ React.createElement("div", { className: "space-y-6" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-black text-emerald-400 uppercase tracking-widest mb-2 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full bg-emerald-400" }), " ", editingGame.teamAName, " (Home)"), /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, (teams.find((t) => t.id === editingGame.teamAId)?.players || []).map((player) => {
+      const isExpanded = expandedEditPlayerId === player.id;
+      const pstats = editStatsTemp[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+      return /* @__PURE__ */ React.createElement("div", { key: player.id, className: "bg-slate-955/60 border border-slate-850 rounded-xl overflow-hidden" }, /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onClick: () => setExpandedEditPlayerId(isExpanded ? null : player.id),
+          className: "p-3 flex items-center justify-between cursor-pointer hover:bg-slate-900/40 select-none"
+        },
+        /* @__PURE__ */ React.createElement("span", { className: "text-xs font-extrabold text-white" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono text-slate-500 mr-1.5" }, "#", player.number), " ", player.name),
+        /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800" }, "PTS: ", pstats.pts || 0, " \u2022 REB: ", pstats.reb || 0, " \u2022 AST: ", pstats.ast || 0)
+      ), isExpanded && /* @__PURE__ */ React.createElement("div", { className: "p-3 bg-slate-955 border-t border-slate-855 grid grid-cols-3 sm:grid-cols-5 gap-2.5 text-xs font-semibold" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "PTS"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.pts || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, pts: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "REB"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.reb || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, reb: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "AST"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.ast || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, ast: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "STL"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.stl || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, stl: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "BLK"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.blk || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, blk: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "TO"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.to || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, to: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "PF"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", max: "5", value: pstats.pf || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, pf: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "2PM"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg2m || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg2m: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "3PM"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg3m || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "2P Miss"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg2m_miss || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg2m_miss: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "3P Miss"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg3m_miss || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m_miss: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "FT Made"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.ftm || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, ftm: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "FT Miss"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.ft_miss || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, ft_miss: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" }))));
+    }))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h4", { className: "text-xs font-black text-red-400 uppercase tracking-widest mb-2 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement("span", { className: "w-2.5 h-2.5 rounded-full bg-red-400" }), " ", editingGame.teamBName, " (Away)"), /* @__PURE__ */ React.createElement("div", { className: "space-y-2" }, (teams.find((t) => t.id === editingGame.teamBId)?.players || []).map((player) => {
+      const isExpanded = expandedEditPlayerId === player.id;
+      const pstats = editStatsTemp[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+      return /* @__PURE__ */ React.createElement("div", { key: player.id, className: "bg-slate-955/60 border border-slate-850 rounded-xl overflow-hidden" }, /* @__PURE__ */ React.createElement(
+        "div",
+        {
+          onClick: () => setExpandedEditPlayerId(isExpanded ? null : player.id),
+          className: "p-3 flex items-center justify-between cursor-pointer hover:bg-slate-900/40 select-none"
+        },
+        /* @__PURE__ */ React.createElement("span", { className: "text-xs font-extrabold text-white" }, /* @__PURE__ */ React.createElement("span", { className: "font-mono text-slate-500 mr-1.5" }, "#", player.number), " ", player.name),
+        /* @__PURE__ */ React.createElement("span", { className: "text-[10px] text-slate-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800" }, "PTS: ", pstats.pts || 0, " \u2022 REB: ", pstats.reb || 0, " \u2022 AST: ", pstats.ast || 0)
+      ), isExpanded && /* @__PURE__ */ React.createElement("div", { className: "p-3 bg-slate-955 border-t border-slate-850 grid grid-cols-3 sm:grid-cols-5 gap-2.5 text-xs font-semibold" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "PTS"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.pts || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, pts: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "REB"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.reb || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, reb: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "AST"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.ast || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, ast: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "STL"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.stl || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, stl: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "BLK"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.blk || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, blk: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "TO"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.to || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, to: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "PF"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", max: "5", value: pstats.pf || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, pf: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "2PM"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg2m || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg2m: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "3PM"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg3m || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "2P Miss"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg2m_miss || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg2m_miss: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "3P Miss"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.fg3m_miss || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m_miss: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "FT Made"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.ftm || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, ftm: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1" }, "FT Miss"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "0", value: pstats.ft_miss || 0, onChange: (e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, ft_miss: parseInt(e.target.value, 10) || 0 } }), className: "w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" }))));
+    })))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2.5 pt-4 border-t border-slate-800 flex-shrink-0" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => {
+          setEditingGame(null);
+          setExpandedEditPlayerId(null);
+        },
+        className: "flex-1 py-2.5 bg-slate-955 text-slate-400 hover:text-white rounded-xl text-xs font-bold border border-slate-850 cursor-pointer"
+      },
+      "Cancel Edits"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "submit",
+        className: "flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg cursor-pointer"
+      },
+      "Save Changes"
+    ))))), isScheduleModalOpen && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-sm shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "border-b border-slate-800 pb-3 mb-4" }, /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-black text-white" }, "Schedule Game"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400" }, "Create an upcoming game without scores.")), /* @__PURE__ */ React.createElement("form", { onSubmit: async (e) => {
+      e.preventDefault();
+      if (!scheduleForm.date || !scheduleForm.teamAId || !scheduleForm.teamBId) {
+        showToast("Date, Team A, and Team B are required.", "error");
+        return;
+      }
+      if (scheduleForm.teamAId === scheduleForm.teamBId) {
+        showToast("Team A and Team B must be different.", "error");
+        return;
+      }
+      try {
+        const result = await apiRequest("/api/games/schedule", { method: "POST", body: JSON.stringify(scheduleForm) });
+        const teamAObj = teams.find((t) => t.id === scheduleForm.teamAId);
+        const teamBObj = teams.find((t) => t.id === scheduleForm.teamBId);
+        const newGame = {
+          id: result.gameId,
+          date: scheduleForm.date,
+          teamAId: scheduleForm.teamAId,
+          teamBId: scheduleForm.teamBId,
+          teamAName: teamAObj?.name || "",
+          teamBName: teamBObj?.name || "",
+          teamAScore: 0,
+          teamBScore: 0,
+          underReview: false,
+          scheduled: true,
+          playerStats: {},
+          dnpPlayers: [],
+          gameWriteup: "",
+          potgWriteup: "",
+          youtubeUrl: "",
+          season: scheduleForm.season || CURRENT_SEASON,
+          gameType: scheduleForm.gameType || "regular",
+          playoffRound: "",
+          seriesId: ""
+        };
+        setGames((prev) => [newGame, ...prev].sort((a, b) => String(b.id || "").localeCompare(String(a.id || ""))));
+        setIsScheduleModalOpen(false);
+        setScheduleForm({ date: "", teamAId: "", teamBId: "", gameType: "regular", season: CURRENT_SEASON });
+        showToast("Game scheduled!", "success");
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    }, className: "space-y-3 text-xs" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1 uppercase tracking-wide" }, "Game Date"), /* @__PURE__ */ React.createElement("input", { type: "date", required: true, value: scheduleForm.date, onChange: (e) => setScheduleForm((f) => ({ ...f, date: e.target.value })), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1 uppercase tracking-wide" }, "Team A (Home)"), /* @__PURE__ */ React.createElement("select", { required: true, value: scheduleForm.teamAId, onChange: (e) => setScheduleForm((f) => ({ ...f, teamAId: e.target.value })), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Select \u2014"), teams.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.name)))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1 uppercase tracking-wide" }, "Team B (Away)"), /* @__PURE__ */ React.createElement("select", { required: true, value: scheduleForm.teamBId, onChange: (e) => setScheduleForm((f) => ({ ...f, teamBId: e.target.value })), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" }, /* @__PURE__ */ React.createElement("option", { value: "" }, "\u2014 Select \u2014"), teams.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.name)))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex-1" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1 uppercase tracking-wide" }, "Type"), /* @__PURE__ */ React.createElement("select", { value: scheduleForm.gameType, onChange: (e) => setScheduleForm((f) => ({ ...f, gameType: e.target.value })), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" }, /* @__PURE__ */ React.createElement("option", { value: "regular" }, "Regular"), /* @__PURE__ */ React.createElement("option", { value: "playoff" }, "Playoff"), /* @__PURE__ */ React.createElement("option", { value: "tiebreaker" }, "Tiebreaker"))), /* @__PURE__ */ React.createElement("div", { className: "w-20" }, /* @__PURE__ */ React.createElement("label", { className: "block text-[10px] text-slate-400 mb-1 uppercase tracking-wide" }, "Season"), /* @__PURE__ */ React.createElement("input", { type: "number", min: "1", value: scheduleForm.season, onChange: (e) => setScheduleForm((f) => ({ ...f, season: parseInt(e.target.value, 10) || CURRENT_SEASON })), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono" }))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 pt-2 font-bold" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setIsScheduleModalOpen(false), className: "flex-1 py-2.5 bg-slate-955 text-slate-400 rounded-xl border border-slate-850 cursor-pointer" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl cursor-pointer" }, "Schedule"))))), importResultsState && importResultsState.step === "preview" && (() => {
+      const { scheduledGame, jsonData } = importResultsState;
+      const gameMeta = jsonData?.game || {};
+      const importedAName = String(gameMeta.teamAName || jsonData?.teamAName || "");
+      const importedBName = String(gameMeta.teamBName || jsonData?.teamBName || "");
+      const scheduledAName = String(scheduledGame?.teamAName || "");
+      const scheduledBName = String(scheduledGame?.teamBName || "");
+      const teamMismatch = importedAName && scheduledAName && (importedAName.toUpperCase() !== scheduledAName.toUpperCase() || importedBName.toUpperCase() !== scheduledBName.toUpperCase());
+      const playerCount = Object.keys(gameMeta.playerStats || {}).length;
+      const writeupSnippet = String(gameMeta.gameWriteup || "").trim().slice(0, 120);
+      const handleConfirm = async () => {
+        try {
+          const mergedGame = {
+            id: scheduledGame.id,
+            date: scheduledGame.date || gameMeta.date || "",
+            teamAId: scheduledGame.teamAId || "",
+            teamBId: scheduledGame.teamBId || "",
+            teamAName: scheduledAName || importedAName,
+            teamBName: scheduledBName || importedBName,
+            teamAScore: Number(gameMeta.teamAScore || 0),
+            teamBScore: Number(gameMeta.teamBScore || 0),
+            underReview: false,
+            scheduled: false,
+            playerStats: gameMeta.playerStats || {},
+            dnpPlayers: Array.isArray(jsonData?.dnpPlayers) ? jsonData.dnpPlayers : [],
+            periodSnapshots: Array.isArray(jsonData?.periodSnapshots) ? jsonData.periodSnapshots : [],
+            gameLog: Array.isArray(jsonData?.gameLog) ? jsonData.gameLog : [],
+            gameWriteup: gameMeta.gameWriteup || "",
+            potgWriteup: gameMeta.potgWriteup || "",
+            youtubeUrl: gameMeta.youtubeUrl || "",
+            season: scheduledGame.season || 3,
+            gameType: scheduledGame.gameType || "regular"
+          };
+          await apiRequest(`/api/games/${encodeURIComponent(scheduledGame.id)}`, {
+            method: "PUT",
+            body: JSON.stringify({ game: mergedGame })
+          });
+          setGames((prev) => prev.map(
+            (g) => g.id === scheduledGame.id ? { ...g, teamAScore: mergedGame.teamAScore, teamBScore: mergedGame.teamBScore, scheduled: false, gameWriteup: mergedGame.gameWriteup, potgWriteup: mergedGame.potgWriteup, youtubeUrl: mergedGame.youtubeUrl, _detailLoaded: false } : g
+          ));
+          setImportResultsState(null);
+          showToast("Game log attached to scheduled game!", "success");
+        } catch (err) {
+          showToast(err.message, "error");
+        }
+      };
+      return /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-lg shadow-2xl" }, /* @__PURE__ */ React.createElement("div", { className: "border-b border-slate-800 pb-3 mb-4" }, /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-black text-white" }, "Attach Game Log"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400" }, "Review before confirming.")), /* @__PURE__ */ React.createElement("div", { className: "space-y-3 text-xs mb-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-sky-500/10 border border-sky-500/30 rounded-xl p-3" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] font-bold text-sky-400 uppercase tracking-wide mb-1" }, "Scheduled Game (target)"), /* @__PURE__ */ React.createElement("div", { className: "text-white font-bold" }, scheduledAName, " vs ", scheduledBName), /* @__PURE__ */ React.createElement("div", { className: "text-slate-400 font-mono text-[10px] mt-0.5" }, scheduledGame?.date, " \xB7 ID: ", scheduledGame?.id)), /* @__PURE__ */ React.createElement("div", { className: `rounded-xl p-3 border ${teamMismatch ? "bg-amber-500/10 border-amber-500/40" : "bg-emerald-500/10 border-emerald-500/30"}` }, /* @__PURE__ */ React.createElement("div", { className: `text-[10px] font-bold uppercase tracking-wide mb-1 ${teamMismatch ? "text-amber-400" : "text-emerald-400"}` }, "From Game Log File"), /* @__PURE__ */ React.createElement("div", { className: "text-white font-bold" }, importedAName || "?", " vs ", importedBName || "?"), /* @__PURE__ */ React.createElement("div", { className: "text-slate-300 font-bold mt-1" }, "Score: ", Number(gameMeta.teamAScore || 0), " \u2013 ", Number(gameMeta.teamBScore || 0)), /* @__PURE__ */ React.createElement("div", { className: "text-slate-400 mt-1" }, playerCount, " player stat lines \xB7 ", Array.isArray(jsonData?.gameLog) ? jsonData.gameLog.length : 0, " log entries"), writeupSnippet && /* @__PURE__ */ React.createElement("div", { className: "text-slate-500 italic mt-1.5 line-clamp-2" }, writeupSnippet, writeupSnippet.length >= 120 ? "..." : "")), teamMismatch && /* @__PURE__ */ React.createElement("div", { className: "bg-red-500/10 border border-red-500/40 rounded-xl p-3 text-red-300 text-xs" }, /* @__PURE__ */ React.createElement("div", { className: "font-bold mb-1" }, "Team mismatch \u2014 cannot attach."), /* @__PURE__ */ React.createElement("div", { className: "text-red-400" }, "Scheduled: ", /* @__PURE__ */ React.createElement("span", { className: "text-white font-bold" }, scheduledAName), " vs ", /* @__PURE__ */ React.createElement("span", { className: "text-white font-bold" }, scheduledBName)), /* @__PURE__ */ React.createElement("div", { className: "text-red-400" }, "File: ", /* @__PURE__ */ React.createElement("span", { className: "text-white font-bold" }, importedAName), " vs ", /* @__PURE__ */ React.createElement("span", { className: "text-white font-bold" }, importedBName)), /* @__PURE__ */ React.createElement("div", { className: "mt-1.5 text-red-400" }, "Make sure you're uploading the correct game log, or check that the scheduled game has the right teams."))), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 font-bold" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setImportResultsState(null), className: "flex-1 py-2.5 bg-slate-955 text-slate-400 rounded-xl border border-slate-850 cursor-pointer text-xs" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: handleConfirm, disabled: teamMismatch, className: "flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl cursor-pointer text-xs" }, teamMismatch ? "Fix team mismatch to continue" : "Confirm Attach"))));
+    })(), showNewTeamModal && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-white mb-3" }, "Create League Franchise"), /* @__PURE__ */ React.createElement("form", { onSubmit: handleCreateTeam, className: "space-y-3 text-xs" }, /* @__PURE__ */ React.createElement("input", { type: "text", value: newTeamName, onChange: (e) => setNewTeamName(e.target.value), placeholder: "Team Name", className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white", required: true }), /* @__PURE__ */ React.createElement("input", { type: "color", value: newTeamColor, onChange: (e) => setNewTeamColor(e.target.value), className: "w-8 h-8 bg-transparent border-0 cursor-pointer block" }), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 font-bold pt-1" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setShowNewTeamModal(false), className: "flex-1 py-2 bg-slate-955 text-slate-400 rounded-xl border border-slate-855" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "flex-1 py-2 bg-emerald-600 text-white rounded-xl" }, "Create"))))), showNewPlayerModal && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-white mb-3" }, "Register Roster Entry"), /* @__PURE__ */ React.createElement("form", { onSubmit: handleCreatePlayer, className: "space-y-3 text-xs" }, /* @__PURE__ */ React.createElement("select", { value: selectedTeamIdForPlayer, onChange: (e) => setSelectedTeamIdForPlayer(e.target.value), className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" }, teams.map((t) => /* @__PURE__ */ React.createElement("option", { key: t.id, value: t.id }, t.name))), /* @__PURE__ */ React.createElement("input", { type: "text", value: newPlayerName, onChange: (e) => setNewPlayerName(e.target.value), placeholder: "Full Name", className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white", required: true }), /* @__PURE__ */ React.createElement("input", { type: "text", value: newPlayerNumber, onChange: (e) => setNewPlayerNumber(e.target.value), placeholder: "Jersey No.", className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono", required: true }), /* @__PURE__ */ React.createElement("input", { type: "text", value: newPlayerHeight, onChange: (e) => setNewPlayerHeight(e.target.value), placeholder: "Height (e.g. 6'4, 6-4, 193cm)", className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono" }), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 font-bold pt-1" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setShowNewPlayerModal(false), className: "flex-1 py-2 bg-slate-955 text-slate-400 rounded-xl border border-slate-850" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "flex-1 py-2 bg-emerald-600 text-white rounded-xl" }, "Register"))))), advancedEditingPlayer && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-lg relative max-h-[85vh] overflow-y-auto" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-white mb-1" }, "Advanced Player Profile"), /* @__PURE__ */ React.createElement("p", { className: "text-[11px] text-slate-400 mb-3" }, "#", advancedEditingPlayer.number, " ", advancedEditingPlayer.name), /* @__PURE__ */ React.createElement("form", { onSubmit: handleSaveAdvancedPlayerProfile, className: "space-y-3 text-xs" }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "text",
+        value: advancedEditingPlayer.pictureUrl,
+        onChange: (e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, pictureUrl: e.target.value }),
+        placeholder: "Picture URL or filename (e.g. player-1.jpg)",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+      }
+    ), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-slate-500 -mt-1" }, "Use an external image URL, or type a filename for an image you manually placed in data/player-images."), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-3" }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "text",
+        value: advancedEditingPlayer.height || "",
+        onChange: (e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, height: e.target.value }),
+        placeholder: "Height (e.g. 6'4, 6-4, 193cm)",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono"
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "date",
+        value: advancedEditingPlayer.birthday,
+        onChange: (e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, birthday: e.target.value }),
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+      }
+    )), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "email",
+        value: advancedEditingPlayer.email,
+        onChange: (e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, email: e.target.value }),
+        placeholder: "Email",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "text",
+        value: advancedEditingPlayer.social,
+        onChange: (e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, social: e.target.value }),
+        placeholder: "Social (e.g. @handle, link)",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+      }
+    ), /* @__PURE__ */ React.createElement(
+      "textarea",
+      {
+        value: advancedEditingPlayer.writeup,
+        onChange: (e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, writeup: e.target.value }),
+        placeholder: "Player Description",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white text-xs resize-none min-h-[90px]"
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/40 p-3" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-400 mb-2 uppercase tracking-widest font-bold text-center" }, "Playing Positions"), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-3 sm:grid-cols-5 gap-2 place-items-center" }, PLAYER_POSITIONS.map((pos) => {
+      const isSelected = Array.isArray(advancedEditingPlayer.positions) && advancedEditingPlayer.positions.includes(pos);
+      return /* @__PURE__ */ React.createElement("label", { key: pos, className: `flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 cursor-pointer select-none text-center ${isSelected ? "border-cyan-500/60 bg-cyan-500/10 text-cyan-200" : "border-slate-800 bg-slate-950 text-slate-300"}` }, /* @__PURE__ */ React.createElement(
+        "input",
+        {
+          type: "checkbox",
+          checked: isSelected,
+          onChange: (e) => {
+            const current = Array.isArray(advancedEditingPlayer.positions) ? advancedEditingPlayer.positions : [];
+            const next = e.target.checked ? [...current, pos] : current.filter((item) => item !== pos);
+            setAdvancedEditingPlayer({ ...advancedEditingPlayer, positions: next });
+          },
+          className: "accent-cyan-500"
+        }
+      ), /* @__PURE__ */ React.createElement("span", { className: "font-mono font-bold text-[11px]" }, pos));
+    }))), /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "text",
+        value: advancedEditingPlayer.contact,
+        onChange: (e) => setAdvancedEditingPlayer({ ...advancedEditingPlayer, contact: e.target.value }),
+        placeholder: "Contact Number",
+        className: "w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 font-bold pt-1" }, /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => setAdvancedEditingPlayer(null), className: "flex-1 py-2 bg-slate-955 text-slate-400 rounded-xl border border-slate-850" }, "Cancel"), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl" }, "Save Profile"))))), showSubstitutionModal && subTargetPlayer && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/75 flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-hidden" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-white mb-3 flex items-center gap-1" }, /* @__PURE__ */ React.createElement(Icons.ArrowRightLeft, null), " Substitute Athlete"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1 max-h-[min(60vh,320px)] overflow-y-auto pr-1", style: { scrollbarGutter: "stable" } }, (() => {
+      const benchIds = (subTargetPlayer.team === "A" ? teamABench : teamBBench).filter((benchId) => !dnpPlayers.includes(benchId));
+      const teamId = subTargetPlayer.team === "A" ? teamAId : teamBId;
+      const teamObj = subTargetPlayer.team === "A" ? teams.find((t) => t.id === teamAId) : teams.find((t) => t.id === teamBId);
+      const lineupIds = subTargetPlayer.team === "A" ? teamALineup : teamBLineup;
+      const orderedLineupEntries = getOrderedLiveLineupEntries(teamId, lineupIds);
+      const targetEntry = orderedLineupEntries.find((entry) => entry.playerId === subTargetPlayer.id);
+      const targetSlot = targetEntry?.slot || "";
+      const targetPlayer = teamObj?.players.find((x) => x.id === subTargetPlayer.id);
+      const targetPositions = normalizePlayerPositions(targetPlayer);
+      const benchEntries = benchIds.map((benchId) => {
+        const p = teamObj?.players.find((x) => x.id === benchId);
+        const playerPositions = normalizePlayerPositions(p);
+        const matchCount = targetPositions.filter((pos) => playerPositions.includes(pos)).length;
+        const height = parsePlayerHeightInches(p);
+        const slotScore = targetSlot ? getLiveLineupSlotFitScore(p, targetSlot).maxScore : matchCount > 0 ? 500 : 0;
+        const purityBonus = targetSlot === "C" ? playerPositions.includes("C") && playerPositions.length === 1 ? 2 : playerPositions.includes("C") ? 1 : 0 : targetSlot === "PF" ? playerPositions.includes("PF") && !playerPositions.includes("SG") && !playerPositions.includes("PG") ? 2 : playerPositions.includes("PF") ? 1 : 0 : targetSlot === "SF" ? playerPositions.includes("SF") && !playerPositions.includes("PG") ? 2 : playerPositions.includes("SF") ? 1 : 0 : targetSlot === "SG" ? playerPositions.includes("SG") && !playerPositions.includes("C") ? 2 : playerPositions.includes("SG") ? 1 : 0 : targetSlot === "PG" ? playerPositions.includes("PG") && playerPositions.length === 1 ? 2 : playerPositions.includes("PG") ? 1 : 0 : 0;
+        const fouls = Number(liveStats[benchId]?.pf || 0);
+        return { benchId, p, matchCount, height, slotScore, purityBonus, fouls };
+      });
+      const orderedBenchEntries = benchEntries.slice().sort((a, b) => {
+        if (b.slotScore !== a.slotScore) return b.slotScore - a.slotScore;
+        const heightDiff = b.height - a.height;
+        if (heightDiff !== 0) return heightDiff;
+        if (b.purityBonus !== a.purityBonus) return b.purityBonus - a.purityBonus;
+        if (a.fouls !== b.fouls) return a.fouls - b.fouls;
+        if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+        return String(a.p?.name || "").localeCompare(String(b.p?.name || ""));
+      });
+      return orderedBenchEntries.map(({ benchId, p }) => {
+        const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
+        const initials = (p?.name || "?").split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "?";
+        return p ? /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: benchId,
+            disabled: isFouledOut,
+            onClick: () => executeSubstitution(subTargetPlayer.id, benchId, subTargetPlayer.team === "A"),
+            className: "w-full p-1.5 bg-slate-955 border border-slate-800/55 rounded-xl text-slate-200 text-left cursor-pointer hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55"
+          },
+          /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-10 h-10 rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100 text-base" }, p.number), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-[12px] font-black text-white truncate leading-tight" }, p.name), /* @__PURE__ */ React.createElement("div", { className: `text-[9px] font-bold mt-0.5 leading-none ${isFouledOut ? "text-red-400" : "text-emerald-400"}` }, isFouledOut ? "5 PF - Not Eligible" : "Tap to Sub In")), /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400" }, p.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: p.pictureUrl, alt: p.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", null, initials)))
+        ) : null;
+      });
+    })()), /* @__PURE__ */ React.createElement("button", { onClick: handleCancelSubstitutionModal, className: "w-full mt-3 py-2 bg-slate-950 text-slate-400 border border-slate-855 text-xs rounded-xl cursor-pointer" }, "Cancel"))), showAddFromBenchModal && addFromBenchTeam && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/75 flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative font-sans max-h-[85vh] overflow-hidden" }, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-bold text-white mb-3" }, "Add Player To On-Court"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1 max-h-[min(60vh,320px)] overflow-y-auto pr-1", style: { scrollbarGutter: "stable" } }, (() => {
+      const isTeamA = addFromBenchTeam === "A";
+      const lineupIds = isTeamA ? teamALineup : teamBLineup;
+      const benchIds = isTeamA ? teamABench : teamBBench;
+      const teamObj = isTeamA ? teams.find((t) => t.id === teamAId) : teams.find((t) => t.id === teamBId);
+      const rosterIds = (teamObj?.players || []).map((p) => p.id);
+      const fallbackCandidates = rosterIds.filter((id) => !lineupIds.includes(id) && !dnpPlayers.includes(id));
+      const candidateIds = (benchIds.length > 0 ? benchIds : fallbackCandidates).filter((id) => !dnpPlayers.includes(id));
+      const availableSlots = Math.max(0, 5 - lineupIds.length);
+      const sortedCandidateIds = candidateIds.slice().sort((a, b) => {
+        const pa = teamObj?.players.find((x) => x.id === a);
+        const pb = teamObj?.players.find((x) => x.id === b);
+        const posA = normalizePlayerPositions(pa);
+        const posB = normalizePlayerPositions(pb);
+        const slotScore = (positions) => positions.reduce((bestRank, position) => {
+          const rank = LIVE_LINEUP_DISPLAY_POSITIONS.indexOf(position);
+          return Math.min(bestRank, rank === -1 ? LIVE_LINEUP_DISPLAY_POSITIONS.length : rank);
+        }, LIVE_LINEUP_DISPLAY_POSITIONS.length);
+        const slotDiff = slotScore(posA) - slotScore(posB);
+        if (slotDiff !== 0) return slotDiff;
+        const heightDiff = parsePlayerHeightInches(pb) - parsePlayerHeightInches(pa);
+        if (heightDiff !== 0) return heightDiff;
+        const jerseyDiff = (Number(pa?.number || 0) || Number.MAX_SAFE_INTEGER) - (Number(pb?.number || 0) || Number.MAX_SAFE_INTEGER);
+        if (jerseyDiff !== 0) return jerseyDiff;
+        return String(pa?.name || "").localeCompare(String(pb?.name || ""));
+      });
+      return sortedCandidateIds.map((benchId) => {
+        const p = teamObj?.players.find((x) => x.id === benchId);
+        const isFouledOut = (liveStats[benchId]?.pf || 0) >= 5;
+        const isSelected = addFromBenchSelection.includes(benchId);
+        const isSlotLocked = !isSelected && addFromBenchSelection.length >= availableSlots;
+        const isDisabled = isFouledOut || isSlotLocked;
+        const initials = (p?.name || "?").split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "?";
+        return p ? /* @__PURE__ */ React.createElement(
+          "button",
+          {
+            key: `add-modal-${benchId}`,
+            type: "button",
+            disabled: isDisabled,
+            onClick: () => {
+              setAddFromBenchSelection((prev) => {
+                if (prev.includes(benchId)) {
+                  return prev.filter((id) => id !== benchId);
+                }
+                if (prev.length >= availableSlots) {
+                  showToast(`You can only add up to ${availableSlots} player${availableSlots > 1 ? "s" : ""}.`, "info");
+                  return prev;
+                }
+                return [...prev, benchId];
+              });
+            },
+            className: `w-full p-1.5 rounded-xl border transition-colors text-left disabled:opacity-35 disabled:cursor-not-allowed ${isSelected ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-100" : "bg-slate-955 border-slate-800/55 text-slate-200 hover:border-emerald-500/45"} ${isSlotLocked ? "saturate-0" : ""} disabled:hover:border-slate-800/55`
+          },
+          /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "w-10 h-10 rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100 text-base" }, p.number), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: "text-[12px] font-black text-white truncate leading-tight" }, p.name), /* @__PURE__ */ React.createElement("div", { className: isFouledOut ? "text-[9px] text-red-400 font-bold mt-0.5" : isSlotLocked ? "text-[9px] text-slate-500 font-bold mt-0.5" : isSelected ? "text-[9px] text-emerald-300 font-bold mt-0.5" : "text-[9px] text-slate-400 font-bold mt-0.5" }, isFouledOut ? "5 PF" : isSlotLocked ? "Full" : isSelected ? "Selected" : "Select")), /* @__PURE__ */ React.createElement("div", { className: "w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400" }, p.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: p.pictureUrl, alt: p.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", null, initials)))
+        ) : null;
+      });
+    })()), /* @__PURE__ */ React.createElement("div", { className: "mt-3 grid grid-cols-2 gap-2" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: handleCancelAddFromBenchModal,
+        className: "py-2 bg-slate-950 text-slate-400 border border-slate-855 text-xs rounded-xl cursor-pointer"
+      },
+      "Cancel"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: () => handleAddMultipleOnCourtPlayers(addFromBenchSelection, addFromBenchTeam === "A"),
+        disabled: addFromBenchSelection.length === 0,
+        className: "py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+      },
+      `Add Selected (${addFromBenchSelection.length})`
+    )))), showLoggingModal && activeAction && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: `bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full shadow-2xl relative my-0 md:my-auto max-h-[85vh] overflow-y-auto ${isCompactRecordActionModal ? "max-w-xl p-4" : "max-w-2xl p-5"}` }, /* @__PURE__ */ React.createElement("div", { className: `rounded-xl border ${isCompactRecordActionModal ? "p-2 mb-2" : "p-3 mb-3"}`, style: activeActionTone.surfaceStyle }, /* @__PURE__ */ React.createElement("div", { className: "text-center" }, /* @__PURE__ */ React.createElement("div", { className: `text-[10px] font-black uppercase tracking-[0.2em] ${activeActionTone.textClass}` }, "Armed Stat Action"), /* @__PURE__ */ React.createElement("h3", { className: `${isCompactRecordActionModal ? "text-base mt-1" : "text-xl mt-1"} font-black text-white leading-tight` }, "Record Action:", /* @__PURE__ */ React.createElement("span", { className: `ml-2 inline-flex items-center rounded-md border px-2 py-0.5 font-mono tracking-wide ${activeActionTone.textClass}`, style: activeActionTone.badgeStyle }, activeActionLabelOverride || activeAction.label)))), /* @__PURE__ */ React.createElement("div", { className: `text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? "mb-2 text-[9px]" : "mb-3 text-[10px]"}` }, "Operator Handling: ", /* @__PURE__ */ React.createElement("span", { className: "text-orange-300" }, operatorHandledTeamLabel)), !displayIsPeriodClockRunning && hasMatchStarted && !canBackfillEndedPeriodStats && !isAwaitingPeriodStart && !awaitingOvertimeDecision && /* @__PURE__ */ React.createElement("div", { className: `mb-2 rounded-lg border border-red-500/45 bg-red-500/12 px-2.5 py-2 text-[10px] font-black text-red-200 ${isCompactRecordActionModal ? "" : "mb-3"}` }, /* @__PURE__ */ React.createElement("span", { className: "inline-flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icons.Timer, null), "CLOCK STOPPED: this action may require clock resume."), !isAutoResumeActionArmed && /* @__PURE__ */ React.createElement("span", { className: "ml-1 text-amber-200" }, "You will be asked to Resume & Record.")), /* @__PURE__ */ React.createElement("div", { className: `grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? "md:grid-cols-2" : "md:grid-cols-1"} ${isCompactRecordActionModal ? "gap-2.5" : "gap-4"}` }, showHomeLivePanel && /* @__PURE__ */ React.createElement("div", { className: `bg-slate-950/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? "p-2.5" : "p-3"}` }, /* @__PURE__ */ React.createElement("div", { className: `font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? "text-[9px] mb-1.5" : "text-[10px] mb-2"}` }, homeTeamLabel, " On Court"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, getOrderedLiveLineupEntries(teamAId, teamALineup).map(({ playerId: id }) => {
+      const p = teams.flatMap((t) => t.players).find((x) => x.id === id);
+      const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
+      const initials = (p?.name || "?").split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "?";
+      return p ? /* @__PURE__ */ React.createElement("button", { key: id, type: "button", disabled: isFouledOut, onClick: () => handlePlayerClick(id, true, { skipAccessChecks: true }), className: `w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? "p-1" : "p-1.5"}` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: `${isCompactRecordActionModal ? "w-8 h-8 text-sm" : "w-9 h-9 text-base"} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100` }, p.number), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: `${isCompactRecordActionModal ? "text-[11px]" : "text-[12px]"} font-black text-white truncate leading-tight` }, p.name)), /* @__PURE__ */ React.createElement("div", { className: `${isCompactRecordActionModal ? "w-8 h-8" : "w-9 h-9"} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400` }, p.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: p.pictureUrl, alt: p.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", null, initials)))) : null;
+    }))), showAwayLivePanel && /* @__PURE__ */ React.createElement("div", { className: `bg-slate-955/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? "p-2.5" : "p-3"}` }, /* @__PURE__ */ React.createElement("div", { className: `font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? "text-[9px] mb-1.5" : "text-[10px] mb-2"}` }, awayTeamLabel, " On Court"), /* @__PURE__ */ React.createElement("div", { className: "space-y-1" }, getOrderedLiveLineupEntries(teamBId, teamBLineup).map(({ playerId: id }) => {
+      const p = teams.flatMap((t) => t.players).find((x) => x.id === id);
+      const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
+      const initials = (p?.name || "?").split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "?";
+      return p ? /* @__PURE__ */ React.createElement("button", { key: id, type: "button", disabled: isFouledOut, onClick: () => handlePlayerClick(id, false, { skipAccessChecks: true }), className: `w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? "p-1" : "p-1.5"}` }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: `${isCompactRecordActionModal ? "w-8 h-8 text-sm" : "w-9 h-9 text-base"} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100` }, p.number), /* @__PURE__ */ React.createElement("div", { className: "min-w-0 flex-1" }, /* @__PURE__ */ React.createElement("div", { className: `${isCompactRecordActionModal ? "text-[11px]" : "text-[12px]"} font-black text-white truncate leading-tight` }, p.name)), /* @__PURE__ */ React.createElement("div", { className: `${isCompactRecordActionModal ? "w-8 h-8" : "w-9 h-9"} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400` }, p.pictureUrl ? /* @__PURE__ */ React.createElement("img", { src: p.pictureUrl, alt: p.name, className: "w-full h-full object-cover" }) : /* @__PURE__ */ React.createElement("span", null, initials)))) : null;
+    })))), /* @__PURE__ */ React.createElement("button", { onClick: handleCancelActionModal, className: `w-full py-2 bg-slate-950 text-slate-400 text-xs rounded-xl font-bold cursor-pointer ${isCompactRecordActionModal ? "mt-3" : "mt-4"}` }, "Cancel Action"))), isLoggedIn && canOperateLive && liveLogEditTarget && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 shadow-2xl relative my-0 md:my-auto space-y-3 max-h-[85vh] overflow-y-auto" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h3", { className: "text-sm font-black text-white uppercase tracking-wider" }, "Edit Live Log Action"), /* @__PURE__ */ React.createElement("p", { className: "mt-1 text-[11px] text-slate-400" }, "Current-period entries only. Prior periods remain locked.")), /* @__PURE__ */ React.createElement("div", { className: "rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 text-[11px] text-slate-300" }, /* @__PURE__ */ React.createElement("div", { className: "text-[10px] text-slate-500 uppercase tracking-wider mb-1" }, "Selected Log"), /* @__PURE__ */ React.createElement("div", { className: "break-words" }, String(liveLogEditTarget.text || "").replace(/^\[(HOME|AWAY)\]\s*/, ""))), /* @__PURE__ */ React.createElement("div", { className: "space-y-2.5 rounded-xl border border-slate-800 bg-slate-950/55 p-2.5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs font-bold text-slate-400 tracking-wider uppercase mb-1" }, "Action"), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: editingLiveLogActionId,
+        onChange: (e) => setEditingLiveLogActionId(e.target.value),
+        className: "w-full bg-slate-900/80 border border-slate-700 rounded-xl p-2.5 text-white text-xs font-bold uppercase tracking-wider"
+      },
+      editableLiveStatActions.map((action) => /* @__PURE__ */ React.createElement("option", { key: `live-edit-action-${action.id}`, value: action.id }, String(action.label || "").toUpperCase()))
+    )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("label", { className: "block text-xs font-bold text-slate-400 tracking-wider uppercase mb-1" }, "Player"), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: selectedPlayerId,
+        onChange: (e) => setSelectedPlayerId(e.target.value),
+        className: "w-full bg-slate-900/80 border border-slate-700 rounded-xl p-2.5 text-white text-xs font-bold uppercase tracking-wider"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "" }, "SELECT PLAYER"),
+      liveLogEditTargetPlayers.map((player) => /* @__PURE__ */ React.createElement("option", { key: `live-edit-player-${player.id}`, value: player.id }, formatLiveLogEditPlayerLabel(player)))
+    ))), /* @__PURE__ */ React.createElement("div", { className: "grid grid-cols-2 gap-2 pt-1" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: handleCloseLiveLogEdit,
+        className: "py-2 bg-slate-950 text-slate-400 border border-slate-800 text-xs rounded-xl cursor-pointer"
+      },
+      "Cancel"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        type: "button",
+        onClick: handleApplyLiveLogEdit,
+        disabled: !editingLiveLogActionId,
+        className: "py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+      },
+      "Apply Edit"
+    )))), foulAlert && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: `border p-6 rounded-t-2xl md:rounded-2xl w-full max-w-sm shadow-2xl relative text-center my-0 md:my-auto max-h-[85vh] overflow-y-auto ${foulAlert.type === "disqualified" ? "bg-red-955/90 border-red-500" : "bg-amber-955 border-amber-700"}` }, /* @__PURE__ */ React.createElement("div", { className: "text-4xl mb-3" }, foulAlert.type === "disqualified" ? "\u{1F6A8}" : "\u26A0\uFE0F"), /* @__PURE__ */ React.createElement("h3", { className: "text-lg font-black text-white uppercase tracking-wider mb-2" }, foulAlert.type === "disqualified" ? "Fouled Out (Disqualified)" : "Foul Trouble Warning"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-slate-200 leading-relaxed mb-4" }, /* @__PURE__ */ React.createElement("strong", { className: "text-white" }, "#", foulAlert.number, " ", foulAlert.playerName), " has reached ", /* @__PURE__ */ React.createElement("strong", { className: "text-orange-400" }, foulAlert.fouls, " personal fouls"), ".", foulAlert.type === "disqualified" ? " This player has officially fouled out and must be substituted off the court." : " They are now in severe foul trouble and are only one foul away from disqualification."), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => setFoulAlert(null),
+        className: `w-full py-2.5 rounded-xl text-xs font-bold text-white transition-colors cursor-pointer ${foulAlert.type === "disqualified" ? "bg-red-600 hover:bg-red-500" : "bg-amber-600 hover:bg-amber-500"}`
+      },
+      "Acknowledge Alert"
+    ))), confirmDialog && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto" }, /* @__PURE__ */ React.createElement("h3", { className: "text-md font-extrabold text-white mb-2" }, confirmDialog.title), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-400 mb-4" }, confirmDialog.text), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 text-xs font-bold" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setConfirmDialog(null), className: "flex-1 py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer" }, confirmDialog.cancelLabel || "Cancel"), /* @__PURE__ */ React.createElement("button", { onClick: confirmDialog.onConfirm, className: "flex-1 py-2 bg-red-600 text-white rounded-xl cursor-pointer" }, confirmDialog.confirmLabel || "Confirm")))), reasonInput && /* @__PURE__ */ React.createElement("div", { className: "fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4" }, /* @__PURE__ */ React.createElement("div", { className: "bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto" }, /* @__PURE__ */ React.createElement("h3", { className: "text-md font-extrabold text-white mb-2" }, reasonInput.type === "technicalFoul" ? `Technical Foul - ${reasonInput.playerName}` : "Officials Timeout"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-slate-300 mb-4" }, reasonInput.type === "technicalFoul" ? "Select or enter a reason for the technical foul:" : "Select or enter a reason for the officials timeout:"), /* @__PURE__ */ React.createElement(
+      "select",
+      {
+        value: reasonInput.selectedReason || "",
+        onChange: (e) => setReasonInput({ ...reasonInput, selectedReason: e.target.value, customReason: "" }),
+        className: "w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 text-slate-100 rounded-lg mb-3 focus:outline-none focus:border-blue-500 cursor-pointer"
+      },
+      /* @__PURE__ */ React.createElement("option", { value: "" }, "-- Select a reason --"),
+      reasonInput.type === "technicalFoul" ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("option", { value: "Excessive timeouts" }, "Excessive timeouts"), /* @__PURE__ */ React.createElement("option", { value: "Abusive language" }, "Abusive language"), /* @__PURE__ */ React.createElement("option", { value: "Unsporting conduct" }, "Unsporting conduct"), /* @__PURE__ */ React.createElement("option", { value: "Other" }, "Other (specify below)")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("option", { value: "Injury timeout" }, "Injury timeout"), /* @__PURE__ */ React.createElement("option", { value: "Equipment issue" }, "Equipment issue"), /* @__PURE__ */ React.createElement("option", { value: "Delay of game" }, "Delay of game"), /* @__PURE__ */ React.createElement("option", { value: "Other" }, "Other (specify below)"))
+    ), (reasonInput.selectedReason === "Other" || !reasonInput.selectedReason) && /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "text",
+        value: reasonInput.customReason || "",
+        onChange: (e) => setReasonInput({ ...reasonInput, customReason: e.target.value }),
+        placeholder: "Enter custom reason or leave blank...",
+        className: "w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 text-slate-100 rounded-lg mb-4 focus:outline-none focus:border-blue-500 placeholder:text-slate-500",
+        autoFocus: true
+      }
+    ), /* @__PURE__ */ React.createElement("div", { className: "flex gap-3 text-xs font-bold" }, /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          setReasonInput(null);
+          if (reasonInput.type === "technicalFoul") {
+            pendingTechnicalFoulReasonRef.current = "";
+          }
+        },
+        className: "flex-1 py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer hover:bg-slate-925"
+      },
+      "Cancel"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        onClick: () => {
+          const finalReason = reasonInput.selectedReason === "Other" ? reasonInput.customReason || "" : reasonInput.selectedReason || reasonInput.customReason || "";
+          if (reasonInput.type === "technicalFoul") {
+            commitTechnicalFoulWithReason(finalReason, reasonInput.playerId, reasonInput.isTeamA);
+          } else if (reasonInput.type === "officialsTimeout") {
+            commitOfficialsTimeoutWithReason(finalReason);
+          }
+        },
+        className: "flex-1 py-2 bg-blue-600 text-white rounded-xl cursor-pointer hover:bg-blue-500"
+      },
+      "Confirm"
+    )))));
+  }
+  var root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(/* @__PURE__ */ React.createElement(App, null));
+})();

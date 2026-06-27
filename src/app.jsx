@@ -144,6 +144,18 @@
             const [selectedRosterPlayer, setSelectedRosterPlayer] = useState(null);
             const [selectedPlayerGameStats, setSelectedPlayerGameStats] = useState(null);
             const CURRENT_SEASON = 3;
+
+            const parseDateForInput = (dateStr) => {
+                if (!dateStr) return '';
+                const iso = String(dateStr).match(/^(\d{4}-\d{2}-\d{2})/);
+                if (iso) return iso[1];
+                const d = new Date(dateStr);
+                if (isNaN(d)) return '';
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            };
             const [selectedSeason, setSelectedSeason] = useState(CURRENT_SEASON);
             const [gameMetaSeason, setGameMetaSeason] = useState(CURRENT_SEASON);
             const [gameMetaSeriesId, setGameMetaSeriesId] = useState('');
@@ -223,9 +235,15 @@
             const [awaitingPeriodStart, setAwaitingPeriodStart] = useState(false);
 
             // Historic Boxscore Editing States
-            const [editingGame, setEditingGame] = useState(null); 
-            const [editStatsTemp, setEditStatsTemp] = useState({}); 
+            const [editingGame, setEditingGame] = useState(null);
+            const [editingGameDate, setEditingGameDate] = useState('');
+            const [editingInlineDateId, setEditingInlineDateId] = useState(null);
+            const [editingInlineDateVal, setEditingInlineDateVal] = useState('');
+            const [editStatsTemp, setEditStatsTemp] = useState({});
             const [expandedEditPlayerId, setExpandedEditPlayerId] = useState(null);
+            const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+            const [scheduleForm, setScheduleForm] = useState({ date: '', teamAId: '', teamBId: '', gameType: 'regular', season: CURRENT_SEASON });
+            const [importResultsState, setImportResultsState] = useState(null);
 
             const [showNewTeamModal, setShowNewTeamModal] = useState(false);
             const [newTeamName, setNewTeamName] = useState("");
@@ -313,6 +331,7 @@
             const locallyDeletedLiveLogIdsRef = useRef(new Set());
             const locallyDeletedGameIdsRef = useRef(new Set());
             const gameLogImportInputRef = useRef(null);
+            const importResultsJsonInputRef = useRef(null);
             const lastLocalSessionUpdatedAtRef = useRef(0);
             const lastLocalDnpUpdatedAtRef = useRef(0);
             const localResumeLockUntilRef = useRef(0);
@@ -3081,17 +3100,21 @@
                         awayScore: teamBScore
                     }]
                     : []),
-                ...games.map(g => ({
-                    id: g.id,
-                    status: 'ENDED',
-                    date: g.date,
-                    homeTeam: g.teamAName,
-                    homeScore: g.teamAScore,
-                    awayTeam: g.teamBName,
-                    awayScore: g.teamBScore,
-                    underReview: Boolean(g.underReview),
-                    writeupSnippet: String(g.gameWriteup || '').trim().slice(0, 140)
-                }))
+                ...games.map(g => {
+                    const isUpcoming = g.scheduled || (Number(g.teamAScore || 0) + Number(g.teamBScore || 0) === 0);
+                    return {
+                        id: g.id,
+                        status: isUpcoming ? 'UPCOMING' : 'ENDED',
+                        date: g.date,
+                        homeTeam: g.teamAName,
+                        homeScore: g.teamAScore,
+                        awayTeam: g.teamBName,
+                        awayScore: g.teamBScore,
+                        underReview: Boolean(g.underReview),
+                        scheduled: Boolean(g.scheduled),
+                        writeupSnippet: String(g.gameWriteup || '').trim().slice(0, 140)
+                    };
+                })
             ];
             const availableSeasons = (() => {
                 const seasonSet = new Set(games.map((g) => g.season || CURRENT_SEASON));
@@ -9333,6 +9356,7 @@
                     if (g.id === editingGame.id) {
                         return {
                             ...g,
+                            date: editingGameDate || g.date,
                             teamAScore: newTeamAScore,
                             teamBScore: newTeamBScore,
                             playerStats: editStatsTemp
@@ -14591,16 +14615,23 @@
                                 <div className="bg-slate-900/65 rounded-2xl border border-slate-800 p-4 shadow-2xl">
                                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-3">
                                         <h4 className="text-sm font-extrabold text-white uppercase tracking-wide">History</h4>
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
                                             <span className="text-[10px] text-slate-400 font-mono">{homepageGameSummaries.length} game(s)</span>
                                             {isLoggedIn && (
                                                 <>
                                                     <button
                                                         type="button"
+                                                        onClick={() => setIsScheduleModalOpen(true)}
+                                                        className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-bold cursor-pointer"
+                                                    >
+                                                        + Schedule Game
+                                                    </button>
+                                                    <button
+                                                        type="button"
                                                         onClick={() => gameLogImportInputRef.current?.click()}
                                                         className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold cursor-pointer"
                                                     >
-                                                        Import New Game Log
+                                                        Import Game Log
                                                     </button>
                                                     <input
                                                         ref={gameLogImportInputRef}
@@ -14651,7 +14682,7 @@
                                                     >
                                                         <div className="flex items-center justify-between gap-2">
                                                             <div className="flex items-center gap-1.5">
-                                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${game.status === 'LIVE' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'}`}>
+                                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${game.status === 'LIVE' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40' : game.status === 'UPCOMING' ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'}`}>
                                                                     {game.status}
                                                                 </span>
                                                                 {game.status === 'ENDED' && Boolean(game.underReview) && (
@@ -14807,7 +14838,36 @@
                                                         <span className="text-[10px] text-slate-500 font-mono mt-0.5 block">Match ID: {game.id}</span>
                                                     </div>
                                                     <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
-                                                        <span className="font-mono text-xs font-bold text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">{game.date}</span>
+                                                        {isLoggedIn && editingInlineDateId === game.id ? (
+                                                            <form onSubmit={async (e) => {
+                                                                e.preventDefault();
+                                                                const newDate = editingInlineDateVal.trim();
+                                                                if (!newDate) { setEditingInlineDateId(null); return; }
+                                                                try {
+                                                                    await apiRequest(`/api/games/${encodeURIComponent(game.id)}`, { method: 'PATCH', body: JSON.stringify({ date: newDate }) });
+                                                                    setGames(prev => prev.map(g => g.id === game.id ? { ...g, date: newDate } : g));
+                                                                    setEditingInlineDateId(null);
+                                                                    showToast('Date updated.', 'success');
+                                                                } catch (err) { showToast(err.message, 'error'); }
+                                                            }} className="flex items-center gap-1">
+                                                                <input
+                                                                    autoFocus
+                                                                    type="date"
+                                                                    value={editingInlineDateVal}
+                                                                    onChange={e => setEditingInlineDateVal(e.target.value)}
+                                                                    onKeyDown={e => e.key === 'Escape' && setEditingInlineDateId(null)}
+                                                                    className="font-mono text-xs text-white bg-slate-950 border border-orange-500/50 rounded px-2 py-1"
+                                                                />
+                                                                <button type="submit" className="text-emerald-400 font-bold text-xs px-1.5 py-1 rounded hover:bg-emerald-500/10 cursor-pointer">✓</button>
+                                                                <button type="button" onClick={() => setEditingInlineDateId(null)} className="text-slate-500 text-xs px-1.5 py-1 rounded hover:bg-slate-800 cursor-pointer">✕</button>
+                                                            </form>
+                                                        ) : (
+                                                            <span
+                                                                className={`font-mono text-xs font-bold text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg ${isLoggedIn ? 'cursor-pointer hover:border-slate-600 hover:text-slate-300' : ''}`}
+                                                                onClick={isLoggedIn ? () => { setEditingInlineDateId(game.id); setEditingInlineDateVal(parseDateForInput(game.date)); } : undefined}
+                                                                title={isLoggedIn ? 'Click to edit date' : undefined}
+                                                            >{game.date}</span>
+                                                        )}
                                                         {Boolean(game.underReview) && (
                                                             <span className="font-mono text-xs font-bold text-amber-200 bg-amber-500/15 border border-amber-500/45 px-2.5 py-1 rounded-lg">Stats Review Pending</span>
                                                         )}
@@ -14824,16 +14884,56 @@
                                                                     {game.underReview ? 'Mark Review Complete' : 'Mark Stats Review Pending'}
                                                                 </button>
                                                                 {/* EDIT SYSTEM INITIATOR TRIGGER BUTTON */}
-                                                                <button 
-                                                                    onClick={() => {
-                                                                        setEditingGame(game);
-                                                                        setEditStatsTemp(JSON.parse(JSON.stringify(game.playerStats)));
-                                                                        setExpandedEditPlayerId(null);
-                                                                    }}
-                                                                    className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
-                                                                >
-                                                                    Edit Box Score
-                                                                </button>
+                                                                {game.scheduled ? (
+                                                                    <>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                const fullGame = games.find(g => g.id === game.id) || game;
+                                                                                setImportResultsState({ step: 'input', scheduledGame: fullGame, jsonData: null });
+                                                                                importResultsJsonInputRef.current?.click();
+                                                                            }}
+                                                                            className="px-2.5 py-1 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
+                                                                        >
+                                                                            Attach Game Log
+                                                                        </button>
+                                                                        <input
+                                                                            ref={importResultsJsonInputRef}
+                                                                            type="file"
+                                                                            accept=".json,application/json"
+                                                                            className="hidden"
+                                                                            onChange={(e) => {
+                                                                                const file = e.target.files?.[0];
+                                                                                e.target.value = '';
+                                                                                if (!file || !importResultsState) return;
+                                                                                const reader = new FileReader();
+                                                                                reader.onload = (ev) => {
+                                                                                    try {
+                                                                                        const parsed = JSON.parse(ev.target.result);
+                                                                                        if (!Array.isArray(parsed?.gameLog) && !parsed?.game) {
+                                                                                            showToast('Not a valid WKND game log file.', 'error');
+                                                                                            setImportResultsState(null);
+                                                                                            return;
+                                                                                        }
+                                                                                        setImportResultsState(s => ({ ...s, step: 'preview', jsonData: parsed }));
+                                                                                    } catch { showToast('Failed to parse JSON file.', 'error'); setImportResultsState(null); }
+                                                                                };
+                                                                                reader.readAsText(file);
+                                                                            }}
+                                                                        />
+                                                                    </>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setEditingGame(game);
+                                                                            setEditingGameDate(parseDateForInput(game.date));
+                                                                            setEditStatsTemp(JSON.parse(JSON.stringify(game.playerStats)));
+                                                                            setExpandedEditPlayerId(null);
+                                                                        }}
+                                                                        className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
+                                                                    >
+                                                                        Edit Box Score
+                                                                    </button>
+                                                                )}
 
                                                                 {/* DELETE GAME RECORD BUTTON */}
                                                                 <button 
@@ -16157,7 +16257,16 @@
                             <div className="bg-slate-900 border border-slate-800 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-3xl shadow-2xl relative my-0 md:my-auto flex flex-col max-h-[85vh]">
                                 <div className="border-b border-slate-800 pb-3 mb-4 flex-shrink-0">
                                     <h3 className="text-lg font-black text-white">Edit Game Box Score</h3>
-                                    <p className="text-xs text-slate-400">Match Date: {editingGame.date} • ID: {editingGame.id}</p>
+                                    <div className="flex items-center gap-2 mt-1.5">
+                                        <label className="text-[10px] text-slate-400 font-mono shrink-0">Date:</label>
+                                        <input
+                                            type="date"
+                                            value={editingGameDate}
+                                            onChange={e => setEditingGameDate(e.target.value)}
+                                            className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs text-white font-mono"
+                                        />
+                                        <span className="text-[10px] text-slate-500 font-mono truncate">ID: {editingGame.id}</span>
+                                    </div>
                                 </div>
 
                                 <form onSubmit={handleSaveHistoricEdit} className="space-y-4 overflow-y-auto flex-1 pr-1">
@@ -16353,6 +16462,188 @@
                             </div>
                         </div>
                     )}
+
+                    {/* SCHEDULE GAME MODAL */}
+                    {isScheduleModalOpen && (
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-sm shadow-2xl">
+                                <div className="border-b border-slate-800 pb-3 mb-4">
+                                    <h3 className="text-lg font-black text-white">Schedule Game</h3>
+                                    <p className="text-xs text-slate-400">Create an upcoming game without scores.</p>
+                                </div>
+                                <form onSubmit={async (e) => {
+                                    e.preventDefault();
+                                    if (!scheduleForm.date || !scheduleForm.teamAId || !scheduleForm.teamBId) {
+                                        showToast('Date, Team A, and Team B are required.', 'error'); return;
+                                    }
+                                    if (scheduleForm.teamAId === scheduleForm.teamBId) {
+                                        showToast('Team A and Team B must be different.', 'error'); return;
+                                    }
+                                    try {
+                                        const result = await apiRequest('/api/games/schedule', { method: 'POST', body: JSON.stringify(scheduleForm) });
+                                        const teamAObj = teams.find(t => t.id === scheduleForm.teamAId);
+                                        const teamBObj = teams.find(t => t.id === scheduleForm.teamBId);
+                                        const newGame = {
+                                            id: result.gameId,
+                                            date: scheduleForm.date,
+                                            teamAId: scheduleForm.teamAId,
+                                            teamBId: scheduleForm.teamBId,
+                                            teamAName: teamAObj?.name || '',
+                                            teamBName: teamBObj?.name || '',
+                                            teamAScore: 0,
+                                            teamBScore: 0,
+                                            underReview: false,
+                                            scheduled: true,
+                                            playerStats: {},
+                                            dnpPlayers: [],
+                                            gameWriteup: '',
+                                            potgWriteup: '',
+                                            youtubeUrl: '',
+                                            season: scheduleForm.season || CURRENT_SEASON,
+                                            gameType: scheduleForm.gameType || 'regular',
+                                            playoffRound: '',
+                                            seriesId: ''
+                                        };
+                                        setGames(prev => [newGame, ...prev].sort((a, b) => String(b.id||'').localeCompare(String(a.id||''))));
+                                        setIsScheduleModalOpen(false);
+                                        setScheduleForm({ date: '', teamAId: '', teamBId: '', gameType: 'regular', season: CURRENT_SEASON });
+                                        showToast('Game scheduled!', 'success');
+                                    } catch (err) { showToast(err.message, 'error'); }
+                                }} className="space-y-3 text-xs">
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1 uppercase tracking-wide">Game Date</label>
+                                        <input type="date" required value={scheduleForm.date} onChange={e => setScheduleForm(f => ({...f, date: e.target.value}))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1 uppercase tracking-wide">Team A (Home)</label>
+                                        <select required value={scheduleForm.teamAId} onChange={e => setScheduleForm(f => ({...f, teamAId: e.target.value}))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+                                            <option value="">— Select —</option>
+                                            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-400 mb-1 uppercase tracking-wide">Team B (Away)</label>
+                                        <select required value={scheduleForm.teamBId} onChange={e => setScheduleForm(f => ({...f, teamBId: e.target.value}))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+                                            <option value="">— Select —</option>
+                                            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <div className="flex-1">
+                                            <label className="block text-[10px] text-slate-400 mb-1 uppercase tracking-wide">Type</label>
+                                            <select value={scheduleForm.gameType} onChange={e => setScheduleForm(f => ({...f, gameType: e.target.value}))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white">
+                                                <option value="regular">Regular</option>
+                                                <option value="playoff">Playoff</option>
+                                                <option value="tiebreaker">Tiebreaker</option>
+                                            </select>
+                                        </div>
+                                        <div className="w-20">
+                                            <label className="block text-[10px] text-slate-400 mb-1 uppercase tracking-wide">Season</label>
+                                            <input type="number" min="1" value={scheduleForm.season} onChange={e => setScheduleForm(f => ({...f, season: parseInt(e.target.value,10)||CURRENT_SEASON}))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-mono" />
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 pt-2 font-bold">
+                                        <button type="button" onClick={() => setIsScheduleModalOpen(false)} className="flex-1 py-2.5 bg-slate-955 text-slate-400 rounded-xl border border-slate-850 cursor-pointer">Cancel</button>
+                                        <button type="submit" className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl cursor-pointer">Schedule</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ATTACH GAME LOG MODAL — JSON export from an existing game */}
+                    {importResultsState && importResultsState.step === 'preview' && (() => {
+                        const { scheduledGame, jsonData } = importResultsState;
+                        const gameMeta = jsonData?.game || {};
+                        const importedAName = String(gameMeta.teamAName || jsonData?.teamAName || '');
+                        const importedBName = String(gameMeta.teamBName || jsonData?.teamBName || '');
+                        const scheduledAName = String(scheduledGame?.teamAName || '');
+                        const scheduledBName = String(scheduledGame?.teamBName || '');
+                        const teamMismatch = importedAName && scheduledAName &&
+                            (importedAName.toUpperCase() !== scheduledAName.toUpperCase() ||
+                             importedBName.toUpperCase() !== scheduledBName.toUpperCase());
+                        const playerCount = Object.keys(gameMeta.playerStats || {}).length;
+                        const writeupSnippet = String(gameMeta.gameWriteup || '').trim().slice(0, 120);
+
+                        const handleConfirm = async () => {
+                            try {
+                                const mergedGame = {
+                                    id: scheduledGame.id,
+                                    date: scheduledGame.date || gameMeta.date || '',
+                                    teamAId: scheduledGame.teamAId || '',
+                                    teamBId: scheduledGame.teamBId || '',
+                                    teamAName: scheduledAName || importedAName,
+                                    teamBName: scheduledBName || importedBName,
+                                    teamAScore: Number(gameMeta.teamAScore || 0),
+                                    teamBScore: Number(gameMeta.teamBScore || 0),
+                                    underReview: false,
+                                    scheduled: false,
+                                    playerStats: gameMeta.playerStats || {},
+                                    dnpPlayers: Array.isArray(jsonData?.dnpPlayers) ? jsonData.dnpPlayers : [],
+                                    periodSnapshots: Array.isArray(jsonData?.periodSnapshots) ? jsonData.periodSnapshots : [],
+                                    gameLog: Array.isArray(jsonData?.gameLog) ? jsonData.gameLog : [],
+                                    gameWriteup: gameMeta.gameWriteup || '',
+                                    potgWriteup: gameMeta.potgWriteup || '',
+                                    youtubeUrl: gameMeta.youtubeUrl || '',
+                                    season: scheduledGame.season || 3,
+                                    gameType: scheduledGame.gameType || 'regular'
+                                };
+                                await apiRequest(`/api/games/${encodeURIComponent(scheduledGame.id)}`, {
+                                    method: 'PUT',
+                                    body: JSON.stringify({ game: mergedGame })
+                                });
+                                setGames(prev => prev.map(g => g.id === scheduledGame.id
+                                    ? { ...g, teamAScore: mergedGame.teamAScore, teamBScore: mergedGame.teamBScore, scheduled: false, gameWriteup: mergedGame.gameWriteup, potgWriteup: mergedGame.potgWriteup, youtubeUrl: mergedGame.youtubeUrl, _detailLoaded: false }
+                                    : g
+                                ));
+                                setImportResultsState(null);
+                                showToast('Game log attached to scheduled game!', 'success');
+                            } catch (err) { showToast(err.message, 'error'); }
+                        };
+
+                        return (
+                            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
+                                <div className="bg-slate-900 border border-slate-800 p-6 rounded-t-2xl md:rounded-2xl w-full max-w-lg shadow-2xl">
+                                    <div className="border-b border-slate-800 pb-3 mb-4">
+                                        <h3 className="text-lg font-black text-white">Attach Game Log</h3>
+                                        <p className="text-xs text-slate-400">Review before confirming.</p>
+                                    </div>
+
+                                    <div className="space-y-3 text-xs mb-4">
+                                        {/* Scheduled game */}
+                                        <div className="bg-sky-500/10 border border-sky-500/30 rounded-xl p-3">
+                                            <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wide mb-1">Scheduled Game (target)</div>
+                                            <div className="text-white font-bold">{scheduledAName} vs {scheduledBName}</div>
+                                            <div className="text-slate-400 font-mono text-[10px] mt-0.5">{scheduledGame?.date} · ID: {scheduledGame?.id}</div>
+                                        </div>
+
+                                        {/* Imported game */}
+                                        <div className={`rounded-xl p-3 border ${teamMismatch ? 'bg-amber-500/10 border-amber-500/40' : 'bg-emerald-500/10 border-emerald-500/30'}`}>
+                                            <div className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${teamMismatch ? 'text-amber-400' : 'text-emerald-400'}`}>From Game Log File</div>
+                                            <div className="text-white font-bold">{importedAName || '?'} vs {importedBName || '?'}</div>
+                                            <div className="text-slate-300 font-bold mt-1">Score: {Number(gameMeta.teamAScore || 0)} – {Number(gameMeta.teamBScore || 0)}</div>
+                                            <div className="text-slate-400 mt-1">{playerCount} player stat lines · {Array.isArray(jsonData?.gameLog) ? jsonData.gameLog.length : 0} log entries</div>
+                                            {writeupSnippet && <div className="text-slate-500 italic mt-1.5 line-clamp-2">{writeupSnippet}{writeupSnippet.length >= 120 ? '...' : ''}</div>}
+                                        </div>
+
+                                        {teamMismatch && (
+                                            <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-3 text-red-300 text-xs">
+                                                <div className="font-bold mb-1">Team mismatch — cannot attach.</div>
+                                                <div className="text-red-400">Scheduled: <span className="text-white font-bold">{scheduledAName}</span> vs <span className="text-white font-bold">{scheduledBName}</span></div>
+                                                <div className="text-red-400">File: <span className="text-white font-bold">{importedAName}</span> vs <span className="text-white font-bold">{importedBName}</span></div>
+                                                <div className="mt-1.5 text-red-400">Make sure you're uploading the correct game log, or check that the scheduled game has the right teams.</div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex gap-2 font-bold">
+                                        <button type="button" onClick={() => setImportResultsState(null)} className="flex-1 py-2.5 bg-slate-955 text-slate-400 rounded-xl border border-slate-850 cursor-pointer text-xs">Cancel</button>
+                                        <button type="button" onClick={handleConfirm} disabled={teamMismatch} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl cursor-pointer text-xs">{teamMismatch ? 'Fix team mismatch to continue' : 'Confirm Attach'}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {/* MODAL WRAPPERS */}
                     {showNewTeamModal && (

@@ -364,6 +364,14 @@ function ensureGamesSeasonColumns() {
   }
 }
 
+function ensureGamesScheduledColumn() {
+  const columns = db.prepare('PRAGMA table_info(games)').all().map(c => c.name);
+  if (!columns.includes('scheduled')) {
+    db.exec('ALTER TABLE games ADD COLUMN scheduled INTEGER NOT NULL DEFAULT 0');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_games_date ON games(date)');
+}
+
 function ensureAwardsTable() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS awards (
@@ -675,6 +683,7 @@ ensureGamesSocialCoverColumn();
 ensureGamesDnpColumn();
 ensureGamesUnderReviewColumn();
 ensureGamesSeasonColumns();
+ensureGamesScheduledColumn();
 ensureAwardsTable();
 ensurePlayerProfileColumns();
 ensurePlayerTotalsTable();
@@ -735,9 +744,9 @@ const upsertPlayerTotalsStmt = db.prepare(`
 
 const insertGameStmt = db.prepare(`
   INSERT INTO games (
-    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review, season, game_type, playoff_round, series_id, sort_order
+    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review, season, game_type, playoff_round, series_id, sort_order, scheduled
   ) VALUES (
-    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @manual_potg_player_id, @social_cover_data_url, @dnp_players_json, @under_review, @season, @game_type, @playoff_round, @series_id, @sort_order
+    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @manual_potg_player_id, @social_cover_data_url, @dnp_players_json, @under_review, @season, @game_type, @playoff_round, @series_id, @sort_order, @scheduled
   )
 `);
 
@@ -791,7 +800,7 @@ const selectGamesStmt = db.prepare(`
   SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score,
          youtube_url, game_writeup, potg_writeup, manual_potg_player_id,
          LENGTH(social_cover_data_url) AS social_cover_data_len, dnp_players_json, under_review,
-         season, game_type, playoff_round, series_id
+         season, game_type, playoff_round, series_id, scheduled
   FROM games
   ORDER BY sort_order ASC, id DESC
 `);
@@ -958,6 +967,11 @@ function parseJsonSafe(value, fallback) {
 
 function toInt(value) {
   return Number.isFinite(value) ? value : Number.parseInt(value || 0, 10) || 0;
+}
+
+function dateToSortOrder(dateStr) {
+  const ts = Date.parse(String(dateStr || ''));
+  return isNaN(ts) ? 0 : Math.floor(ts / 1000);
 }
 
 function isClearlyBeforeClearBoundary(timestampMs, clearBoundaryMs) {
@@ -2430,7 +2444,8 @@ function readState() {
     season: toInt(game.season) || 3,
     gameType: game.game_type || 'regular',
     playoffRound: game.playoff_round || '',
-    seriesId: game.series_id || ''
+    seriesId: game.series_id || '',
+    scheduled: toInt(game.scheduled) === 1
   }));
 
   _stateCache = { teams: hydratedTeams, games: hydratedGames };
@@ -2517,7 +2532,8 @@ const writeGamesTransaction = db.transaction((nextGames) => {
       game_type: game.gameType || 'regular',
       playoff_round: game.playoffRound || '',
       series_id: game.seriesId || '',
-      sort_order: gameIndex
+      sort_order: dateToSortOrder(game.date) || gameIndex,
+      scheduled: game.scheduled ? 1 : 0
     });
 
     const playerStats = game.playerStats || {};
@@ -4148,7 +4164,8 @@ app.put('/api/games/:gameId', (req, res) => {
         game_type: game.gameType || existingDetailRow?.game_type || 'regular',
         playoff_round: game.playoffRound || existingDetailRow?.playoff_round || '',
         series_id: game.seriesId || existingDetailRow?.series_id || '',
-        sort_order: 0
+        sort_order: dateToSortOrder(game.date || new Date().toISOString()),
+        scheduled: game.scheduled ? 1 : 0
       });
 
       const playerStats = game.playerStats || {};
@@ -4184,6 +4201,196 @@ app.put('/api/games/:gameId', (req, res) => {
   } catch (error) {
     console.error('PUT /api/games/:gameId error:', error);
     res.status(500).json({ error: 'Failed to persist game.' });
+  }
+});
+
+// Partial update — only updates fields provided; never touches player stats.
+app.patch('/api/games/:gameId', (req, res) => {
+  const gameId = String(req.params.gameId || '').trim();
+  if (!gameId) return res.status(400).json({ error: 'gameId is required.' });
+
+  const allowed = ['date', 'game_writeup', 'potg_writeup', 'youtube_url', 'under_review', 'manual_potg_player_id'];
+  const fieldMap = { date: 'date', gameWriteup: 'game_writeup', potgWriteup: 'potg_writeup', youtubeUrl: 'youtube_url', underReview: 'under_review', manualPotgPlayerId: 'manual_potg_player_id' };
+  const body = req.body || {};
+  const setClauses = [];
+  const values = [];
+
+  for (const [clientKey, colName] of Object.entries(fieldMap)) {
+    if (clientKey in body) {
+      setClauses.push(`${colName} = ?`);
+      values.push(clientKey === 'underReview' ? (body[clientKey] ? 1 : 0) : String(body[clientKey] ?? ''));
+    }
+  }
+
+  if (setClauses.length === 0) return res.status(400).json({ error: 'No patchable fields provided.' });
+
+  // Also update sort_order when date changes
+  if ('date' in body) {
+    setClauses.push('sort_order = ?');
+    values.push(dateToSortOrder(body.date));
+  }
+
+  values.push(gameId);
+  try {
+    db.prepare(`UPDATE games SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+    invalidateStateCache();
+    broadcastSync();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('PATCH /api/games/:gameId error:', err);
+    res.status(500).json({ error: 'Failed to patch game.' });
+  }
+});
+
+// Schedule a future game (no scores yet).
+app.post('/api/games/schedule', (req, res) => {
+  const { date, teamAId, teamBId, gameType, season } = req.body || {};
+  if (!date || !teamAId || !teamBId) {
+    return res.status(400).json({ error: 'date, teamAId, and teamBId are required.' });
+  }
+  if (teamAId === teamBId) {
+    return res.status(400).json({ error: 'Team A and Team B cannot be the same.' });
+  }
+  const teamA = db.prepare('SELECT id, name FROM teams WHERE id = ?').get(teamAId);
+  const teamB = db.prepare('SELECT id, name FROM teams WHERE id = ?').get(teamBId);
+  if (!teamA || !teamB) {
+    return res.status(400).json({ error: 'One or both teams not found.' });
+  }
+  try {
+    const gameId = `game_sched_${Date.now()}`;
+    insertGameStmt.run({
+      id: gameId,
+      date: String(date),
+      team_a_id: teamAId,
+      team_b_id: teamBId,
+      team_a_name: teamA.name,
+      team_b_name: teamB.name,
+      team_a_score: 0,
+      team_b_score: 0,
+      game_log_json: '[]',
+      period_snapshots_json: '[]',
+      dnp_players_json: '[]',
+      under_review: 0,
+      youtube_url: '',
+      game_writeup: '',
+      potg_writeup: '',
+      manual_potg_player_id: '',
+      social_cover_data_url: '',
+      season: toInt(season) || 3,
+      game_type: gameType || 'regular',
+      playoff_round: '',
+      series_id: '',
+      sort_order: dateToSortOrder(date),
+      scheduled: 1
+    });
+    broadcastSync();
+    res.json({ ok: true, gameId });
+  } catch (err) {
+    console.error('POST /api/games/schedule error:', err);
+    res.status(500).json({ error: 'Failed to schedule game.' });
+  }
+});
+
+// Preview CSV import: resolve game + players before committing.
+app.post('/api/games/import-results/preview', (req, res) => {
+  const { gameHeader, players } = req.body || {};
+  if (!gameHeader?.date || !gameHeader?.teamA || !gameHeader?.teamB) {
+    return res.status(400).json({ error: 'gameHeader must include date, teamA, teamB.' });
+  }
+  if (!Array.isArray(players)) {
+    return res.status(400).json({ error: 'players must be an array.' });
+  }
+
+  const normalize = (name) => String(name || '').replace(/,/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+
+  const game = db.prepare(`
+    SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, scheduled
+    FROM games
+    WHERE date = ?
+      AND UPPER(team_a_name) = UPPER(?)
+      AND UPPER(team_b_name) = UPPER(?)
+  `).get(String(gameHeader.date), String(gameHeader.teamA), String(gameHeader.teamB));
+
+  if (!game) {
+    return res.status(404).json({
+      error: `No scheduled game found for ${gameHeader.teamA} vs ${gameHeader.teamB} on ${gameHeader.date}. Check the date format (YYYY-MM-DD) and team names exactly match.`
+    });
+  }
+
+  const allPlayers = db.prepare('SELECT id, name, team_id FROM players').all();
+  const allTeams = db.prepare('SELECT id, name FROM teams').all();
+
+  const matched = [];
+  const unmatched = [];
+
+  for (const row of players) {
+    const normalizedImport = normalize(row.player_name || row.name || '');
+    const importTeamName = String(row.team || '').trim().toUpperCase();
+    const teamRow = allTeams.find(t => t.name.toUpperCase() === importTeamName);
+
+    const player = allPlayers.find(p => {
+      const nameMatch = normalize(p.name) === normalizedImport;
+      if (!nameMatch) return false;
+      if (teamRow) return p.team_id === teamRow.id;
+      return true;
+    }) || allPlayers.find(p => normalize(p.name) === normalizedImport);
+
+    if (player) {
+      matched.push({ ...row, player_id: player.id, team_id: player.team_id, db_name: player.name });
+    } else {
+      unmatched.push({ ...row });
+    }
+  }
+
+  res.json({ game, matched, unmatched });
+});
+
+// Confirm CSV import: write scores + player stats to scheduled game.
+app.post('/api/games/import-results/confirm', (req, res) => {
+  const { gameId, teamAScore, teamBScore, players } = req.body || {};
+  if (!gameId) return res.status(400).json({ error: 'gameId is required.' });
+  if (!Array.isArray(players)) return res.status(400).json({ error: 'players must be an array.' });
+
+  const existing = db.prepare('SELECT * FROM games WHERE id = ?').get(gameId);
+  if (!existing) return res.status(404).json({ error: `Game ${gameId} not found.` });
+
+  try {
+    db.transaction(() => {
+      db.prepare('DELETE FROM game_player_stats WHERE game_id = ?').run(gameId);
+      db.prepare(`
+        UPDATE games SET team_a_score = ?, team_b_score = ?, scheduled = 0, under_review = 0 WHERE id = ?
+      `).run(toInt(teamAScore), toInt(teamBScore), gameId);
+
+      for (const p of players) {
+        if (!p.player_id) continue;
+        insertGamePlayerStatStmt.run({
+          game_id: gameId,
+          team_id: p.team_id || '',
+          player_id: p.player_id,
+          pts: toInt(p.pts),
+          ast: toInt(p.ast),
+          reb: toInt(p.reb),
+          stl: toInt(p.stl),
+          blk: toInt(p.blk),
+          turnover: toInt(p.to),
+          pf: toInt(p.pf),
+          fg2m: toInt(p.fg2m),
+          fg3m: toInt(p.fg3m),
+          fg2m_miss: toInt(p.fg2m_miss) || Math.max(0, toInt(p.fg2a) - toInt(p.fg2m)),
+          fg3m_miss: toInt(p.fg3m_miss) || Math.max(0, toInt(p.fg3a) - toInt(p.fg3m)),
+          ftm: toInt(p.ftm),
+          ft_miss: toInt(p.ft_miss) || Math.max(0, toInt(p.fta) - toInt(p.ftm)),
+          minutes: String(p.min || p.minutes || '')
+        });
+      }
+    })();
+
+    rebuildPlayerTotalsFromGameStats();
+    broadcastSync();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('POST /api/games/import-results/confirm error:', err);
+    res.status(500).json({ error: 'Failed to import results.' });
   }
 });
 
