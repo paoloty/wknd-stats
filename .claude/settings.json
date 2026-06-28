@@ -8,7 +8,11 @@
       "PowerShell(node --check \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\server.js\" 2>&1)",
       "PowerShell($content = Get-Content \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\src\\\\app.jsx\" -Raw; $open = \\([regex]::Matches\\($content, '\\\\{'\\)\\).Count; $close = \\([regex]::Matches\\($content, '\\\\}'\\)\\).Count; Write-Host \"Braces: $open open, $close close, diff: $\\($open - $close\\)\")",
       "PowerShell($content = Get-Content \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\src\\\\app.jsx\" -Raw; $open = \\([regex]::Matches\\($content, '\\\\{'\\)\\).Count; $close = \\([regex]::Matches\\($content, '\\\\}'\\)\\).Count; Write-Host \"Braces: open=$open close=$close diff=$\\($open-$close\\)\")",
-      "PowerShell(node --check \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\server.js\" 2>&1; Write-Host \"server.js OK\"; $content = Get-Content \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\src\\\\app.jsx\" -Raw; $o = \\([regex]::Matches\\($content,'\\\\{'\\)\\).Count; $c = \\([regex]::Matches\\($content,'\\\\}'\\)\\).Count; Write-Host \"app.jsx braces: open=$o close=$c diff=$\\($o-$c\\)\")"
+      "PowerShell(node --check \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\server.js\" 2>&1; Write-Host \"server.js OK\"; $content = Get-Content \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\src\\\\app.jsx\" -Raw; $o = \\([regex]::Matches\\($content,'\\\\{'\\)\\).Count; $c = \\([regex]::Matches\\($content,'\\\\}'\\)\\).Count; Write-Host \"app.jsx braces: open=$o close=$c diff=$\\($o-$c\\)\")",
+      "PowerShell(\\(Get-Content \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\src\\\\app.jsx\" | Measure-Object -Line\\).Lines)",
+      "Bash(grep -v \"const\\\\|//\\\\|import\\\\|FREE_AGENT\")",
+      "Bash(awk 'NR>=14355 && NR<=14375' \"c:/Users/paolo/Documents/Work/wknd-stats/src/app.jsx\")",
+      "Bash(grep -iv \"//\\\\|iife\\\\|comment\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\paolo\\Documents\\Work\\wknd-portal"

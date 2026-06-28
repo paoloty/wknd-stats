@@ -395,7 +395,9 @@ function ensurePlayerProfileColumns() {
     ['email', 'TEXT NOT NULL DEFAULT ""'],
     ['social', 'TEXT NOT NULL DEFAULT ""'],
     ['contact', 'TEXT NOT NULL DEFAULT ""'],
-    ['writeup', 'TEXT NOT NULL DEFAULT ""']
+    ['writeup', 'TEXT NOT NULL DEFAULT ""'],
+    ['released', 'INTEGER NOT NULL DEFAULT 0'],
+    ['team_history_json', "TEXT NOT NULL DEFAULT '[]'"]
   ];
   wanted.forEach(([name, typeDef]) => {
     if (!columns.some((column) => column.name === name)) {
@@ -561,6 +563,31 @@ function ensureGamePlayerStatsMinutesColumn() {
   }
 }
 
+function ensureIndexes() {
+  const indexes = [
+    // players — team lookup (write, delete, join) and sort
+    'CREATE INDEX IF NOT EXISTS idx_players_team_id ON players(team_id)',
+    'CREATE INDEX IF NOT EXISTS idx_players_sort_order ON players(sort_order, id)',
+    // games — sort order (primary read sort), team filtering, season filtering
+    'CREATE INDEX IF NOT EXISTS idx_games_sort_order ON games(sort_order, id)',
+    'CREATE INDEX IF NOT EXISTS idx_games_season ON games(season)',
+    'CREATE INDEX IF NOT EXISTS idx_games_team_a_id ON games(team_a_id)',
+    'CREATE INDEX IF NOT EXISTS idx_games_team_b_id ON games(team_b_id)',
+    // game_player_stats — composite covering index for per-player aggregates
+    'CREATE INDEX IF NOT EXISTS idx_gps_player_game ON game_player_stats(player_id, game_id)',
+    // stat_actions — sort order
+    'CREATE INDEX IF NOT EXISTS idx_stat_actions_sort_order ON stat_actions(sort_order, id)',
+    // match_sessions — status and recency lookups
+    'CREATE INDEX IF NOT EXISTS idx_match_sessions_status ON match_sessions(status)',
+    'CREATE INDEX IF NOT EXISTS idx_match_sessions_updated_at ON match_sessions(updated_at)',
+    // live_events — time-based queries
+    'CREATE INDEX IF NOT EXISTS idx_live_events_created_at ON live_events(created_at)',
+    // teams — sort order
+    'CREATE INDEX IF NOT EXISTS idx_teams_sort_order ON teams(sort_order)',
+  ];
+  indexes.forEach((sql) => db.exec(sql));
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS teams (
     id TEXT PRIMARY KEY,
@@ -690,6 +717,7 @@ ensurePlayerTotalsTable();
 ensurePlayersTableWithoutLegacyStats();
 ensureGamePlayerStatsTeamColumn();
 ensureGamePlayerStatsMinutesColumn();
+ensureIndexes();
 
 const selectLegacyStateStmt = db.prepare('SELECT teams_json, games_json FROM app_state WHERE id = 1');
 const selectLegacyConfigStmt = db.prepare('SELECT value_json FROM config_values WHERE key = ?');
@@ -713,9 +741,9 @@ const deleteGamePlayerStatsByGameStmt = db.prepare('DELETE FROM game_player_stat
 const insertTeamStmt = db.prepare('INSERT INTO teams (id, name, color, sort_order) VALUES (@id, @name, @color, @sort_order)');
 const insertPlayerStmt = db.prepare(`
   INSERT INTO players (
-    id, team_id, name, number, positions, height, picture_url, birthday, email, social, contact, writeup, sort_order
+    id, team_id, name, number, positions, height, picture_url, birthday, email, social, contact, writeup, sort_order, released, team_history_json
   ) VALUES (
-    @id, @team_id, @name, @number, @positions, @height, @picture_url, @birthday, @email, @social, @contact, @writeup, @sort_order
+    @id, @team_id, @name, @number, @positions, @height, @picture_url, @birthday, @email, @social, @contact, @writeup, @sort_order, @released, @team_history_json
   )
 `);
 
@@ -2396,6 +2424,8 @@ function readState() {
       social: player.social || '',
       contact: player.contact || '',
       writeup: player.writeup || '',
+      released: player.released === 1,
+      teamHistory: parseJsonSafe(player.team_history_json, []),
       gamesPlayed: toInt(player.games_played),
       totalStats: {
         pts: toInt(player.pts),
@@ -2481,7 +2511,9 @@ const writeTeamsTransaction = db.transaction((nextTeams) => {
         social: player.social || '',
         contact: player.contact || '',
         writeup: player.writeup || '',
-        sort_order: playerIndex
+        sort_order: playerIndex,
+        released: player.released ? 1 : 0,
+        team_history_json: JSON.stringify(Array.isArray(player.teamHistory) ? player.teamHistory : [])
       });
 
       upsertPlayerTotalsStmt.run({
@@ -2951,9 +2983,8 @@ function writeActiveSession(session, sourceClientId = null) {
     return false;
   }
 
-  // Equal-revision writes are common during multi-client contention. Accept them only
-  // when they carry a strictly newer sessionUpdatedAt; otherwise they can re-apply a
-  // stale clock/snapshot and roll back a just-started period.
+  // Equal-revision writes: accept only when they carry a strictly newer sessionUpdatedAt.
+  // This prevents stale snapshots from re-applying a rolled-back clock/score.
   if (
     isSameSessionInstance
     && incomingSessionRevision > 0
@@ -2963,6 +2994,21 @@ function writeActiveSession(session, sourceClientId = null) {
     if (incomingSessionUpdatedAt <= 0 || (existingSessionUpdatedAt > 0 && incomingSessionUpdatedAt <= existingSessionUpdatedAt)) {
       return false;
     }
+  }
+
+  // Higher-revision writes from a stale client: if the incoming session has a higher
+  // revision number but an OLDER sessionUpdatedAt than what the server holds, the client
+  // inflated its revision counter locally (e.g. offline auto-saves) while another device
+  // advanced the game state. Reject it — a higher revision means nothing if the data is
+  // from an earlier point in time.
+  if (
+    isSameSessionInstance
+    && incomingSessionRevision > existingSessionRevision
+    && incomingSessionUpdatedAt > 0
+    && existingSessionUpdatedAt > 0
+    && incomingSessionUpdatedAt < existingSessionUpdatedAt
+  ) {
+    return false;
   }
 
   if (

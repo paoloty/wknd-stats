@@ -133,7 +133,10 @@
 
         function App() {
             const SHOW_LIVE_SYNC_DEBUG = false;
+            const FREE_AGENTS_TEAM_ID = '__free_agents__';
             const [teams, setTeams] = useState([]);
+            const [freeAgents, setFreeAgents] = useState([]);
+            const freeAgentsRef = useRef([]);
             const [games, setGames] = useState([]);
             const [statActions, setStatActions] = useState([]);
             const [activeTab, setActiveTab] = useState('home');
@@ -184,6 +187,7 @@
             const [manualClockInput, setManualClockInput] = useState('12:00');
             const [isEditingClockInput, setIsEditingClockInput] = useState(false);
             const [showExtraGameControls, setShowExtraGameControls] = useState(false);
+            const [endMatchReady, setEndMatchReady] = useState(false);
             const [showSyncClockEditor, setShowSyncClockEditor] = useState(false);
             
             const [teamALineup, setTeamALineup] = useState([]);
@@ -358,6 +362,7 @@
             const [sharedAdminFocus, setSharedAdminFocus] = useState(null);
             const [isRoleCapacityExceeded, setIsRoleCapacityExceeded] = useState(false);
             const hadLiveSessionRef = useRef(false);
+            const confirmedNoActiveSessionRef = useRef(false);
             const gamesBootstrappedRef = useRef(false);
 
             const [authRole, setAuthRole] = useState('viewer');
@@ -1245,8 +1250,11 @@
                         setTeamBBench(replayed.teamBBench);
                         setPlayedPlayers(replayed.playedPlayers);
                     }
-                    hadLiveSessionRef.current = true;
-                    setIsGameLive(true);
+                    // Don't resurrect the live view if the server already confirmed no active session.
+                    if (!confirmedNoActiveSessionRef.current) {
+                        hadLiveSessionRef.current = true;
+                        setIsGameLive(true);
+                    }
                     return nextLog;
                 });
             };
@@ -2076,7 +2084,7 @@
                 const teamObj = teams.find((t) => t.id === targetTeamId);
                 if (!teamObj) return false;
 
-                const rosterIds = (teamObj.players || []).map((p) => p.id);
+                const rosterIds = (teamObj.players || []).filter(p => !p.released).map((p) => p.id);
                 const fallbackCandidates = rosterIds.filter((id) => !targetLineup.includes(id) && !dnpPlayers.includes(id));
                 const addCandidates = (targetBench.length > 0 ? targetBench : fallbackCandidates)
                     .filter((id) => !dnpPlayers.includes(id));
@@ -2087,7 +2095,7 @@
                 const { fillToFive = true } = options;
                 const teamPool = (teamsRef.current && teamsRef.current.length > 0) ? teamsRef.current : teams;
                 const teamObj = teamPool.find((t) => t.id === teamId);
-                const roster = (teamObj?.players || []).map((p) => p.id);
+                const roster = (teamObj?.players || []).filter(p => !p.released).map((p) => p.id);
                 const rosterSet = new Set(roster);
 
                 const toUniqueLoose = (ids = []) => {
@@ -2680,6 +2688,22 @@
                     return;
                 }
 
+                // Defense-in-depth: even if the remote session has a newer timestamp
+                // (e.g. due to clock skew between devices or local revision inflation),
+                // reject it if it carries significantly fewer game log entries than we
+                // already have. Fewer events = earlier in the game = stale data.
+                const remoteGameLogLength = Array.isArray(session.gameLog) ? session.gameLog.length : 0;
+                const localGameLogLength = (gameLogRef.current || []).length;
+                const isStaleByGameLogLength = Boolean(
+                    !isDifferentLiveSession
+                    && localGameLogLength > 10
+                    && remoteGameLogLength > 0
+                    && remoteGameLogLength < localGameLogLength * 0.5
+                );
+                if (isStaleByGameLogLength) {
+                    return;
+                }
+
                 const isStaleClockControlDuringResumeLock = Boolean(
                     !isDifferentLiveSession
                     && hasActiveLocalResumeLockNow
@@ -3088,19 +3112,8 @@
             const isTieGame = teamAScore === teamBScore;
             const canStartOvertime = isTieGame;
             const hasLiveSessionIdentity = Boolean(String(liveSessionInstanceId || '').trim());
-            const homepageGameSummaries = [
-                ...(isGameLive && hasLiveSessionIdentity && liveHomeTeam && liveAwayTeam
-                    ? [{
-                        id: `live_${teamAId}_${teamBId}`,
-                        status: 'LIVE',
-                        date: new Date().toLocaleString(),
-                        homeTeam: liveHomeTeam.name,
-                        homeScore: teamAScore,
-                        awayTeam: liveAwayTeam.name,
-                        awayScore: teamBScore
-                    }]
-                    : []),
-                ...games.map(g => {
+            const homepageGameSummaries = (() => {
+                const mapped = games.map(g => {
                     const isUpcoming = g.scheduled || (Number(g.teamAScore || 0) + Number(g.teamBScore || 0) === 0);
                     return {
                         id: g.id,
@@ -3114,8 +3127,29 @@
                         scheduled: Boolean(g.scheduled),
                         writeupSnippet: String(g.gameWriteup || '').trim().slice(0, 140)
                     };
-                })
-            ];
+                });
+                const upcoming = mapped
+                    .filter(g => g.status === 'UPCOMING')
+                    .sort((a, b) => (Date.parse(a.date) || 0) - (Date.parse(b.date) || 0));
+                const ended = mapped
+                    .filter(g => g.status === 'ENDED')
+                    .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+                return [
+                    ...(isGameLive && hasLiveSessionIdentity && liveHomeTeam && liveAwayTeam
+                        ? [{
+                            id: `live_${teamAId}_${teamBId}`,
+                            status: 'LIVE',
+                            date: new Date().toLocaleString(),
+                            homeTeam: liveHomeTeam.name,
+                            homeScore: teamAScore,
+                            awayTeam: liveAwayTeam.name,
+                            awayScore: teamBScore
+                        }]
+                        : []),
+                    ...upcoming,
+                    ...ended
+                ];
+            })();
             const availableSeasons = (() => {
                 const seasonSet = new Set(games.map((g) => g.season || CURRENT_SEASON));
                 return Array.from(seasonSet).sort((a, b) => b - a);
@@ -3217,7 +3251,7 @@
                 { id: 'pf', label: 'PF', tabLabel: 'Fouls' }
             ];
             const getTeamTotalValue = (team, key) => {
-                const players = Array.isArray(team?.players) ? team.players : [];
+                const players = (Array.isArray(team?.players) ? team.players : []).filter(p => !p.released);
                 const totals = players.reduce((acc, player) => {
                     const s = player?.totalStats || {};
                     acc.pts += Number(s.pts || 0);
@@ -3254,7 +3288,7 @@
                 return Number(totals[key] || 0);
             };
             const teamStatTotals = teams.map((team) => {
-                const players = Array.isArray(team.players) ? team.players : [];
+                const players = (Array.isArray(team.players) ? team.players : []).filter(p => !p.released);
                 const totalsByCategory = standingsLeaderDefs.reduce((acc, def) => {
                     acc[def.id] = getTeamTotalValue(team, def.id);
                     return acc;
@@ -4168,8 +4202,15 @@
             }, [isGameLive, pendingPeriodActionMode]);
 
             useEffect(() => {
-                if (!canFinalizeGame) return;
+                if (!canFinalizeGame) {
+                    setEndMatchReady(false);
+                    return;
+                }
                 setShowExtraGameControls(true);
+                // Brief cooldown so the button can't be tapped through from "End Period"
+                setEndMatchReady(false);
+                const t = setTimeout(() => setEndMatchReady(true), 1500);
+                return () => clearTimeout(t);
             }, [canFinalizeGame]);
 
             useEffect(() => {
@@ -4416,22 +4457,27 @@
                         const loadedGames = Array.isArray(bootstrap?.state?.games) ? bootstrap.state.games : [];
                         const loadedActions = Array.isArray(bootstrap?.statActions) ? bootstrap.statActions : [];
 
-                        const normalizedTeams = normalizeTeamsForStorage(loadedTeams);
+                        const { realTeams: splitTeams, pool: splitPool } = splitLoadedTeams(normalizeTeamsForStorage(loadedTeams));
                         const normalizedGames = loadedGames
                             .map((game) => ({
                                 ...game,
                                 underReview: Boolean(game?.underReview)
                             }))
                             .sort((a, b) => b.id.localeCompare(a.id));
-                        setTeams(normalizedTeams);
+                        setTeams(splitTeams);
+                        setFreeAgents(splitPool);
+                        freeAgentsRef.current = splitPool;
                         setGames(normalizedGames);
                         setStatActions(loadedActions);
-                        writeCachedAppState(normalizedTeams, normalizedGames, loadedActions, { dirty: false });
+                        writeCachedAppState(splitTeams, normalizedGames, loadedActions, { dirty: false });
                         gamesBootstrappedRef.current = true;
                     } catch (e) {
                         if (cachedState) {
                             const cachedGames = Array.isArray(cachedState.games) ? cachedState.games.sort((a, b) => b.id.localeCompare(a.id)) : [];
-                            setTeams(normalizeTeamsForStorage(cachedState.teams));
+                            const { realTeams: cacheRealTeams, pool: cachePool } = splitLoadedTeams(normalizeTeamsForStorage(cachedState.teams));
+                            setTeams(cacheRealTeams);
+                            setFreeAgents(cachePool);
+                            freeAgentsRef.current = cachePool;
                             setGames(cachedGames);
                             setStatActions(Array.isArray(cachedState.statActions) ? cachedState.statActions : []);
                             gamesBootstrappedRef.current = true;
@@ -4591,6 +4637,7 @@
                                 // Ended/discarded by this device — suppress and let the queued DELETE clean up.
                                 purgeStaleLocalSessionArtifacts();
                             } else {
+                                confirmedNoActiveSessionRef.current = false;
                                 hydrateSession(payload.session);
                                 hydratedFromRemote = true;
                             }
@@ -4598,6 +4645,7 @@
                             // Server has no active session and is reachable.
                             // Do NOT recover local cache here, or ended/discarded matches can
                             // resurrect after refresh from stale local storage.
+                            confirmedNoActiveSessionRef.current = true;
                             purgeStaleLocalSessionArtifacts();
                         }
                     } catch (e) {
@@ -4775,7 +4823,10 @@
                             }
 
                             if (payload.state) {
-                                const normalizedRemoteTeams = normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []);
+                                const { realTeams: wsRealTeams, pool: wsPool } = splitLoadedTeams(normalizeTeamsForStorage(Array.isArray(payload.state.teams) ? payload.state.teams : []));
+                                const normalizedRemoteTeams = wsRealTeams;
+                                setFreeAgents(wsPool);
+                                freeAgentsRef.current = wsPool;
                                 setGames((prevGames) => {
                                     const locallyDeletedGameIds = locallyDeletedGameIdsRef.current || new Set();
                                     const remoteGames = Array.isArray(payload.state.games)
@@ -5106,6 +5157,8 @@
                 }
             }, [gameLog]);
 
+            useEffect(() => { freeAgentsRef.current = freeAgents; }, [freeAgents]);
+
             useEffect(() => {
                 teamsRef.current = teams;
                 isGameLiveRef.current = isGameLive;
@@ -5187,6 +5240,11 @@
                     suppressLiveSessionSyncRef.current = false;
                 }
 
+                // Suppress auto-save while the game-end sequence is in flight. handleEndGame
+                // takes care of its own explicit save + clear; a concurrent PUT here would race
+                // the server-side DELETE and could briefly resurrect a cleared session.
+                if (isEndingGame) return;
+
                 const hasValidLiveIdentity = Boolean(isGameLive && liveSessionInstanceId && teamAId && teamBId);
 
                 if (hasValidLiveIdentity) {
@@ -5225,7 +5283,7 @@
                         flushPendingActiveSessionSync();
                     }
                 }
-            }, [isGameLive, teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
+            }, [isGameLive, isEndingGame, teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
 
             const showToast = (message, type = 'success') => {
                 setToast({ message, type });
@@ -5577,7 +5635,19 @@
                 };
             };
 
-            const saveTeamState = async (updatedTeams) => {
+            const splitLoadedTeams = (allTeams) => {
+                const realTeams = allTeams.filter(t => t.id !== FREE_AGENTS_TEAM_ID);
+                const poolTeam = allTeams.find(t => t.id === FREE_AGENTS_TEAM_ID);
+                const pool = Array.isArray(poolTeam?.players) ? poolTeam.players : [];
+                return { realTeams, pool };
+            };
+
+            const buildTeamsPayload = (updatedTeams, updatedPool) => [
+                ...updatedTeams,
+                { id: FREE_AGENTS_TEAM_ID, name: 'Free Agents', color: '', players: updatedPool }
+            ];
+
+            const saveTeamState = async (updatedTeams, updatedPool = freeAgentsRef.current) => {
                 const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
                 setTeams(normalizedTeams);
                 writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
@@ -5585,19 +5655,33 @@
                     if (navigator.onLine !== false) {
                         const payload = await apiRequest('/api/teams', {
                             method: 'PUT',
-                            body: JSON.stringify({ teams: normalizedTeams })
+                            body: JSON.stringify({ teams: buildTeamsPayload(normalizedTeams, updatedPool) })
                         });
-                        const persistedTeams = Array.isArray(payload?.teams)
-                            ? normalizeTeamsForStorage(payload.teams)
-                            : normalizedTeams;
-                        setTeams(persistedTeams);
-                        writeCachedAppState(persistedTeams, games, statActions, { dirty: false });
+                        const allReturned = Array.isArray(payload?.teams) ? payload.teams : buildTeamsPayload(normalizedTeams, updatedPool);
+                        const { realTeams: persistedTeams } = splitLoadedTeams(allReturned);
+                        const normalized = normalizeTeamsForStorage(persistedTeams);
+                        setTeams(normalized);
+                        writeCachedAppState(normalized, games, statActions, { dirty: false });
                     }
                     return true;
                 } catch (error) {
                     writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
                     return false;
                 }
+            };
+
+            const saveFreeAgentsState = async (updatedPool) => {
+                const normalizedPool = normalizeTeamsForStorage([{ id: FREE_AGENTS_TEAM_ID, name: 'Free Agents', color: '', players: updatedPool }])[0].players;
+                setFreeAgents(normalizedPool);
+                freeAgentsRef.current = normalizedPool;
+                try {
+                    if (navigator.onLine !== false) {
+                        await apiRequest('/api/teams', {
+                            method: 'PUT',
+                            body: JSON.stringify({ teams: buildTeamsPayload(teamsRef.current, normalizedPool) })
+                        });
+                    }
+                } catch (error) {}
             };
 
             const saveNewGameState = async (newGame, updatedTeams) => {
@@ -6210,8 +6294,9 @@
                     setLiveGameSnapshot(nextLiveSnapshot);
 
                     const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
+                    sessionRevisionRef.current = nextSessionRevision;
                     const nextClockControlRevision = Number(clockControlRevisionRef.current || 0);
-                    const nextSessionUpdatedAt = Date.now();
+                    const nextSessionUpdatedAt = markLocalSessionUpdated();
                     const liveSessionPayload = {
                         teamAId,
                         teamBId,
@@ -6795,7 +6880,19 @@
                 const teamBObj = teams.find(t => t.id === teamBId);
                 if (!teamAObj || !teamBObj || teamAObj.players.length === 0 || teamBObj.players.length === 0) return;
 
-                const didClearRemoteSession = await clearAnyRemoteActiveSessionBeforeStart();
+                // Check if another game is already live on the server before silently killing it.
+                let existingRemoteSession = null;
+                try {
+                    const peek = await apiRequest('/api/active-session');
+                    existingRemoteSession = peek?.session || null;
+                } catch (_) {}
+
+                const existingRemoteSessionId = String(existingRemoteSession?.liveSessionInstanceId || existingRemoteSession?.sessionInstanceId || '').trim();
+                const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
+                const isForeignSession = existingRemoteSession && existingRemoteSessionId && existingRemoteSessionId !== localSessionId;
+
+                const proceedWithStart = async () => {
+                    const didClearRemoteSession = await clearAnyRemoteActiveSessionBeforeStart();
                 if (!didClearRemoteSession) {
                     showToast('Could not clear previous active session on server. Please retry Start Match.', 'error');
                     return;
@@ -6807,10 +6904,12 @@
                 discardedLiveSessionTombstoneRef.current = { sessionInstanceId: '', discardedAt: 0 };
                 persistDiscardedSessionTombstone();
 
-                const startersA = teamAObj.players.slice(0, 5).map(p => p.id);
-                const benchA = teamAObj.players.slice(5).map(p => p.id);
-                const startersB = teamBObj.players.slice(0, 5).map(p => p.id);
-                const benchB = teamBObj.players.slice(5).map(p => p.id);
+                const activePlayersA = teamAObj.players.filter(p => !p.released);
+                const activePlayersB = teamBObj.players.filter(p => !p.released);
+                const startersA = activePlayersA.slice(0, 5).map(p => p.id);
+                const benchA = activePlayersA.slice(5).map(p => p.id);
+                const startersB = activePlayersB.slice(0, 5).map(p => p.id);
+                const benchB = activePlayersB.slice(5).map(p => p.id);
                 const nextSessionInstanceId = generateLiveSessionInstanceId();
                 const nextSessionCreatedAt = Date.now();
                 const focusEventTs = Date.now();
@@ -6941,6 +7040,24 @@
                     team_b_id: teamBId
                 });
                 showToast('Match started. Press Start Q1 to begin period play.', 'success');
+                }; // end proceedWithStart
+
+                if (isForeignSession) {
+                    // A different game is already live on the server — warn before killing it.
+                    const existingTeamA = teams.find(t => t.id === String(existingRemoteSession?.teamAId || ''))?.name || 'Team A';
+                    const existingTeamB = teams.find(t => t.id === String(existingRemoteSession?.teamBId || ''))?.name || 'Team B';
+                    setConfirmDialog({
+                        title: 'A live game is already running',
+                        text: `${existingTeamA} vs ${existingTeamB} is currently live on another device. Starting a new match will discard that game for everyone connected. Are you sure?`,
+                        confirmLabel: 'Discard & Start New',
+                        onConfirm: async () => {
+                            setConfirmDialog(null);
+                            await proceedWithStart();
+                        }
+                    });
+                } else {
+                    await proceedWithStart();
+                }
             };
 
             const handlePlayerClick = (playerId, isTeamA, options = {}) => {
@@ -7790,8 +7907,6 @@
                     setAwaitingOvertimeDecision(false);
                     setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
                     showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, 'info');
-                    // Persist to DB immediately at period boundary.
-                    setTimeout(() => saveSessionToServer(), 0);
                     return true;
                 }
 
@@ -7810,7 +7925,6 @@
                     setAwaitingOvertimeDecision(false);
                     setGameLog((prev) => [checkpointEvent, quarterEndEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
                     showToast(`${periodLabel} finalized. ${nextLabel} is ready to start.`, 'info');
-                    setTimeout(() => saveSessionToServer(), 0);
                     return true;
                 }
 
@@ -8426,7 +8540,7 @@
                 const teamObj = teams.find((t) => t.id === teamId);
                 const lineup = isTeamA ? teamALineup : teamBLineup;
                 const bench = isTeamA ? teamABench : teamBBench;
-                const rosterIds = (teamObj?.players || []).map((p) => p.id);
+                const rosterIds = (teamObj?.players || []).filter(p => !p.released).map((p) => p.id);
                 const fallbackCandidates = rosterIds.filter((id) => !lineup.includes(id) && !dnpPlayers.includes(id));
                 const addCandidates = (bench.length > 0 ? bench : fallbackCandidates)
                     .filter((id) => !dnpPlayers.includes(id));
@@ -8652,7 +8766,7 @@
                 const currentBench = isTeamA ? teamABench : teamBBench;
                 if (!teamId || !teamObj) return;
 
-                const rosterIds = (teamObj.players || []).map((p) => p.id);
+                const rosterIds = (teamObj.players || []).filter(p => !p.released).map((p) => p.id);
                 const eligibleSet = new Set(
                     rosterIds.filter((id) => !dnpPlayers.includes(id) && (liveStats[id]?.pf || 0) < 5)
                 );
@@ -8869,13 +8983,21 @@
                         finalizedClockSeconds
                     );
 
+                    // Derive final scores and per-player stats by replaying the finalized log
+                    // rather than reading from closure state. This is immune to concurrent WS
+                    // stat events arriving between when the button was tapped and here.
+                    const finalizedReplay = buildLiveStateFromEvents(liveGameSnapshotRef.current, finalizedGameLog);
+                    const finalizedLiveStats = finalizedReplay?.liveStats || liveStats;
+                    const finalizedTeamAScore = finalizedReplay?.teamAScore ?? teamAScore;
+                    const finalizedTeamBScore = finalizedReplay?.teamBScore ?? teamBScore;
+
                     const participantStats = {};
 
                     const updatedTeams = teams.map(team => {
                     if (team.id !== teamAId && team.id !== teamBId) return team;
 
                     const updatedPlayers = team.players.map(player => {
-                        const statsLive = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                        const statsLive = finalizedLiveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
                         const hasStatLine = Object.values(statsLive).some(val => Number(val || 0) > 0);
                         const didParticipate = !dnpPlayers.includes(player.id) && (playedPlayers.includes(player.id) || hasStatLine);
 
@@ -8917,8 +9039,8 @@
                     teamBId,
                     teamAName: teamAObj.name,
                     teamBName: teamBObj.name,
-                    teamAScore,
-                    teamBScore,
+                    teamAScore: finalizedTeamAScore,
+                    teamBScore: finalizedTeamBScore,
                     underReview: false,
                     playerStats: participantStats,
                     dnpPlayers: [...dnpPlayers],
@@ -9412,7 +9534,8 @@
             const handleDeletePlayer = (teamId, playerId) => {
                 setConfirmDialog({
                     title: "Delete Player?",
-                    text: "Are you sure you want to remove this player from the team roster?",
+                    text: "This permanently removes the player and their career stats. To keep their stats history, use Release instead.",
+                    confirmLabel: "Delete Permanently",
                     onConfirm: async () => {
                         const updatedTeams = teams.map(t => {
                             if (t.id === teamId) {
@@ -9426,7 +9549,119 @@
 
                         await saveTeamState(updatedTeams);
                         setConfirmDialog(null);
-                        showToast("Player removed from roster.", "success");
+                        showToast("Player permanently deleted.", "success");
+                    }
+                });
+            };
+
+            const handleReleasePlayer = (teamId, playerId) => {
+                const playerName = teams.find(t => t.id === teamId)?.players.find(p => p.id === playerId)?.name || 'Player';
+                setConfirmDialog({
+                    title: "Release Player?",
+                    text: `${playerName} will be removed from the active roster. Their career stats are preserved and they can be re-signed later.`,
+                    confirmLabel: "Release",
+                    onConfirm: async () => {
+                        const updatedTeams = teams.map(t => {
+                            if (t.id !== teamId) return t;
+                            return { ...t, players: t.players.map(p => p.id === playerId ? { ...p, released: true } : p) };
+                        });
+                        await saveTeamState(updatedTeams);
+                        setConfirmDialog(null);
+                        showToast(`${playerName} released.`, "success");
+                    }
+                });
+            };
+
+            const handleRestorePlayer = async (teamId, playerId) => {
+                const updatedTeams = teams.map(t => {
+                    if (t.id !== teamId) return t;
+                    return { ...t, players: t.players.map(p => p.id === playerId ? { ...p, released: false } : p) };
+                });
+                await saveTeamState(updatedTeams);
+                showToast("Player re-signed to roster.", "success");
+            };
+
+            const handleTransferPlayer = (fromTeamId, playerId, toTeamId) => {
+                const fromTeam = teams.find(t => t.id === fromTeamId);
+                const toTeam = teams.find(t => t.id === toTeamId);
+                const player = fromTeam?.players.find(p => p.id === playerId);
+                if (!fromTeam || !toTeam || !player) return;
+                setConfirmDialog({
+                    title: "Transfer Player?",
+                    text: `${player.name} will be moved to ${toTeam.name}. Their game history on ${fromTeam.name} stays intact and their career stats carry over.`,
+                    confirmLabel: "Transfer",
+                    onConfirm: async () => {
+                        const historyEntry = { teamId: fromTeamId, teamName: fromTeam.name };
+                        const prevHistory = Array.isArray(player.teamHistory) ? player.teamHistory : [];
+                        const transferredPlayer = { ...player, released: false, teamHistory: [...prevHistory, historyEntry] };
+                        const updatedTeams = teams.map(t => {
+                            if (t.id === fromTeamId) return { ...t, players: t.players.filter(p => p.id !== playerId) };
+                            if (t.id === toTeamId) return { ...t, players: [...t.players, transferredPlayer] };
+                            return t;
+                        });
+                        await saveTeamState(updatedTeams);
+                        setConfirmDialog(null);
+                        showToast(`${player.name} transferred to ${toTeam.name}.`, "success");
+                    }
+                });
+            };
+
+            const handleSendToPool = (fromTeamId, playerId) => {
+                const fromTeam = teams.find(t => t.id === fromTeamId);
+                const player = fromTeam?.players.find(p => p.id === playerId);
+                if (!fromTeam || !player) return;
+                setConfirmDialog({
+                    title: "Send to Free Agency?",
+                    text: `${player.name} will be moved to the Free Agent Pool. Any team can sign them later. Career stats are preserved.`,
+                    confirmLabel: "Send to Pool",
+                    onConfirm: async () => {
+                        const historyEntry = { teamId: fromTeamId, teamName: fromTeam.name };
+                        const prevHistory = Array.isArray(player.teamHistory) ? player.teamHistory : [];
+                        const poolPlayer = { ...player, released: false, teamHistory: [...prevHistory, historyEntry] };
+                        const updatedTeams = teams.map(t => t.id === fromTeamId ? { ...t, players: t.players.filter(p => p.id !== playerId) } : t);
+                        const updatedPool = [...freeAgentsRef.current, poolPlayer];
+                        setFreeAgents(updatedPool);
+                        freeAgentsRef.current = updatedPool;
+                        await saveTeamState(updatedTeams, updatedPool);
+                        setConfirmDialog(null);
+                        showToast(`${player.name} sent to Free Agent Pool.`, "success");
+                    }
+                });
+            };
+
+            const handleSignFromPool = (playerId, toTeamId) => {
+                const player = freeAgentsRef.current.find(p => p.id === playerId);
+                const toTeam = teams.find(t => t.id === toTeamId);
+                if (!player || !toTeam) return;
+                setConfirmDialog({
+                    title: `Sign ${player.name}?`,
+                    text: `${player.name} will join ${toTeam.name}. Their career stats carry over.`,
+                    confirmLabel: "Sign",
+                    onConfirm: async () => {
+                        const signedPlayer = { ...player, released: false };
+                        const updatedPool = freeAgentsRef.current.filter(p => p.id !== playerId);
+                        const updatedTeams = teams.map(t => t.id === toTeamId ? { ...t, players: [...t.players, signedPlayer] } : t);
+                        setFreeAgents(updatedPool);
+                        freeAgentsRef.current = updatedPool;
+                        await saveTeamState(updatedTeams, updatedPool);
+                        setConfirmDialog(null);
+                        showToast(`${player.name} signed to ${toTeam.name}.`, "success");
+                    }
+                });
+            };
+
+            const handleDeleteFromPool = (playerId) => {
+                const player = freeAgentsRef.current.find(p => p.id === playerId);
+                if (!player) return;
+                setConfirmDialog({
+                    title: "Delete Player Permanently?",
+                    text: `This will permanently delete ${player.name} and all their stats. This cannot be undone.`,
+                    confirmLabel: "Delete Permanently",
+                    onConfirm: async () => {
+                        const updatedPool = freeAgentsRef.current.filter(p => p.id !== playerId);
+                        await saveFreeAgentsState(updatedPool);
+                        setConfirmDialog(null);
+                        showToast(`${player.name} deleted.`, "success");
                     }
                 });
             };
@@ -9876,22 +10111,38 @@
                 };
             };
 
-            const getPlayerRecentGamesSummaries = (teamId, playerId, limit = null, statsByGame = null) => {
-                if (!teamId || !playerId) return [];
+            const getPlayerRecentGamesSummaries = (teamId, playerId, limit = null, statsByGame = null, extraTeamIds = []) => {
+                if (!playerId) return [];
 
-                const teamGames = games
-                    .filter((g) => g.teamAId === teamId || g.teamBId === teamId)
-                    .sort((a, b) => getGameRecencyValue(b) - getGameRecencyValue(a));
+                // Build the full set of team IDs this player has ever been on.
+                const allTeamIds = new Set([teamId, ...extraTeamIds].filter(Boolean));
+
+                // If per-game stats are loaded, any game with an entry for this player
+                // is a game they participated in — no team filter needed.
+                // Otherwise fall back to filtering by known team IDs.
+                const teamGames = (statsByGame
+                    ? games.filter((g) => statsByGame[g.id] !== undefined)
+                    : games.filter((g) => allTeamIds.has(g.teamAId) || allTeamIds.has(g.teamBId))
+                ).slice().sort((a, b) => {
+                    const dateA = Date.parse(a.date || '') || 0;
+                    const dateB = Date.parse(b.date || '') || 0;
+                    if (dateB !== dateA) return dateB - dateA;
+                    return getGameRecencyValue(b) - getGameRecencyValue(a);
+                });
+
                 const visibleGames = Number.isFinite(limit) && Number(limit) > 0
                     ? teamGames.slice(0, Number(limit))
                     : teamGames;
 
                 return visibleGames
                     .map((game) => {
-                        const isHome = game.teamAId === teamId;
+                        // Determine which side the player was on for this specific game.
+                        const playerTeamId = allTeamIds.has(game.teamAId) ? game.teamAId : game.teamBId;
+                        const isHome = game.teamAId === playerTeamId;
                         const opponentName = isHome ? game.teamBName : game.teamAName;
                         const teamScore = isHome ? game.teamAScore : game.teamBScore;
                         const opponentScore = isHome ? game.teamBScore : game.teamAScore;
+                        const playerTeamName = isHome ? game.teamAName : game.teamBName;
                         const explicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(playerId);
                         const playerStats = statsByGame
                             ? (statsByGame[game.id] || null)
@@ -9904,6 +10155,7 @@
                             opponentName,
                             teamScore,
                             opponentScore,
+                            playerTeamName,
                             didPlay,
                             explicitDnp,
                             stats: playerStats
@@ -9911,15 +10163,25 @@
                     });
             };
 
+            const isFreeAgentProfile = selectedRosterPlayer?.teamId === FREE_AGENTS_TEAM_ID;
             const selectedRosterTeam = selectedRosterPlayer
-                ? teams.find((team) => team.id === selectedRosterPlayer.teamId)
+                ? (isFreeAgentProfile
+                    ? { id: FREE_AGENTS_TEAM_ID, name: 'Free Agent Pool', color: '', players: freeAgents }
+                    : teams.find((team) => team.id === selectedRosterPlayer.teamId))
                 : null;
             const selectedRosterAthlete = selectedRosterTeam
                 ? selectedRosterTeam.players.find((player) => player.id === selectedRosterPlayer.playerId)
                 : null;
             const selectedRosterAthleteAverages = selectedRosterAthlete ? getAverages(selectedRosterAthlete) : null;
+            const selectedRosterAthleteHistoryTeamIds = (selectedRosterAthlete?.teamHistory || []).map(h => h.teamId);
             const selectedRosterAthleteRecentGames = selectedRosterPlayer
-                ? getPlayerRecentGamesSummaries(selectedRosterPlayer.teamId, selectedRosterPlayer.playerId, null, selectedPlayerGameStats)
+                ? getPlayerRecentGamesSummaries(
+                    selectedRosterPlayer.teamId,
+                    selectedRosterPlayer.playerId,
+                    null,
+                    selectedPlayerGameStats,
+                    selectedRosterAthleteHistoryTeamIds
+                  )
                 : null;
 
             const getPlayerPerStyleScore = (stats = {}) => {
@@ -12291,8 +12553,8 @@
                                                                 <button
                                                                     type="button"
                                                                     onClick={openEndGameConfirm}
-                                                                    disabled={!canAdminControlClock}
-                                                                    title={!canAdminControlClock ? 'Only admin can end and lock scores.' : undefined}
+                                                                    disabled={!canAdminControlClock || !endMatchReady}
+                                                                    title={!canAdminControlClock ? 'Only admin can end and lock scores.' : (!endMatchReady ? 'Tap again to end match' : undefined)}
                                                                     className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-red-500/45 bg-red-950/30 text-red-400 hover:bg-red-950/40 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] animate-pulse"
                                                                 >
                                                                     <span className="inline-flex items-center justify-center gap-1">
@@ -13631,7 +13893,10 @@
                                                         </div>
                                                     )}
                                                     <div>
-                                                        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">{selectedRosterTeam.name}</div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">{selectedRosterTeam.name}</div>
+                                                            {selectedRosterAthlete.released && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border border-amber-500/40 bg-amber-500/10 text-amber-400">Released</span>}
+                                                        </div>
                                                         <div className="flex items-start justify-between gap-2">
                                                             <h3 className="text-lg md:text-xl font-black text-white leading-tight">#{selectedRosterAthlete.number} {selectedRosterAthlete.name}</h3>
                                                             {isLoggedIn && canEditPlayers && (
@@ -13652,6 +13917,9 @@
                                                             )}
                                                         </div>
                                                         <div className="text-xs text-slate-400">Games Played: {selectedRosterAthlete.gamesPlayed || 0}</div>
+                                                        {Array.isArray(selectedRosterAthlete.teamHistory) && selectedRosterAthlete.teamHistory.length > 0 && (
+                                                            <div className="mt-1 text-[10px] text-slate-500">Previously: {selectedRosterAthlete.teamHistory.map(h => h.teamName).join(' → ')}</div>
+                                                        )}
                                                         {selectedRosterAthlete.writeup && (
                                                             <p className="mt-2 text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap">{selectedRosterAthlete.writeup}</p>
                                                         )}
@@ -13736,7 +14004,7 @@
                                                                 >
                                                                     <td className="py-2 px-2 text-slate-400 whitespace-nowrap">{game.date || '-'}</td>
                                                                     <td className="py-2 px-2 font-bold text-slate-200 whitespace-nowrap">vs {game.opponentName}</td>
-                                                                    <td className="py-2 px-2 text-center text-slate-400 whitespace-nowrap">{selectedRosterTeam.name} {game.teamScore} - {game.opponentScore}</td>
+                                                                    <td className="py-2 px-2 text-center text-slate-400 whitespace-nowrap">{game.playerTeamName || selectedRosterTeam.name} {game.teamScore} - {game.opponentScore}</td>
                                                                     <td className="py-2 px-2 text-center font-black text-orange-400">{game.didPlay ? (game.stats?.pts || 0) : '-'}</td>
                                                                     <td className="py-2 px-2 text-center text-emerald-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0) + Number(game.stats?.fg2m_miss || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
                                                                     <td className="py-2 px-2 text-center text-cyan-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg3m || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
@@ -13812,7 +14080,7 @@
 
                                 <div className="space-y-4">
                                     {teams.map(team => {
-                                        const teamStats = compileTeamStatistics(team.players, team.id);
+                                        const teamStats = compileTeamStatistics(team.players.filter(p => !p.released), team.id);
                                         return (
                                             <div key={team.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-md">
                                                 <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
@@ -13843,7 +14111,7 @@
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody className="divide-y divide-slate-850/40 text-slate-300 font-medium font-mono">
-                                                                    {team.players.map(p => {
+                                                                    {team.players.filter(p => !p.released).map(p => {
                                                                         const gp = p.gamesPlayed || 0;
                                                                         const avgs = getAverages(p);
                                                                         const isEditingPlayer = editingPlayer && editingPlayer.teamId === team.id && editingPlayer.playerId === p.id;
@@ -13905,7 +14173,9 @@
                                                                                                 <button onClick={() => handleStartEditPlayer(team.id, p)} className="text-blue-400 hover:text-blue-300 p-1 rounded cursor-pointer" title="Edit player" aria-label="Edit player">
                                                                                                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
                                                                                                 </button>
-                                                                                                <button onClick={() => handleDeletePlayer(team.id, p.id)} className="text-slate-500 hover:text-red-400 cursor-pointer"><Icons.Trash /></button>
+                                                                                                <button onClick={() => handleReleasePlayer(team.id, p.id)} className="text-slate-500 hover:text-amber-400 p-1 rounded cursor-pointer" title="Release player" aria-label="Release player">
+                                                                                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                                                                                                </button>
                                                                                             </div> : <span className="text-slate-600">-</span>
                                                                                         )}
                                                                                     </td>
@@ -13954,7 +14224,7 @@
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody className="divide-y divide-slate-850/40 text-slate-300 font-medium font-mono">
-                                                                    {team.players.map(p => {
+                                                                    {team.players.filter(p => !p.released).map(p => {
                                                                         const gp = p.gamesPlayed || 0;
                                                                         const ts = p.totalStats || {};
                                                                         const fgMade = (ts.fg2m || 0) + (ts.fg3m || 0);
@@ -14021,7 +14291,9 @@
                                                                                                 <button onClick={() => handleStartEditPlayer(team.id, p)} className="text-blue-400 hover:text-blue-300 p-1 rounded cursor-pointer" title="Edit player" aria-label="Edit player">
                                                                                                     <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg>
                                                                                                 </button>
-                                                                                                <button onClick={() => handleDeletePlayer(team.id, p.id)} className="text-slate-500 hover:text-red-400 cursor-pointer"><Icons.Trash /></button>
+                                                                                                <button onClick={() => handleReleasePlayer(team.id, p.id)} className="text-slate-500 hover:text-amber-400 p-1 rounded cursor-pointer" title="Release player" aria-label="Release player">
+                                                                                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                                                                                                </button>
                                                                                             </div> : <span className="text-slate-600">-</span>
                                                                                         )}
                                                                                     </td>
@@ -14060,12 +14332,139 @@
                                                         )}
                                                     </table>
                                                 </div>
+                                                {/* RELEASED PLAYERS SECTION */}
+                                                {team.players.some(p => p.released) && (
+                                                    <details className="border-t border-slate-800/50">
+                                                        <summary className="px-4 py-2.5 text-[11px] font-mono text-slate-500 hover:text-slate-300 cursor-pointer select-none flex items-center gap-1.5">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                                                            Released ({team.players.filter(p => p.released).length})
+                                                        </summary>
+                                                        <div className="overflow-x-auto">
+                                                            <table className="w-full text-left text-[11px] min-w-[950px]">
+                                                                <tbody className="divide-y divide-slate-850/30 text-slate-400 font-mono">
+                                                                    {team.players.filter(p => p.released).map(p => {
+                                                                        const ts = p.totalStats || {};
+                                                                        const avgs = getAverages(p);
+                                                                        return (
+                                                                            <tr key={p.id} className="opacity-50 hover:opacity-70 hover:bg-slate-855/10">
+                                                                                <td className="py-2 px-4 font-bold text-slate-500">#{p.number}</td>
+                                                                                <td className="py-2 px-4 font-bold text-slate-400 font-sans italic">
+                                                                                    <button type="button" onClick={() => setSelectedRosterPlayer({ teamId: team.id, playerId: p.id })} className="text-left hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer italic">{p.name}</button>
+                                                                                </td>
+                                                                                <td className="py-2 px-2 text-center">{p.gamesPlayed || 0}</td>
+                                                                                {rosterViewMode === 'averages' ? (<>
+                                                                                    <td className="py-2 px-2 text-center text-orange-400">{avgs.pts}</td>
+                                                                                    <td className="py-2 px-2 text-center text-emerald-400">{(ts.fg2m||0)+(ts.fg3m||0)}/{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg2m_miss||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-cyan-400">{ts.fg3m||0}/{(ts.fg3m||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-pink-400">{avgs.ftPct}</td>
+                                                                                    <td className="py-2 px-2 text-center text-emerald-300">{avgs.reb}</td>
+                                                                                    <td className="py-2 px-2 text-center text-blue-300">{avgs.ast}</td>
+                                                                                    <td className="py-2 px-2 text-center text-teal-400">{avgs.spg}</td>
+                                                                                    <td className="py-2 px-2 text-center text-violet-400">{avgs.bpg}</td>
+                                                                                    <td className="py-2 px-2 text-center text-amber-500">{avgs.to}</td>
+                                                                                    <td className="py-2 px-2 text-center text-red-400">{avgs.pf}</td>
+                                                                                </>) : (<>
+                                                                                    <td className="py-2 px-2 text-center text-orange-400">{ts.pts || 0}</td>
+                                                                                    <td className="py-2 px-2 text-center text-emerald-400">{(ts.fg2m||0)+(ts.fg3m||0)}/{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg2m_miss||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-cyan-400">{ts.fg3m||0}/{(ts.fg3m||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-pink-400">{ts.ftm||0}/{(ts.ftm||0)+(ts.ft_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-emerald-300">{ts.reb||0}</td>
+                                                                                    <td className="py-2 px-2 text-center text-blue-300">{ts.ast||0}</td>
+                                                                                    <td className="py-2 px-2 text-center text-teal-400">{ts.stl||0}</td>
+                                                                                    <td className="py-2 px-2 text-center text-violet-400">{ts.blk||0}</td>
+                                                                                    <td className="py-2 px-2 text-center text-amber-500">{ts.to||0}</td>
+                                                                                    <td className="py-2 px-2 text-center text-red-400">{ts.pf||0}</td>
+                                                                                </>)}
+                                                                                {isLoggedIn && canEditPlayers && (
+                                                                                    <td className="py-2 px-4 text-center">
+                                                                                        <div className="flex items-center justify-center gap-2">
+                                                                                            <button onClick={() => handleRestorePlayer(team.id, p.id)} className="text-slate-500 hover:text-emerald-400 text-[10px] font-bold font-sans cursor-pointer">Re-sign</button>
+                                                                                            {teams.filter(t => t.id !== team.id).map(t => (
+                                                                                                <button key={t.id} onClick={() => handleTransferPlayer(team.id, p.id, t.id)} className="text-slate-500 hover:text-cyan-400 text-[10px] font-bold font-sans cursor-pointer" title={`Transfer to ${t.name}`}>→ {t.name}</button>
+                                                                                            ))}
+                                                                                            <button onClick={() => handleSendToPool(team.id, p.id)} className="text-slate-500 hover:text-violet-400 text-[10px] font-bold font-sans cursor-pointer" title="Send to Free Agent Pool">→ Pool</button>
+                                                                                            <button onClick={() => handleDeletePlayer(team.id, p.id)} className="text-slate-600 hover:text-red-400 cursor-pointer"><Icons.Trash /></button>
+                                                                                        </div>
+                                                                                    </td>
+                                                                                )}
+                                                                            </tr>
+                                                                        );
+                                                                    })}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </details>
+                                                )}
                                             </div>
                                         );
                                     })}
                                         </div>
 
                                 </>
+                                )}
+
+                                {/* FREE AGENT POOL */}
+                                {isLoggedIn && (
+                                    <div className="mt-6 border border-violet-500/20 rounded-2xl bg-slate-900/60 overflow-hidden">
+                                        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-800">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-violet-400">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+                                                </span>
+                                                <span className="text-[11px] font-bold text-violet-300 uppercase tracking-widest">Free Agent Pool</span>
+                                                {freeAgents.length > 0 && <span className="px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-400 text-[10px] font-bold">{freeAgents.length}</span>}
+                                            </div>
+                                        </div>
+                                        {freeAgents.length === 0 ? (
+                                            <div className="px-4 py-6 text-center text-[11px] text-slate-600">No free agents. Release a player and send them to the pool.</div>
+                                        ) : (
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-[11px]">
+                                                    <thead>
+                                                        <tr className="border-b border-slate-800 text-slate-500">
+                                                            <th className="py-2 px-4 text-left font-bold">#</th>
+                                                            <th className="py-2 px-4 text-left font-bold">Player</th>
+                                                            <th className="py-2 px-4 text-left font-bold text-slate-600">Prev. Team</th>
+                                                            <th className="py-2 px-2 text-center font-bold">GP</th>
+                                                            <th className="py-2 px-2 text-center font-bold text-orange-400">PTS</th>
+                                                            <th className="py-2 px-2 text-center font-bold text-emerald-300">REB</th>
+                                                            <th className="py-2 px-2 text-center font-bold text-blue-300">AST</th>
+                                                            {canEditPlayers && <th className="py-2 px-4 text-center font-bold">Sign</th>}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {freeAgents.map(p => {
+                                                            const avgs = getAverages(p);
+                                                            const prevTeam = Array.isArray(p.teamHistory) && p.teamHistory.length > 0 ? p.teamHistory[p.teamHistory.length - 1].teamName : '—';
+                                                            return (
+                                                                <tr key={p.id} className="border-b border-slate-800/50 hover:bg-slate-800/20">
+                                                                    <td className="py-2.5 px-4 text-slate-500">#{p.number}</td>
+                                                                    <td className="py-2.5 px-4 font-bold text-white">
+                                                                        <button type="button" onClick={() => setSelectedRosterPlayer({ teamId: FREE_AGENTS_TEAM_ID, playerId: p.id })} className="text-left hover:text-cyan-300 underline decoration-dotted decoration-slate-500/50 underline-offset-2 cursor-pointer">{p.name}</button>
+                                                                    </td>
+                                                                    <td className="py-2.5 px-4 text-slate-600 text-[10px]">{prevTeam}</td>
+                                                                    <td className="py-2.5 px-2 text-center text-slate-400">{p.gamesPlayed || 0}</td>
+                                                                    <td className="py-2.5 px-2 text-center font-bold text-orange-400">{avgs.pts}</td>
+                                                                    <td className="py-2.5 px-2 text-center text-emerald-300">{avgs.reb}</td>
+                                                                    <td className="py-2.5 px-2 text-center text-blue-300">{avgs.ast}</td>
+                                                                    {canEditPlayers && (
+                                                                        <td className="py-2.5 px-4 text-center">
+                                                                            <div className="flex items-center justify-center gap-2">
+                                                                                {teams.map(t => (
+                                                                                    <button key={t.id} onClick={() => handleSignFromPool(p.id, t.id)} className="text-slate-500 hover:text-emerald-400 text-[10px] font-bold cursor-pointer">{t.name}</button>
+                                                                                ))}
+                                                                                <button onClick={() => handleDeleteFromPool(p.id)} className="text-slate-600 hover:text-red-400 cursor-pointer"><Icons.Trash /></button>
+                                                                            </div>
+                                                                        </td>
+                                                                    )}
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -16239,7 +16638,8 @@
                                     <button
                                         type="button"
                                         onClick={canFinalizeGame ? openEndGameConfirm : openFinalizePeriodConfirm}
-                                        disabled={canFinalizeGame ? false : !canEndCurrentPeriod}
+                                        disabled={canFinalizeGame ? !endMatchReady : !canEndCurrentPeriod}
+                                        title={canFinalizeGame && !endMatchReady ? 'Tap again to end match' : undefined}
                                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-orange-500/45 bg-orange-500/15 py-2 text-[10px] font-black uppercase tracking-wide text-orange-200 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
                                         <Icons.Stop />
