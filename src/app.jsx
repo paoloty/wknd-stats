@@ -2718,8 +2718,12 @@
                     // Reject a session that was created before the current game started —
                     // it's a stale previous-game session arriving via WS or the fallback poll.
                     if (remoteSessionCreatedAt > 0 && localSessionCreatedAt > 0 && remoteSessionCreatedAt < localSessionCreatedAt) {
+                        // eslint-disable-next-line no-console
+                        console.warn('[applyRemoteLiveSession] rejecting old session — remote createdAt:', remoteSessionCreatedAt, 'local createdAt:', localSessionCreatedAt, 'remote id:', remoteSessionInstanceId);
                         return;
                     }
+                    // eslint-disable-next-line no-console
+                    console.warn('[applyRemoteLiveSession] DIFFERENT session applying — remote id:', remoteSessionInstanceId, 'local id:', localSessionInstanceId, 'remote createdAt:', remoteSessionCreatedAt, 'local createdAt:', localSessionCreatedAt, 'remote gameLog length:', (session.gameLog || []).length);
                     pendingLiveEventsRef.current = [];
                     persistPendingLiveEvents();
                     pendingActiveSessionSyncRef.current = null;
@@ -4087,6 +4091,8 @@
 
                 if (['quarterClockExpired', 'quarterEnd'].includes(latestClockControlEvent.metaType)) {
                     if (periodClockSeconds !== 0) {
+                        // eslint-disable-next-line no-console
+                        console.warn('[clock-reconcile] forcing clock to 0 — event:', latestClockControlEvent?.metaType, 'id:', latestClockControlEvent?.id, 'q:', latestClockControlEvent?.quarter, 'log length:', currentLiveGameLog?.length);
                         setPeriodClockSeconds(0);
                     }
                     if (isPeriodClockRunning) {
