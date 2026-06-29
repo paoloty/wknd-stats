@@ -4780,31 +4780,19 @@ app.put('/api/games/:gameId/video', (req, res) => {
   }
 
   const youtubeUrl = String(req.body?.youtubeUrl || '').trim();
-  const state = readState();
-  const existingGames = Array.isArray(state.games) ? state.games : [];
-  const targetGame = existingGames.find((game) => String(game?.id || '').trim() === gameId);
 
-  if (!targetGame) {
-    res.status(404).json({ error: 'Game not found.' });
-    return;
+  // Direct targeted UPDATE — never touches players, teams, or game_player_stats.
+  // The old pattern (readState → writeState) wiped all game_player_stats because
+  // readState() returns playerStats:{} for every game, causing writeGamesTransaction
+  // to clear and re-insert with no stats rows.
+  const result = db.prepare('UPDATE games SET youtube_url = ? WHERE id = ?').run(youtubeUrl, gameId);
+
+  if (!result.changes) {
+    return res.status(404).json({ error: 'Game not found.' });
   }
 
-  const nextGames = existingGames.map((game) => {
-    if (String(game?.id || '').trim() !== gameId) return game;
-    const nextGame = { ...game };
-    if (youtubeUrl) {
-      nextGame.youtubeUrl = youtubeUrl;
-    } else {
-      delete nextGame.youtubeUrl;
-    }
-    return nextGame;
-  });
-
-  writeState(state.teams || [], nextGames);
   broadcastSync();
-
-  const savedGame = nextGames.find((game) => String(game?.id || '').trim() === gameId) || null;
-  res.json({ ok: true, game: savedGame });
+  res.json({ ok: true, youtubeUrl });
 });
 
 app.put('/api/games/:gameId/social-cover', (req, res) => {
