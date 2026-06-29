@@ -4163,6 +4163,9 @@
                 }
 
                 const timerId = window.setInterval(() => {
+                    // Guard against the one extra tick that fires between
+                    // setIsPeriodClockRunning(false) and the effect cleanup.
+                    if (!isPeriodClockRunningRef.current) return;
                     setPeriodClockSeconds((prev) => {
                         if (prev <= 1) {
                             handlePeriodClockExpired();
@@ -7283,6 +7286,8 @@
                     setDnpPlayers(prev => prev.filter(id => id !== playerId));
                 }
 
+                let nextTotalA = teamAScore;
+                let nextTotalB = teamBScore;
                 setLiveStats(prev => {
                     const currentVal = prev[playerId]?.[statField] || 0;
                     const newVal = Math.max(0, currentVal + changeAmount);
@@ -7294,17 +7299,18 @@
                     }
 
                     const updated = { ...prev, [playerId]: playerUpdate };
-                    let totalA = 0, totalB = 0;
-                    const teamAObj = teams.find(t => t.id === teamAId);
-                    const teamBObj = teams.find(t => t.id === teamBId);
-
-                    if (teamAObj) teamAObj.players.forEach(p => { totalA += updated[p.id]?.pts || 0; });
-                    if (teamBObj) teamBObj.players.forEach(p => { totalB += updated[p.id]?.pts || 0; });
-
-                    setTeamAScore(totalA);
-                    setTeamBScore(totalB);
+                    // Compute scores outside the updater to avoid calling state setters
+                    // inside another setter (violates React rules; can cause double-invocation).
+                    // Use teamsRef for the authoritative roster, not the closure snapshot.
+                    const currentTeams = teamsRef.current || [];
+                    const teamAPlayers = currentTeams.find(t => t.id === teamAId)?.players || [];
+                    const teamBPlayers = currentTeams.find(t => t.id === teamBId)?.players || [];
+                    nextTotalA = teamAPlayers.reduce((s, p) => s + (updated[p.id]?.pts || 0), 0);
+                    nextTotalB = teamBPlayers.reduce((s, p) => s + (updated[p.id]?.pts || 0), 0);
                     return updated;
                 });
+                setTeamAScore(nextTotalA);
+                setTeamBScore(nextTotalB);
 
                 const statLogEvent = {
                     id: logEntryId,
@@ -7378,6 +7384,7 @@
                     nonPrimaryResumeConfirmRef.current = false;
                     markLocalSessionUpdated();
                     setIsPlayPaused(true);
+                    isPeriodClockRunningRef.current = false;
                     setIsPeriodClockRunning(false);
                     showToast('Clock stopped for foul stoppage. Press Resume to continue.', 'info');
                     return;
@@ -7463,6 +7470,7 @@
                 }
 
                 setIsPlayPaused(true);
+                isPeriodClockRunningRef.current = false;
                 setIsPeriodClockRunning(false);
                 const lastAction = latestHistoryEntry;
                 const remainingHistory = loggedHistory.filter((entry) => entry?.id !== lastAction.id);
@@ -7574,6 +7582,7 @@
                     return;
                 }
 
+                isPeriodClockRunningRef.current = false;
                 setIsPeriodClockRunning(false);
 
                 const idsToDelete = new Set([String(logId)]);
@@ -7928,12 +7937,10 @@
                     return true;
                 }
 
-                setAwaitingOvertimeDecision(true);
                 setAwaitingPeriodStart(false);
                 setIsPlayPaused(false);
                 const nextGameLog = [checkpointEvent, quarterEndEvent, ...gameLog].slice(0, MAX_LIVE_LOG_ENTRIES);
                 setGameLog(nextGameLog);
-                setAwaitingOvertimeDecision(false);
                 handleEndGame({ finalGameLogOverride: nextGameLog });
                 showToast(`${periodLabel} finalized. Match ended and locked.`, 'success');
                 return false;
@@ -9244,6 +9251,7 @@
 
                 markLocalSessionUpdated();
                 setIsPlayPaused(true);
+                isPeriodClockRunningRef.current = false;
                 setIsPeriodClockRunning(false);
                 setGameLog((prev) => [{
                     id: timeoutLogId,
@@ -9282,6 +9290,7 @@
                 const pauseLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 markLocalSessionUpdated();
                 setIsPlayPaused(true);
+                isPeriodClockRunningRef.current = false;
                 setIsPeriodClockRunning(false);
                 setGameLog((prev) => [{
                     id: pauseLogId,
@@ -9324,6 +9333,7 @@
                 const officialsLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                 markLocalSessionUpdated();
                 setIsPlayPaused(true);
+                isPeriodClockRunningRef.current = false;
                 setIsPeriodClockRunning(false);
                 const displayText = reasonText
                     ? `Officials Timeout: ${reasonText}`

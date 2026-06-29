@@ -12,7 +12,11 @@
       "PowerShell(\\(Get-Content \"c:\\\\Users\\\\paolo\\\\Documents\\\\Work\\\\wknd-stats\\\\src\\\\app.jsx\" | Measure-Object -Line\\).Lines)",
       "Bash(grep -v \"const\\\\|//\\\\|import\\\\|FREE_AGENT\")",
       "Bash(awk 'NR>=14355 && NR<=14375' \"c:/Users/paolo/Documents/Work/wknd-stats/src/app.jsx\")",
-      "Bash(grep -iv \"//\\\\|iife\\\\|comment\")"
+      "Bash(grep -iv \"//\\\\|iife\\\\|comment\")",
+      "Bash(grep -iv \"//.*resume\\\\|//.*period\")",
+      "Bash(grep -v \"latestPause\\\\|isPause\\\\|isTeam\\\\|canCall\\\\|allow\\\\|//\\\\|timeline\\\\|includes\\\\|precedingPause\\\\|priorMeta\\\\|PAUSE\")",
+      "Read(//c/Users/paulo/Documents/Work/wknd-stats/src/**)",
+      "Bash(grep -v \"//\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\paolo\\Documents\\Work\\wknd-portal"
