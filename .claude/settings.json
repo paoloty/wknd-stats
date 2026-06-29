@@ -16,7 +16,8 @@
       "Bash(grep -iv \"//.*resume\\\\|//.*period\")",
       "Bash(grep -v \"latestPause\\\\|isPause\\\\|isTeam\\\\|canCall\\\\|allow\\\\|//\\\\|timeline\\\\|includes\\\\|precedingPause\\\\|priorMeta\\\\|PAUSE\")",
       "Read(//c/Users/paulo/Documents/Work/wknd-stats/src/**)",
-      "Bash(grep -v \"//\")"
+      "Bash(grep -v \"//\")",
+      "Bash(grep -n \"setInterval.*[0-9]\\\\{4,\\\\}\\\\|pollInterval\\\\|fetchActiveSession\\\\|active-session\" \"c:/Users/paolo/Documents/Work/wknd-stats/src/app.jsx\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\paolo\\Documents\\Work\\wknd-portal"

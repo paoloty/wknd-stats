@@ -2715,6 +2715,11 @@
                 }
 
                 if (isDifferentLiveSession) {
+                    // Reject a session that was created before the current game started —
+                    // it's a stale previous-game session arriving via WS or the fallback poll.
+                    if (remoteSessionCreatedAt > 0 && localSessionCreatedAt > 0 && remoteSessionCreatedAt < localSessionCreatedAt) {
+                        return;
+                    }
                     pendingLiveEventsRef.current = [];
                     persistPendingLiveEvents();
                     pendingActiveSessionSyncRef.current = null;
@@ -6902,10 +6907,10 @@
                 }
 
                 await clearLiveSessionEverywhere({ keepTeamSelection: true, terminationStatus: 'discarded' });
-
-                // Starting a brand-new match should not carry forward prior discard markers.
-                discardedLiveSessionTombstoneRef.current = { sessionInstanceId: '', discardedAt: 0 };
-                persistDiscardedSessionTombstone();
+                // Do NOT clear the tombstone here. clearLiveSessionEverywhere already set it
+                // to the old session's ID. Clearing it immediately would remove the only guard
+                // protecting the new game from the old session being re-applied via the fallback
+                // poll before the server DELETE completes.
 
                 const activePlayersA = teamAObj.players.filter(p => !p.released);
                 const activePlayersB = teamBObj.players.filter(p => !p.released);
@@ -7286,8 +7291,6 @@
                     setDnpPlayers(prev => prev.filter(id => id !== playerId));
                 }
 
-                let nextTotalA = teamAScore;
-                let nextTotalB = teamBScore;
                 setLiveStats(prev => {
                     const currentVal = prev[playerId]?.[statField] || 0;
                     const newVal = Math.max(0, currentVal + changeAmount);
@@ -7299,18 +7302,19 @@
                     }
 
                     const updated = { ...prev, [playerId]: playerUpdate };
-                    // Compute scores outside the updater to avoid calling state setters
-                    // inside another setter (violates React rules; can cause double-invocation).
-                    // Use teamsRef for the authoritative roster, not the closure snapshot.
+                    // Score setters are intentionally inside the updater so they receive
+                    // the newly computed totals from `updated` (not a stale closure value).
+                    // Use teamsRef for the authoritative roster instead of the closure snapshot.
                     const currentTeams = teamsRef.current || [];
-                    const teamAPlayers = currentTeams.find(t => t.id === teamAId)?.players || [];
-                    const teamBPlayers = currentTeams.find(t => t.id === teamBId)?.players || [];
-                    nextTotalA = teamAPlayers.reduce((s, p) => s + (updated[p.id]?.pts || 0), 0);
-                    nextTotalB = teamBPlayers.reduce((s, p) => s + (updated[p.id]?.pts || 0), 0);
+                    const teamAObj = currentTeams.find(t => t.id === teamAId);
+                    const teamBObj = currentTeams.find(t => t.id === teamBId);
+                    let totalA = 0, totalB = 0;
+                    if (teamAObj) teamAObj.players.forEach(p => { totalA += updated[p.id]?.pts || 0; });
+                    if (teamBObj) teamBObj.players.forEach(p => { totalB += updated[p.id]?.pts || 0; });
+                    setTeamAScore(totalA);
+                    setTeamBScore(totalB);
                     return updated;
                 });
-                setTeamAScore(nextTotalA);
-                setTeamBScore(nextTotalB);
 
                 const statLogEvent = {
                     id: logEntryId,
