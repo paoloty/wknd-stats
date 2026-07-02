@@ -101,6 +101,20 @@
             });
         }
 
+        function getTeamColorStyles(color, textColor, fallbackColor = '#06b6d4') {
+            const hex = String(color || fallbackColor).replace('#', '');
+            const norm = hex.length === 3
+                ? hex.split('').map(c => c + c).join('')
+                : hex.padEnd(6, '0').slice(0, 6);
+            const r = parseInt(norm.slice(0, 2), 16);
+            const g = parseInt(norm.slice(2, 4), 16);
+            const b = parseInt(norm.slice(4, 6), 16);
+            const isLight = (r * 299 + g * 587 + b * 114) / 1000 > 180;
+            return isLight
+                ? { borderColor: '#cbd5e1', backgroundColor: '#e2e8f0', color: '#020617' }
+                : { borderColor: color || fallbackColor, backgroundColor: color || '#0f172a', color: textColor || '#ffffff' };
+        }
+
         const Icons = {
             Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
             Minus: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/></svg>,
@@ -364,6 +378,7 @@
             const hadLiveSessionRef = useRef(false);
             const confirmedNoActiveSessionRef = useRef(false);
             const gamesBootstrappedRef = useRef(false);
+            const portalResolvedTeamsRef = useRef([]);
 
             const [authRole, setAuthRole] = useState('viewer');
             const [showAuthModal, setShowAuthModal] = useState(false);
@@ -1152,7 +1167,7 @@
                 const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
                 const tombstone = discardedLiveSessionTombstoneRef.current || { sessionInstanceId: '', discardedAt: 0 };
                 if (localSessionId && eventSessionId && eventSessionId !== localSessionId) {
-                    pullActiveSessionSnapshot();
+                    pullActiveSessionSnapshot({ clearIfAbsent: true });
                     return;
                 }
                 if (eventSessionId && eventSessionId === String(tombstone.sessionInstanceId || '').trim()) {
@@ -1270,7 +1285,7 @@
                 } catch (e) {}
             };
 
-            const pullActiveSessionSnapshot = async ({ apply = true } = {}) => {
+            const pullActiveSessionSnapshot = async ({ apply = true, clearIfAbsent = false } = {}) => {
                 try {
                     const payload = await apiRequest('/api/active-session');
                     if (payload?.session) {
@@ -1278,6 +1293,9 @@
                             applyRemoteLiveSession(payload.session);
                         }
                         return payload.session;
+                    }
+                    if (clearIfAbsent && apply && isGameLiveRef.current) {
+                        clearLocalLiveSessionArtifacts({ keepTeamSelection: false });
                     }
                     return null;
                 } catch (e) {
@@ -3052,6 +3070,8 @@
 
             const liveHomeTeam = teams.find(t => t.id === teamAId);
             const liveAwayTeam = teams.find(t => t.id === teamBId);
+            const homeTimeoutBtnStyles = getTeamColorStyles(liveHomeTeam?.color, liveHomeTeam?.textColor);
+            const awayTimeoutBtnStyles = getTeamColorStyles(liveAwayTeam?.color, liveAwayTeam?.textColor);
             const homeTeamLabel = liveHomeTeam?.name || 'HOME';
             const awayTeamLabel = liveAwayTeam?.name || 'AWAY';
             const liveLogEditTargetTeam = liveLogEditTarget?.isTeamA === true
@@ -3544,12 +3564,12 @@
                 const exceedsRoleCapacity = (authRole === 'admin' && activeAdminPresenceCount > 1)
                     || (authRole === 'operator' && activeOperatorPresenceCount > 1);
                 setIsRoleCapacityExceeded(exceedsRoleCapacity);
-                if (!exceedsRoleCapacity) return;
+                if (!exceedsRoleCapacity || !isGameLive) return;
                 if (Date.now() - Number(adminMissingToastAtRef.current || 0) > 8000) {
                     adminMissingToastAtRef.current = Date.now();
                     showToast('Live game allows max 2 users: 1 admin and 1 operator.', 'info');
                 }
-            }, [authRole, activeAdminPresenceCount, activeOperatorPresenceCount]);
+            }, [authRole, activeAdminPresenceCount, activeOperatorPresenceCount, isGameLive]);
 
             useEffect(() => {
                 if (authRole !== 'operator') return;
@@ -4809,9 +4829,11 @@
                             const clearedSessionId = String(payload.sessionInstanceId || '').trim();
                             const localSessionId = String(liveSessionInstanceIdRef.current || '').trim();
                             if (localSessionId && clearedSessionId && localSessionId !== clearedSessionId) {
-                                // Ignore stale clear events from older sessions.
+                                // Ignore stale clear events from older sessions, but confirm
+                                // with the server in case our local session is actually the
+                                // stale one (e.g. it was ended/deleted from another device).
                                 // WS ordering can deliver an old clear after a new match start.
-                                pullActiveSessionSnapshot();
+                                pullActiveSessionSnapshot({ clearIfAbsent: true });
                                 return;
                             }
 
@@ -4905,7 +4927,19 @@
                                         return nextGame;
                                     });
 
-                                    setTeams(normalizedRemoteTeams);
+                                    // If portal-resolved teams are active (live game with portal UUIDs),
+                                    // merge them back in so sync messages can't overwrite them with
+                                    // the server's local-ID versions.
+                                    const portalTeams = portalResolvedTeamsRef.current || [];
+                                    const teamsToSet = portalTeams.length > 0
+                                        ? normalizedRemoteTeams.map(t => {
+                                            const portal = portalTeams.find(
+                                                p => p.name.trim().toUpperCase() === t.name.trim().toUpperCase()
+                                            );
+                                            return portal || t;
+                                        })
+                                        : normalizedRemoteTeams;
+                                    setTeams(teamsToSet);
                                     return resolvedGames;
                                 });
                             }
@@ -4915,10 +4949,10 @@
                                     applyRemoteLiveSession(payload.session);
                                 } else {
                                     if (isGameLiveRef.current) {
-                                        // Never clear on null sync snapshot alone.
-                                        // Session clear is signaled via explicit 'session_cleared' event.
+                                        // Don't clear on the null sync snapshot alone — confirm
+                                        // against the server first, then clear if it agrees.
                                         flushPendingActiveSessionSync();
-                                        pullActiveSessionSnapshot();
+                                        pullActiveSessionSnapshot({ clearIfAbsent: true });
                                     }
                                 }
                             }
@@ -4986,7 +5020,7 @@
                     const socket = syncSocketRef.current;
                     const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
                     if (!socketIsOpen) {
-                        pullActiveSessionSnapshot();
+                        pullActiveSessionSnapshot({ clearIfAbsent: true });
                     }
                     fetchMissingLiveEvents();
                     flushPendingLiveEvents();
@@ -5001,7 +5035,7 @@
                     const socket = syncSocketRef.current;
                     const socketIsOpen = socket && socket.readyState === WebSocket.OPEN;
                     if (!socketIsOpen) {
-                        pullActiveSessionSnapshot();
+                        pullActiveSessionSnapshot({ clearIfAbsent: true });
                         fetchMissingLiveEvents();
                     }
                     flushPendingLiveEvents();
@@ -5012,7 +5046,7 @@
 
             useEffect(() => {
                 const handleOnline = () => {
-                    pullActiveSessionSnapshot();
+                    pullActiveSessionSnapshot({ clearIfAbsent: true });
                     fetchMissingLiveEvents();
                     flushPendingLiveEvents();
                     flushPendingActiveSessionSync();
@@ -5512,6 +5546,8 @@
                     teamBScore: Number(game?.teamBScore || 0),
                     underReview: Boolean(game?.underReview),
                     playerStats: detail.playerStats || game?.playerStats || {},
+                    gameLog: Array.isArray(detail.gameLog) ? detail.gameLog : (Array.isArray(game?.gameLog) ? game.gameLog : []),
+                    periodSnapshots: Array.isArray(detail.periodSnapshots) ? detail.periodSnapshots : (Array.isArray(game?.periodSnapshots) ? game.periodSnapshots : []),
                     gameWriteup: game?.gameWriteup || '',
                     potgWriteup: game?.potgWriteup || '',
                     youtubeUrl: game?.youtubeUrl || ''
@@ -6558,6 +6594,16 @@
                 };
             };
 
+            const handleSyncRosterFromPortal = async () => {
+                try {
+                    showToast('Syncing roster from portal…', 'info');
+                    await apiRequest('/api/portal-roster/sync', { method: 'POST' });
+                    showToast('Roster synced from portal.', 'success');
+                } catch (_) {
+                    showToast('Failed to sync roster from portal. Check that the portal is running.', 'error');
+                }
+            };
+
             const handleExportRostersOnly = () => {
                 try {
                     const rostersOnly = teams.map(t => ({
@@ -6638,6 +6684,9 @@
                 try {
                     localStorage.removeItem(LIVE_EVENTS_LAST_SEQ_KEY);
                 } catch (err) {}
+                try {
+                    localStorage.removeItem(PENDING_COMPLETED_GAME_KEY);
+                } catch (err) {}
 
                 pendingLiveEventsRef.current = [];
                 persistPendingLiveEvents();
@@ -6666,6 +6715,7 @@
                 isGameLiveRef.current = false;
                 liveSessionInstanceIdRef.current = '';
                 liveSessionCreatedAtRef.current = 0;
+                portalResolvedTeamsRef.current = [];
                 setIsGameLive(false);
                 setIsPlayPaused(false);
                 setActiveAction(null);
@@ -6918,8 +6968,54 @@
                 // protecting the new game from the old session being re-applied via the fallback
                 // poll before the server DELETE completes.
 
-                const activePlayersA = teamAObj.players.filter(p => !p.released);
-                const activePlayersB = teamBObj.players.filter(p => !p.released);
+                // Resolve portal roster: replace local SQLite IDs with portal UUIDs so the
+                // live session and final export use the portal's canonical player/team IDs.
+                let resolvedTeamAId = teamAId;
+                let resolvedTeamBId = teamBId;
+                let resolvedTeamAObj = teamAObj;
+                let resolvedTeamBObj = teamBObj;
+                try {
+                    const portalRoster = await apiRequest('/api/portal-roster');
+                    if (Array.isArray(portalRoster?.teams) && Array.isArray(portalRoster?.players)) {
+                        const portalTeamA = portalRoster.teams.find(
+                            t => t.name.trim().toUpperCase() === teamAObj.name.trim().toUpperCase()
+                        );
+                        const portalTeamB = portalRoster.teams.find(
+                            t => t.name.trim().toUpperCase() === teamBObj.name.trim().toUpperCase()
+                        );
+                        if (portalTeamA && portalTeamB) {
+                            const resolveTeamObj = (localTeam, portalTeam) => {
+                                const portalPlayers = portalRoster.players.filter(
+                                    p => p.teamId === portalTeam.id && p.status === 'active'
+                                );
+                                const players = localTeam.players.map(lp => {
+                                    const pp = portalPlayers.find(
+                                        p => p.name.trim().toUpperCase() === lp.name.trim().toUpperCase()
+                                    );
+                                    return pp ? { ...lp, id: pp.id } : lp;
+                                });
+                                return { ...localTeam, id: portalTeam.id, players };
+                            };
+                            resolvedTeamAObj = resolveTeamObj(teamAObj, portalTeamA);
+                            resolvedTeamBObj = resolveTeamObj(teamBObj, portalTeamB);
+                            resolvedTeamAId = portalTeamA.id;
+                            resolvedTeamBId = portalTeamB.id;
+                            portalResolvedTeamsRef.current = [resolvedTeamAObj, resolvedTeamBObj];
+                            setTeamAId(resolvedTeamAId);
+                            setTeamBId(resolvedTeamBId);
+                            setTeams(prev => prev.map(t => {
+                                if (t.id === teamAId) return resolvedTeamAObj;
+                                if (t.id === teamBId) return resolvedTeamBObj;
+                                return t;
+                            }));
+                        }
+                    }
+                } catch (_) {
+                    // Portal unreachable and no cache — fall back to local IDs
+                }
+
+                const activePlayersA = resolvedTeamAObj.players.filter(p => !p.released);
+                const activePlayersB = resolvedTeamBObj.players.filter(p => !p.released);
                 const startersA = activePlayersA.slice(0, 5).map(p => p.id);
                 const benchA = activePlayersA.slice(5).map(p => p.id);
                 const startersB = activePlayersB.slice(0, 5).map(p => p.id);
@@ -6939,12 +7035,12 @@
                 setDnpPlayers([]);
 
                 const initializedStats = {};
-                teamAObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
-                teamBObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
+                resolvedTeamAObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
+                resolvedTeamBObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
 
                 const initialLiveSnapshot = {
-                    teamAId,
-                    teamBId,
+                    teamAId: resolvedTeamAId,
+                    teamBId: resolvedTeamBId,
                     teamAScore: 0,
                     teamBScore: 0,
                     currentQuarter: 1,
@@ -7017,8 +7113,8 @@
                 liveSessionInstanceIdRef.current = nextSessionInstanceId;
                 liveSessionCreatedAtRef.current = nextSessionCreatedAt;
                 const initialSession = {
-                    teamAId,
-                    teamBId,
+                    teamAId: resolvedTeamAId,
+                    teamBId: resolvedTeamBId,
                     teamAScore: 0,
                     teamBScore: 0,
                     liveSessionInstanceId: nextSessionInstanceId,
@@ -7050,8 +7146,8 @@
 
                 setIsGameLive(true);
                 trackAnalyticsEvent('start_match', {
-                    team_a_id: teamAId,
-                    team_b_id: teamBId
+                    team_a_id: resolvedTeamAId,
+                    team_b_id: resolvedTeamBId
                 });
                 showToast('Match started. Press Start Q1 to begin period play.', 'success');
                 }; // end proceedWithStart
@@ -12372,41 +12468,7 @@
                                                             onClick={() => handleLogTimeout(true)}
                                                             disabled={!teamATimeoutEnabled || !canOperateTeam(true)}
                                                             className="w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed border-2 backdrop-blur-md shadow-sm"
-                                                            style={{
-                                                                borderColor: (() => {
-                                                                    const color = String(liveHomeTeam?.color || '#06b6d4').replace('#', '');
-                                                                    const normalized = color.length === 3
-                                                                        ? color.split('').map((ch) => ch + ch).join('')
-                                                                        : color.padEnd(6, '0').slice(0, 6);
-                                                                    const red = parseInt(normalized.slice(0, 2), 16);
-                                                                    const green = parseInt(normalized.slice(2, 4), 16);
-                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
-                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
-                                                                    return isLight ? '#cbd5e1' : (liveHomeTeam?.color || '#06b6d4');
-                                                                })(),
-                                                                backgroundColor: (() => {
-                                                                    const color = String(liveHomeTeam?.color || '#06b6d4').replace('#', '');
-                                                                    const normalized = color.length === 3
-                                                                        ? color.split('').map((ch) => ch + ch).join('')
-                                                                        : color.padEnd(6, '0').slice(0, 6);
-                                                                    const red = parseInt(normalized.slice(0, 2), 16);
-                                                                    const green = parseInt(normalized.slice(2, 4), 16);
-                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
-                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
-                                                                    return isLight ? '#e2e8f0' : (liveHomeTeam?.color || '#0f172a');
-                                                                })(),
-                                                                color: (() => {
-                                                                    const color = String(liveHomeTeam?.color || '#06b6d4').replace('#', '');
-                                                                    const normalized = color.length === 3
-                                                                        ? color.split('').map((ch) => ch + ch).join('')
-                                                                        : color.padEnd(6, '0').slice(0, 6);
-                                                                    const red = parseInt(normalized.slice(0, 2), 16);
-                                                                    const green = parseInt(normalized.slice(2, 4), 16);
-                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
-                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
-                                                                    return isLight ? '#020617' : (liveHomeTeam?.textColor || '#ffffff');
-                                                                })()
-                                                            }}
+                                                            style={homeTimeoutBtnStyles}
                                                         >
                                                             <span className="inline-flex items-center justify-center gap-1">
                                                                 <Icons.Timer />
@@ -12440,41 +12502,7 @@
                                                             onClick={() => handleLogTimeout(false)}
                                                             disabled={!teamBTimeoutEnabled || !canOperateTeam(false)}
                                                             className="w-full inline-flex items-center justify-center py-3 md:py-3.5 px-2 rounded-xl text-[10px] md:text-xs font-black leading-tight tracking-wide uppercase transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed border-2 backdrop-blur-md shadow-sm"
-                                                            style={{
-                                                                borderColor: (() => {
-                                                                    const color = String(liveAwayTeam?.color || '#ef4444').replace('#', '');
-                                                                    const normalized = color.length === 3
-                                                                        ? color.split('').map((ch) => ch + ch).join('')
-                                                                        : color.padEnd(6, '0').slice(0, 6);
-                                                                    const red = parseInt(normalized.slice(0, 2), 16);
-                                                                    const green = parseInt(normalized.slice(2, 4), 16);
-                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
-                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
-                                                                    return isLight ? '#cbd5e1' : (liveAwayTeam?.color || '#ef4444');
-                                                                })(),
-                                                                backgroundColor: (() => {
-                                                                    const color = String(liveAwayTeam?.color || '#ef4444').replace('#', '');
-                                                                    const normalized = color.length === 3
-                                                                        ? color.split('').map((ch) => ch + ch).join('')
-                                                                        : color.padEnd(6, '0').slice(0, 6);
-                                                                    const red = parseInt(normalized.slice(0, 2), 16);
-                                                                    const green = parseInt(normalized.slice(2, 4), 16);
-                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
-                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
-                                                                    return isLight ? '#e2e8f0' : (liveAwayTeam?.color || '#0f172a');
-                                                                })(),
-                                                                color: (() => {
-                                                                    const color = String(liveAwayTeam?.color || '#ef4444').replace('#', '');
-                                                                    const normalized = color.length === 3
-                                                                        ? color.split('').map((ch) => ch + ch).join('')
-                                                                        : color.padEnd(6, '0').slice(0, 6);
-                                                                    const red = parseInt(normalized.slice(0, 2), 16);
-                                                                    const green = parseInt(normalized.slice(2, 4), 16);
-                                                                    const blue = parseInt(normalized.slice(4, 6), 16);
-                                                                    const isLight = ((red * 299) + (green * 587) + (blue * 114)) / 1000 > 180;
-                                                                    return isLight ? '#020617' : (liveAwayTeam?.textColor || '#ffffff');
-                                                                })()
-                                                            }}
+                                                            style={awayTimeoutBtnStyles}
                                                         >
                                                             <span className="inline-flex items-center justify-center gap-1">
                                                                 <Icons.Timer />
@@ -14058,6 +14086,7 @@
                                         <h3 className="text-base font-bold text-white font-sans">Division Rosters</h3>
                                     </div>
                                     <div className="flex flex-wrap gap-1.5 text-xs font-bold font-sans">
+                                        {isLoggedIn && <button onClick={handleSyncRosterFromPortal} className="bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded cursor-pointer transition-colors">Sync from Portal</button>}
                                         {isLoggedIn && <button onClick={handleExportRostersOnly} className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Export Templates</button>}
                                         {isLoggedIn && <label className="bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-slate-300 cursor-pointer">Import Templates<input type="file" accept=".json" onChange={handleImportRostersOnly} className="hidden" /></label>}
                                         

@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const express = require('express');
 const Database = require('better-sqlite3');
 const { WebSocketServer } = require('ws');
+const { fetchRoster } = require('./lib/roster');
 
 const SHARP_ENABLED = String(process.env.WKND_DISABLE_SHARP || '').trim() !== '1';
 let sharp = null;
@@ -3357,6 +3358,83 @@ app.get('/api/bootstrap', (_req, res) => {
   });
 });
 
+app.get('/api/portal-roster', async (_req, res) => {
+  try {
+    const roster = await fetchRoster();
+    if (!roster) {
+      res.status(503).json({ error: 'Portal roster unavailable and no cached version found.' });
+      return;
+    }
+    res.json(roster);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch portal roster.' });
+  }
+});
+
+async function syncRosterFromPortal() {
+  const roster = await fetchRoster();
+  if (!Array.isArray(roster?.teams) || !Array.isArray(roster?.players)) return false;
+
+  // Preserve career stats for players already in local DB (matched by portal UUID).
+  const existing = readState();
+  const existingPlayerMap = new Map();
+  existing.teams.forEach((t) => t.players.forEach((p) => existingPlayerMap.set(p.id, p)));
+
+  const nextTeams = roster.teams.map((portalTeam) => {
+    const portalPlayers = roster.players.filter(
+      (p) => p.teamId === portalTeam.id && p.status === 'active'
+    );
+    return {
+      id: portalTeam.id,
+      name: portalTeam.name,
+      color: portalTeam.color || '',
+      players: portalPlayers.map((pp) => {
+        const prev = existingPlayerMap.get(pp.id) || {};
+        return {
+          id: pp.id,
+          name: pp.name,
+          number: String(pp.number || ''),
+          positions: Array.isArray(pp.positions) ? pp.positions : [],
+          height: prev.height || '',
+          pictureUrl: pp.pictureUrl || prev.pictureUrl || '',
+          birthday: prev.birthday || '',
+          email: prev.email || '',
+          social: prev.social || '',
+          contact: prev.contact || '',
+          writeup: prev.writeup || '',
+          released: false,
+          teamHistory: prev.teamHistory || [],
+          gamesPlayed: prev.gamesPlayed || 0,
+          totalStats: prev.totalStats || {
+            pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0,
+            fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0
+          }
+        };
+      })
+    };
+  });
+
+  writeTeamsTransaction(nextTeams);
+  invalidateStateCache();
+  console.log(`[roster] synced ${nextTeams.length} teams, ${nextTeams.reduce((n, t) => n + t.players.length, 0)} players from portal`);
+  return true;
+}
+
+app.post('/api/portal-roster/sync', async (_req, res) => {
+  try {
+    const ok = await syncRosterFromPortal();
+    if (!ok) {
+      res.status(503).json({ error: 'Portal roster unavailable and no cached version found.' });
+      return;
+    }
+    broadcastSync();
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[roster] sync error:', error);
+    res.status(500).json({ error: 'Failed to sync portal roster.' });
+  }
+});
+
 app.get('/api/client-config', (req, res) => {
   const gaEnabled = isGaEnabledForRequest(req);
 
@@ -4958,4 +5036,8 @@ wss.on('connection', (socket) => {
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`WKND Stats server running at http://localhost:${PORT}`);
+  syncRosterFromPortal().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[roster] startup sync failed:', err.message);
+  });
 });
