@@ -188,6 +188,8 @@
             const [selectedStandingsLeaderStat, setSelectedStandingsLeaderStat] = useState('pts');
 
             const [isGameLive, setIsGameLive] = useState(false);
+            const [isStartingMatch, setIsStartingMatch] = useState(false);
+            const [portalSyncStatus, setPortalSyncStatus] = useState(null); // null | 'syncing' | 'live' | 'cached' | 'offline'
             const [teamAId, setTeamAId] = useState("");
             const [teamBId, setTeamBId] = useState("");
             const [liveSessionInstanceId, setLiveSessionInstanceId] = useState('');
@@ -6722,6 +6724,7 @@
                 setCorrectionMode(false);
                 setAwaitingOvertimeDecision(false);
                 setAwaitingPeriodStart(false);
+                setPortalSyncStatus(null);
                 setShowLoggingModal(false);
                 setShowSubstitutionModal(false);
                 setSubTargetPlayer(null);
@@ -6930,6 +6933,7 @@
 
             const handleStartMatch = async (e) => {
                 e?.preventDefault?.();
+                if (isStartingMatch) return;
                 if (!canAdminControlClock) {
                     showToast('Only admin can create a live game.', 'info');
                     return;
@@ -6956,6 +6960,8 @@
                 const isForeignSession = existingRemoteSession && existingRemoteSessionId && existingRemoteSessionId !== localSessionId;
 
                 const proceedWithStart = async () => {
+                    setIsStartingMatch(true);
+                    try {
                     const didClearRemoteSession = await clearAnyRemoteActiveSessionBeforeStart();
                 if (!didClearRemoteSession) {
                     showToast('Could not clear previous active session on server. Please retry Start Match.', 'error');
@@ -6974,6 +6980,7 @@
                 let resolvedTeamBId = teamBId;
                 let resolvedTeamAObj = teamAObj;
                 let resolvedTeamBObj = teamBObj;
+                setPortalSyncStatus('syncing');
                 try {
                     const portalRoster = await apiRequest('/api/portal-roster');
                     if (Array.isArray(portalRoster?.teams) && Array.isArray(portalRoster?.players)) {
@@ -7009,9 +7016,14 @@
                                 return t;
                             }));
                         }
+                        const src = portalRoster.source;
+                        setPortalSyncStatus(src === 'portal' ? 'live' : 'cached');
+                    } else {
+                        setPortalSyncStatus('offline');
                     }
                 } catch (_) {
                     // Portal unreachable and no cache — fall back to local IDs
+                    setPortalSyncStatus('offline');
                 }
 
                 const activePlayersA = resolvedTeamAObj.players.filter(p => !p.released);
@@ -7150,6 +7162,9 @@
                     team_b_id: resolvedTeamBId
                 });
                 showToast('Match started. Press Start Q1 to begin period play.', 'success');
+                    } finally {
+                        setIsStartingMatch(false);
+                    }
                 }; // end proceedWithStart
 
                 if (isForeignSession) {
@@ -12319,7 +12334,21 @@
                                                             </select>
                                                         </div>
                                                     </div>
-                                                    <button type="submit" className="w-full bg-orange-500 font-bold py-2.5 rounded-xl text-xs text-white cursor-pointer shadow-lg">Start Live Tracking Match</button>
+                                                    <button
+                                                        type="submit"
+                                                        disabled={isStartingMatch}
+                                                        className={`w-full font-bold py-2.5 rounded-xl text-xs text-white shadow-lg transition-all ${isStartingMatch ? 'bg-orange-500/60 cursor-not-allowed' : 'bg-orange-500 cursor-pointer'}`}
+                                                    >
+                                                        {isStartingMatch ? (
+                                                            <span className="inline-flex items-center justify-center gap-2">
+                                                                <svg className="animate-spin h-3 w-3 text-white" viewBox="0 0 24 24" fill="none">
+                                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                                                                </svg>
+                                                                {portalSyncStatus === 'syncing' ? 'Connecting to Portal…' : 'Starting…'}
+                                                            </span>
+                                                        ) : 'Start Live Tracking Match'}
+                                                    </button>
                                                 </form>
                                             </div>
                                         )}
@@ -12444,7 +12473,33 @@
                                                 {/* Permanent Global Match Controls Row */}
                                                 <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-2.5 space-y-2">
                                                     <div className="flex items-center justify-between gap-2 mb-2">
-                                                        <div className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500">Global Match Controls</div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500">Global Match Controls</div>
+                                                            {portalSyncStatus === 'syncing' && (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 text-[8px] font-bold text-sky-400 animate-pulse">
+                                                                    <span className="w-1 h-1 rounded-full bg-sky-400 inline-block" />
+                                                                    Portal…
+                                                                </span>
+                                                            )}
+                                                            {portalSyncStatus === 'live' && (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[8px] font-bold text-emerald-400">
+                                                                    <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block" />
+                                                                    Portal
+                                                                </span>
+                                                            )}
+                                                            {portalSyncStatus === 'cached' && (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[8px] font-bold text-amber-400">
+                                                                    <span className="w-1 h-1 rounded-full bg-amber-400 inline-block" />
+                                                                    Cached
+                                                                </span>
+                                                            )}
+                                                            {portalSyncStatus === 'offline' && (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-slate-700/50 border border-slate-600/40 px-1.5 py-0.5 text-[8px] font-bold text-slate-400">
+                                                                    <span className="w-1 h-1 rounded-full bg-slate-500 inline-block" />
+                                                                    Local
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <button
                                                             type="button"
                                                             onClick={() => {

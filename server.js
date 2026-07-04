@@ -3365,7 +3365,8 @@ app.get('/api/portal-roster', async (_req, res) => {
       res.status(503).json({ error: 'Portal roster unavailable and no cached version found.' });
       return;
     }
-    res.json(roster);
+    const { _source, ...rosterData } = roster;
+    res.json({ ...rosterData, source: _source || 'portal' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch portal roster.' });
   }
