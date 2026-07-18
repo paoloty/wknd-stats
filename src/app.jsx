@@ -1297,7 +1297,12 @@
                         return payload.session;
                     }
                     if (clearIfAbsent && apply && isGameLiveRef.current) {
-                        clearLocalLiveSessionArtifacts({ keepTeamSelection: false });
+                        // Don't clear if there's a pending PUT queued for the server — the server
+                        // temporarily not having the session is a network race, not a true absence.
+                        // Only clear when there's no pending sync (session was genuinely abandoned).
+                        if (!pendingActiveSessionSyncRef.current) {
+                            clearLocalLiveSessionArtifacts({ keepTeamSelection: false });
+                        }
                     }
                     return null;
                 } catch (e) {
@@ -7961,7 +7966,7 @@
                 showToast('Log edited.', 'success');
             };
 
-            const autoFinalizeEndedPeriodAndStartNextPeriod = () => {
+            const autoFinalizeEndedPeriodAndStartNextPeriod = async () => {
                 markLocalSessionUpdated();
                 clockControlRevisionRef.current = Math.max(
                     Number(clockControlRevisionRef.current || 0),
@@ -8062,8 +8067,7 @@
                 setIsPlayPaused(false);
                 const nextGameLog = [checkpointEvent, quarterEndEvent, ...gameLog].slice(0, MAX_LIVE_LOG_ENTRIES);
                 setGameLog(nextGameLog);
-                handleEndGame({ finalGameLogOverride: nextGameLog });
-                showToast(`${periodLabel} finalized. Match ended and locked.`, 'success');
+                await handleEndGame({ finalGameLogOverride: nextGameLog });
                 return false;
             };
 
@@ -9087,7 +9091,10 @@
 
                     const teamAObj = teams.find(t => t.id === teamAId);
                     const teamBObj = teams.find(t => t.id === teamBId);
-                    if (!teamAObj || !teamBObj) return;
+                    if (!teamAObj || !teamBObj) {
+                        showToast('Cannot save game: team data not found. Please retry End Game.', 'error');
+                        return;
+                    }
 
                     const finalizedSessionId = String(liveSessionInstanceIdRef.current || liveSessionInstanceId || '').trim();
                     const gameId = finalizedSessionId ? `game_${finalizedSessionId}` : `game_${Date.now()}`;
