@@ -454,6 +454,27 @@
                         .filter((pos) => PLAYER_POSITIONS.includes(pos))
                 ));
             };
+            const formatLiveDisplayName = (rawName) => {
+                const trimmed = String(rawName || '').trim();
+                if (!trimmed) return '';
+                const [lastPart, firstPart] = trimmed.includes(',')
+                    ? trimmed.split(',').map((part) => part.trim())
+                    : [trimmed, ''];
+                const lastName = lastPart.toUpperCase();
+                const firstWord = (firstPart.split(/\s+/).filter(Boolean)[0]) || '';
+                return firstWord ? `${lastName}, ${firstWord}` : lastName;
+            };
+            const renderLiveDisplayName = (rawName) => {
+                const trimmed = String(rawName || '').trim();
+                if (!trimmed) return trimmed;
+                const [lastPart, firstPart] = trimmed.includes(',')
+                    ? trimmed.split(',').map((part) => part.trim())
+                    : [trimmed, ''];
+                const lastName = lastPart.toUpperCase();
+                const firstWord = (firstPart.split(/\s+/).filter(Boolean)[0]) || '';
+                if (!firstWord) return lastName;
+                return <>{lastName}, <span className="font-normal">{firstWord}</span></>;
+            };
             const parsePlayerHeightInches = (playerLike) => {
                 const raw = String(playerLike?.height || '').trim();
                 if (!raw) return 0;
@@ -11996,7 +12017,7 @@
                 const teamObj = isTeamA ? teams.find(t => t.id === teamAId) : teams.find(t => t.id === teamBId);
                 const player = teams && teams.length > 0 ? teams.flatMap(t => t?.players || []).find(p => p?.id === playerId) : null;
                 if (!player) return null;
-                const onCourtLastName = (typeof player.name === 'string' ? player.name.split(',')[0] : '').trim() || player.name;
+                const onCourtDisplayName = renderLiveDisplayName(player.name) || player.name;
                 const stats = liveStats[playerId] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
                 const hasActionArmed = activeAction !== null && !isLiveGameplayModalActive;
 
@@ -12048,8 +12069,8 @@
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                             <span className="w-12 md:w-14 min-h-[52px] text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0 inline-flex items-center justify-center">{player.number}</span>
                             <div className="min-w-0 flex-1">
-                                <span className="font-extrabold text-[11px] text-white block truncate leading-tight md:hidden">{player.name}</span>
-                                <span className="font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight">{onCourtLastName}</span>
+                                <span className="font-extrabold text-[11px] text-white block truncate leading-tight md:hidden">{onCourtDisplayName}</span>
+                                <span className="font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight">{onCourtDisplayName}</span>
                                 <div className="hidden md:flex gap-2 mt-1 items-center">
                                     {slotLabel && <span className="text-[9px] text-sky-300 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20 uppercase">{slotLabel}</span>}
                                     {isLoggedIn && !hasActionArmed && <span className="text-[9px] text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20 uppercase">Sub</span>}
@@ -12958,7 +12979,7 @@
                                                                             className="px-2 py-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                                                                             title={isFouledOut ? 'Player has 5 fouls' : 'Add to on-court'}
                                                                         >
-                                                                            #{p.number} {p.name}
+                                                                            #{p.number} {renderLiveDisplayName(p.name) || p.name}
                                                                         </button>
                                                                     );
                                                                 });
@@ -13087,7 +13108,7 @@
                                                                             className="px-2 py-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
                                                                             title={isFouledOut ? 'Player has 5 fouls' : 'Add to on-court'}
                                                                         >
-                                                                            #{p.number} {p.name}
+                                                                            #{p.number} {renderLiveDisplayName(p.name) || p.name}
                                                                         </button>
                                                                     );
                                                                 });
@@ -13320,7 +13341,7 @@
                                                                         return (
                                                                             <tr key={player.id} data-player-id={player.id} className={`hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? 'bg-emerald-500/5 font-semibold text-white' : 'opacity-70'} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10' : ''}`}>
                                                                                 <td className="py-1.5 px-3 truncate font-sans">
-                                                                                    <span className="font-mono text-slate-500 text-[10px] mr-1">#{player.number}</span>
+                                                                                    <span className="font-mono text-slate-500 text-[10px] mr-1 inline-block w-6 text-right">#{player.number}</span>
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => {
@@ -13409,7 +13430,7 @@
                                                                         return (
                                                                             <tr key={player.id} data-player-id={player.id} className={`hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? 'bg-emerald-500/5 font-semibold text-white' : 'opacity-70'} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10' : ''}`}>
                                                                                 <td className="py-1.5 px-3 truncate font-sans">
-                                                                                    <span className="font-mono text-slate-500 text-[10px] mr-1">#{player.number}</span>
+                                                                                    <span className="font-mono text-slate-500 text-[10px] mr-1 inline-block w-6 text-right">#{player.number}</span>
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => {
@@ -17353,7 +17374,7 @@
                                                     <div className="flex items-center gap-2">
                                                         <span className="w-10 h-10 rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100 text-base">{p.number}</span>
                                                         <div className="min-w-0 flex-1">
-                                                            <div className="text-[12px] font-black text-white truncate leading-tight">{p.name}</div>
+                                                            <div className="text-[12px] font-black text-white truncate leading-tight">{renderLiveDisplayName(p.name) || p.name}</div>
                                                             <div className={`text-[9px] font-bold mt-0.5 leading-none ${isFouledOut ? 'text-red-400' : 'text-emerald-400'}`}>{isFouledOut ? '5 PF - Not Eligible' : 'Tap to Sub In'}</div>
                                                         </div>
                                                         <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400">
@@ -17440,7 +17461,7 @@
                                                     <div className="flex items-center gap-2">
                                                         <span className="w-10 h-10 rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100 text-base">{p.number}</span>
                                                         <div className="min-w-0 flex-1">
-                                                            <div className="text-[12px] font-black text-white truncate leading-tight">{p.name}</div>
+                                                            <div className="text-[12px] font-black text-white truncate leading-tight">{renderLiveDisplayName(p.name) || p.name}</div>
                                                             <div className={isFouledOut ? 'text-[9px] text-red-400 font-bold mt-0.5' : isSlotLocked ? 'text-[9px] text-slate-500 font-bold mt-0.5' : isSelected ? 'text-[9px] text-emerald-300 font-bold mt-0.5' : 'text-[9px] text-slate-400 font-bold mt-0.5'}>{isFouledOut ? '5 PF' : isSlotLocked ? 'Full' : isSelected ? 'Selected' : 'Select'}</div>
                                                         </div>
                                                         <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400">
@@ -17514,7 +17535,7 @@
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, true, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
+                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, true, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{renderLiveDisplayName(p.name) || p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
                                             })}
                                         </div>
                                     </div>}
@@ -17525,7 +17546,7 @@
                                                 const p = teams.flatMap(t => t.players).find(x => x.id === id);
                                                 const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
                                                 const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, false, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
+                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, false, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{renderLiveDisplayName(p.name) || p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
                                             })}
                                         </div>
                                     </div>}
