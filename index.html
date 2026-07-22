@@ -88,6 +88,19 @@
             animation: targetPulse 1.8s infinite ease-in-out;
             cursor: pointer;
         }
+        /* Quick attention shake for the armed-action recording banner popping in */
+        @keyframes bannerShakeIn {
+            0% { transform: translateX(0); }
+            15% { transform: translateX(-6px); }
+            30% { transform: translateX(5px); }
+            45% { transform: translateX(-4px); }
+            60% { transform: translateX(3px); }
+            75% { transform: translateX(-1.5px); }
+            100% { transform: translateX(0); }
+        }
+        .banner-shake-in {
+            animation: bannerShakeIn 400ms ease-in-out;
+        }
         @keyframes leaderBarGrow {
             from { transform: scaleX(0); opacity: 0.45; }
             to { transform: scaleX(1); opacity: 1; }

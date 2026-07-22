@@ -1,12 +1,28 @@
         const { useState, useEffect, useRef } = React;
 
         async function apiRequest(path, options = {}) {
+            const { compress, headers: optionHeaders, body: optionBody, ...restOptions } = options;
+            let body = optionBody;
+            const extraHeaders = {};
+
+            if (compress && typeof body === 'string' && typeof CompressionStream !== 'undefined') {
+                try {
+                    const compressedStream = new Blob([body]).stream().pipeThrough(new CompressionStream('gzip'));
+                    body = await new Response(compressedStream).arrayBuffer();
+                    extraHeaders['Content-Encoding'] = 'gzip';
+                } catch {
+                    body = optionBody;
+                }
+            }
+
             const response = await fetch(path, {
+                ...restOptions,
+                body,
                 headers: {
                     'Content-Type': 'application/json',
-                    ...(options.headers || {})
-                },
-                ...options
+                    ...extraHeaders,
+                    ...(optionHeaders || {})
+                }
             });
 
             const text = await response.text();
@@ -332,6 +348,9 @@
             const teamBBenchRef = useRef(teamBBench);
             const bodyScrollLockYRef = useRef(0);
             const bodyScrollLockedRef = useRef(false);
+            const onCourtZoneRef = useRef(null);
+            const mobileScorebarRef = useRef(null);
+            const desktopScorebarRef = useRef(null);
             const gameLogRef = useRef(gameLog);
             const liveGameSnapshotRef = useRef(liveGameSnapshot);
             const loggedHistoryRef = useRef(loggedHistory);
@@ -454,16 +473,6 @@
                         .filter((pos) => PLAYER_POSITIONS.includes(pos))
                 ));
             };
-            const formatLiveDisplayName = (rawName) => {
-                const trimmed = String(rawName || '').trim();
-                if (!trimmed) return '';
-                const [lastPart, firstPart] = trimmed.includes(',')
-                    ? trimmed.split(',').map((part) => part.trim())
-                    : [trimmed, ''];
-                const lastName = lastPart.toUpperCase();
-                const firstWord = (firstPart.split(/\s+/).filter(Boolean)[0]) || '';
-                return firstWord ? `${lastName}, ${firstWord}` : lastName;
-            };
             const renderLiveDisplayName = (rawName) => {
                 const trimmed = String(rawName || '').trim();
                 if (!trimmed) return trimmed;
@@ -549,22 +558,21 @@
                         player,
                         positions,
                         height: parsePlayerHeightInches(player),
-                        fouls: Number(liveStats[playerId]?.pf || 0),
-                        jerseyNumber: Number(player?.number || 0) || Number.MAX_SAFE_INTEGER,
                         positionSpecificity
                     };
                 });
 
+                // Note: foul-count and jersey-number tiebreakers were removed here — with a
+                // fixed candidate pool assigned across all slots, their totals are identical
+                // for every permutation, so they never actually influenced the result.
                 let bestScore = Number.NEGATIVE_INFINITY;
                 let bestSpecificity = Number.NEGATIVE_INFINITY;
                 let bestHeightTieBreak = Number.NEGATIVE_INFINITY;
-                let bestFoulPreference = Number.NEGATIVE_INFINITY;
-                let bestJerseyPreference = Number.NEGATIVE_INFINITY;
                 let bestAssignment = null;
                 const assignedEntries = new Array(targetSlots.length);
                 const used = new Array(candidates.length).fill(false);
 
-                const backtrack = (slotIndex, scoreTotal, specificityTotal, heightTieBreakTotal, foulPreferenceTotal, jerseyPreferenceTotal) => {
+                const backtrack = (slotIndex, scoreTotal, specificityTotal, heightTieBreakTotal) => {
                     if (slotIndex >= targetSlots.length) {
                         if (
                             scoreTotal > bestScore
@@ -574,19 +582,7 @@
                                     specificityTotal > bestSpecificity
                                     || (
                                         specificityTotal === bestSpecificity
-                                        && (
-                                            heightTieBreakTotal > bestHeightTieBreak
-                                            || (
-                                                heightTieBreakTotal === bestHeightTieBreak
-                                                && (
-                                                    foulPreferenceTotal > bestFoulPreference
-                                                    || (
-                                                        foulPreferenceTotal === bestFoulPreference
-                                                        && jerseyPreferenceTotal > bestJerseyPreference
-                                                    )
-                                                )
-                                            )
-                                        )
+                                        && heightTieBreakTotal > bestHeightTieBreak
                                     )
                                 )
                             )
@@ -594,8 +590,6 @@
                             bestScore = scoreTotal;
                             bestSpecificity = specificityTotal;
                             bestHeightTieBreak = heightTieBreakTotal;
-                            bestFoulPreference = foulPreferenceTotal;
-                            bestJerseyPreference = jerseyPreferenceTotal;
                             bestAssignment = assignedEntries.slice();
                         }
                         return;
@@ -613,8 +607,6 @@
                         const slotHeightTieBreak = hasHeight
                             ? (slot === 'PG' || slot === 'SG' ? -candidate.height : candidate.height)
                             : -1000;
-                        const slotFoulPreference = -candidate.fouls;
-                        const slotJerseyPreference = -candidate.jerseyNumber;
 
                         used[i] = true;
                         assignedEntries[slotIndex] = { playerId: candidate.playerId, slot };
@@ -623,16 +615,14 @@
                             slotIndex + 1,
                             scoreTotal + slotScore,
                             specificityTotal + slotSpecificity,
-                            heightTieBreakTotal + slotHeightTieBreak,
-                            foulPreferenceTotal + slotFoulPreference,
-                            jerseyPreferenceTotal + slotJerseyPreference
+                            heightTieBreakTotal + slotHeightTieBreak
                         );
 
                         used[i] = false;
                     }
                 };
 
-                backtrack(0, 0, 0, 0, 0, 0);
+                backtrack(0, 0, 0, 0);
 
                 const orderedEntries = Array.isArray(bestAssignment)
                     ? bestAssignment
@@ -1026,6 +1016,10 @@
 
 
             const openActionForTeam = (action, isTeamA) => {
+                if (activeAction && action && activeAction.id === action.id) {
+                    handleCancelActionModal();
+                    return;
+                }
                 if (!canUseLiveControls) {
                     showToast('Live controls are locked right now.', 'info');
                     return;
@@ -1065,6 +1059,51 @@
                 openActionForTeam(action, isTeamA);
             };
 
+            useEffect(() => {
+                if (!activeAction) return;
+                // Desktop already shows the action grid and on-court cards together without
+                // scrolling; only mobile needs the assist (and scrolling on desktop here pushes
+                // Global Match Controls off-screen and crowds the sticky banner against the
+                // on-court panel below it).
+                if (typeof window !== 'undefined' && window.innerWidth >= 768) return;
+                const node = onCourtZoneRef.current;
+                if (!node || typeof node.scrollIntoView !== 'function') return;
+                node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, [activeAction]);
+
+            // Floats the armed-action banner below the scorebar without it occupying layout
+            // space (which would otherwise push everything below it down every time a stat is
+            // armed). Position is measured off the scorebar's real on-screen edge rather than a
+            // fixed offset, since a hardcoded value drifts between mobile/desktop and between the
+            // scorebar's resting position (unscrolled) vs its stuck position (scrolled).
+            const [bannerRect, setBannerRect] = useState({ top: 0, left: 0, width: 0 });
+            useEffect(() => {
+                if (!showLoggingModal || !activeAction) return;
+                const measure = () => {
+                    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+                    const node = (isMobile ? mobileScorebarRef.current : desktopScorebarRef.current);
+                    if (!node) return;
+                    const rect = node.getBoundingClientRect();
+                    setBannerRect({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+                };
+                measure();
+                let frame = null;
+                const onScrollOrResize = () => {
+                    if (frame) return;
+                    frame = window.requestAnimationFrame(() => {
+                        frame = null;
+                        measure();
+                    });
+                };
+                window.addEventListener('scroll', onScrollOrResize, { passive: true });
+                window.addEventListener('resize', onScrollOrResize);
+                return () => {
+                    if (frame) window.cancelAnimationFrame(frame);
+                    window.removeEventListener('scroll', onScrollOrResize);
+                    window.removeEventListener('resize', onScrollOrResize);
+                };
+            }, [showLoggingModal, activeAction]);
+
             const handleCancelActionModal = () => {
                 setShowLoggingModal(false);
                 setActiveAction(null);
@@ -1075,7 +1114,6 @@
 
             const showHomeLivePanel = isOperatorScreenLockedByAdminBoth || !canOperateLive || effectiveOperatorFocus !== 'away';
             const showAwayLivePanel = isOperatorScreenLockedByAdminBoth || !canOperateLive || effectiveOperatorFocus !== 'home';
-            const isCompactRecordActionModal = canOperateLive && effectiveOperatorFocus === 'both' && showHomeLivePanel && showAwayLivePanel;
             const resolveActionToneClasses = (action) => {
                 const source = String(action?.colorClass || '');
                 const actionId = String(action?.id || '');
@@ -1084,27 +1122,31 @@
                     return {
                         textClass: 'text-red-200',
                         surfaceStyle: { backgroundColor: 'rgba(239, 68, 68, 0.22)', borderColor: 'rgba(248, 113, 113, 0.55)' },
-                        badgeStyle: { backgroundColor: 'rgba(239, 68, 68, 0.22)', borderColor: 'rgba(248, 113, 113, 0.55)' }
+                        badgeStyle: { backgroundColor: 'rgba(239, 68, 68, 0.22)', borderColor: 'rgba(248, 113, 113, 0.55)' },
+                        solidSurfaceStyle: { backgroundColor: 'rgb(43, 20, 20)', borderColor: 'rgba(248, 113, 113, 0.55)' }
                     };
                 }
                 if (/\bamber-|\borange-|\byellow-/.test(source)) {
                     return {
                         textClass: 'text-amber-200',
                         surfaceStyle: { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'rgba(251, 191, 36, 0.5)' },
-                        badgeStyle: { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'rgba(251, 191, 36, 0.5)' }
+                        badgeStyle: { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'rgba(251, 191, 36, 0.5)' },
+                        solidSurfaceStyle: { backgroundColor: 'rgb(43, 33, 15)', borderColor: 'rgba(251, 191, 36, 0.5)' }
                     };
                 }
                 if (/\bsky-|\bblue-|\bcyan-|\bteal-/.test(source)) {
                     return {
                         textClass: 'text-cyan-200',
                         surfaceStyle: { backgroundColor: 'rgba(6, 182, 212, 0.2)', borderColor: 'rgba(34, 211, 238, 0.5)' },
-                        badgeStyle: { backgroundColor: 'rgba(6, 182, 212, 0.2)', borderColor: 'rgba(34, 211, 238, 0.5)' }
+                        badgeStyle: { backgroundColor: 'rgba(6, 182, 212, 0.2)', borderColor: 'rgba(34, 211, 238, 0.5)' },
+                        solidSurfaceStyle: { backgroundColor: 'rgb(11, 36, 42)', borderColor: 'rgba(34, 211, 238, 0.5)' }
                     };
                 }
                 return {
                     textClass: 'text-emerald-200',
                     surfaceStyle: { backgroundColor: 'rgba(16, 185, 129, 0.2)', borderColor: 'rgba(52, 211, 153, 0.5)' },
-                    badgeStyle: { backgroundColor: 'rgba(16, 185, 129, 0.2)', borderColor: 'rgba(52, 211, 153, 0.5)' }
+                    badgeStyle: { backgroundColor: 'rgba(16, 185, 129, 0.2)', borderColor: 'rgba(52, 211, 153, 0.5)' },
+                    solidSurfaceStyle: { backgroundColor: 'rgb(9, 38, 30)', borderColor: 'rgba(52, 211, 153, 0.5)' }
                 };
             };
             const activeActionTone = resolveActionToneClasses(activeAction);
@@ -1412,6 +1454,7 @@
                         if (nextRequest.mode === 'put') {
                             const putResult = await apiRequest('/api/active-session', {
                                 method: 'PUT',
+                                compress: true,
                                 body: JSON.stringify({ session: nextRequest.session, sourceClientId: nextRequest.sourceClientId })
                             });
                             if (putResult?.applied === false) {
@@ -1781,6 +1824,41 @@
                 if (entry.kind === 'stat') return true;
                 return Boolean(entry.actionId || entry.statField);
             };
+            const isDeletableMetaLogEntry = (entry) => {
+                if (!entry || typeof entry !== 'object') return false;
+                if (entry.kind === 'sub') return true;
+                return entry.kind === 'meta' && entry.metaType === 'timeout';
+            };
+            // Admin-unlocking an ended period is restricted to stat and timeout entries — a
+            // substitution's effect on lineup is only recoverable by patching the period's cached
+            // checkpoint, and reliably reversing a lineup swap that far back (especially if other
+            // subs happened after it) is too easy to get subtly wrong, so it's kept out of scope.
+            const isAdminUnlockDeletableEntry = (entry) => {
+                if (isEditableStatLogEntry(entry)) return true;
+                return Boolean(entry) && entry.kind === 'meta' && entry.metaType === 'timeout';
+            };
+            // Every period-end creates a hidden 'periodCheckpoint' snapshot that later replays use
+            // as a shortcut starting point instead of replaying from the very start of the game.
+            // Correcting an entry from an ended period is only safe if we also strip that period's
+            // checkpoint (and any later ones) so the replay recomputes from true game start instead
+            // of silently ignoring the correction via a stale cached snapshot.
+            const getMaxCheckpointedQuarter = (logs) => (logs || []).reduce((max, event) => {
+                if (event?.kind === 'meta' && event?.metaType === 'periodCheckpoint') {
+                    const q = Number(event?.quarter || 0);
+                    return q > max ? q : max;
+                }
+                return max;
+            }, 0);
+            const isAdminUnlockableEndedPeriodEntry = (entry, logs, finalizedPeriodsSet) => {
+                if (!entry) return false;
+                const entryQuarter = Number(getEffectiveQuarterFromLogEntry(entry, logs));
+                if (!Number.isFinite(entryQuarter) || entryQuarter <= 0) return false;
+                if (!(finalizedPeriodsSet instanceof Set) || !finalizedPeriodsSet.has(entryQuarter)) return false;
+                // Restrict to the most-recently-ended period only: if a later period has also
+                // ended (and been checkpointed) since, correcting this one would require
+                // regenerating every checkpoint after it too, which is too risky to do blindly.
+                return entryQuarter === getMaxCheckpointedQuarter(logs);
+            };
 
             const buildTeamAcronym = (teamName) => {
                 const safe = String(teamName || '').trim();
@@ -2061,26 +2139,6 @@
 
             const armLocalResumeStabilityWindow = () => {
                 localResumeLockUntilRef.current = Date.now() + 2500;
-            };
-
-            const appendPlayResumeMetaIfNeeded = (labelOverride) => {
-                const currentSegment = getCurrentGameLogSegment(gameLog);
-                const hasActivePause = isTimeoutCurrentlyActive(currentSegment) || Boolean(isPlayPaused);
-                if (!hasActivePause) return false;
-
-                armLocalResumeStabilityWindow();
-                const resumeLogId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                const resumeLabel = labelOverride || `Play resumed (${getPeriodLabel(currentQuarter)})`;
-                setGameLog((prev) => [{
-                    id: resumeLogId,
-                    time: getWallClockTime(),
-                    text: resumeLabel,
-                    kind: 'meta',
-                    metaType: 'playResume',
-                    quarter: currentQuarter,
-                    clockRemaining: formatSecondsAsClock(periodClockSeconds)
-                }, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
-                return true;
             };
 
             const extractYouTubeVideoId = (rawUrl = '') => {
@@ -2418,6 +2476,59 @@
                 recomputeScores();
 
                 return nextState;
+            };
+
+            // Admin corrections to an already-ended period can't safely replay "from the start":
+            // liveGameSnapshot itself advances to the latest periodCheckpoint at every period-end
+            // (see autoFinalizeEndedPeriodAndStartNextPeriod), and the true pre-game starting lineup
+            // is never logged as replayable events — it only ever lived in that transient snapshot.
+            // So instead of replaying, we surgically patch the existing checkpoint's baked-in
+            // liveStats/score by the same delta the normal current-period fast-path already applies,
+            // then let the normal replay continue forward from that corrected checkpoint as usual.
+            const cloneCheckpointSnapshot = (snap) => ({
+                teamAId: snap?.teamAId || '',
+                teamBId: snap?.teamBId || '',
+                teamAScore: snap?.teamAScore || 0,
+                teamBScore: snap?.teamBScore || 0,
+                currentQuarter: snap?.currentQuarter || 1,
+                teamALineup: [...(snap?.teamALineup || [])],
+                teamABench: [...(snap?.teamABench || [])],
+                teamBLineup: [...(snap?.teamBLineup || [])],
+                teamBBench: [...(snap?.teamBBench || [])],
+                liveStats: cloneStatsMap(snap?.liveStats || {}),
+                playedPlayers: [...(snap?.playedPlayers || [])]
+            });
+            const applyStatDeltaToCheckpointSnapshot = (snap, playerId, statField, delta, trackingStat, trackingDelta) => {
+                const next = cloneCheckpointSnapshot(snap);
+                if (!playerId || !statField || !delta) return next;
+                const currentPlayerStats = { ...(next.liveStats[playerId] || {}) };
+                currentPlayerStats[statField] = Math.max(0, (currentPlayerStats[statField] || 0) + delta);
+                if (trackingStat && trackingDelta) {
+                    currentPlayerStats[trackingStat] = Math.max(0, (currentPlayerStats[trackingStat] || 0) + trackingDelta);
+                }
+                next.liveStats[playerId] = currentPlayerStats;
+
+                let totalA = 0;
+                let totalB = 0;
+                const teamAObj = teams.find(t => t.id === next.teamAId);
+                const teamBObj = teams.find(t => t.id === next.teamBId);
+                if (teamAObj) teamAObj.players.forEach(p => { totalA += next.liveStats[p.id]?.pts || 0; });
+                if (teamBObj) teamBObj.players.forEach(p => { totalB += next.liveStats[p.id]?.pts || 0; });
+                next.teamAScore = totalA;
+                next.teamBScore = totalB;
+                return next;
+            };
+            const patchCheckpointForQuarter = (logs, quarterValue, patchFn) => {
+                let patched = false;
+                const next = (logs || []).map((log) => {
+                    if (patched) return log;
+                    if (log?.kind === 'meta' && log?.metaType === 'periodCheckpoint' && Number(log?.quarter || 0) === Number(quarterValue) && log?.checkpointSnapshot) {
+                        patched = true;
+                        return { ...log, checkpointSnapshot: patchFn(log.checkpointSnapshot) };
+                    }
+                    return log;
+                });
+                return patched ? next : null;
             };
 
             const normalizeLiveSessionEvents = (sessionGameLog = [], sessionHistory = []) => {
@@ -3538,6 +3649,10 @@
                     .map((event) => getQuarterFromEvent(event))
                     .filter((quarter) => Number.isFinite(quarter) && quarter > 0)
             );
+            const isAdminUnlockEditTarget = Boolean(liveLogEditTarget)
+                && Number(getEffectiveQuarterFromLogEntry(liveLogEditTarget, gameLog)) !== Number(currentQuarter)
+                && authRole === 'admin'
+                && isAdminUnlockableEndedPeriodEntry(liveLogEditTarget, gameLog, finalizedPeriods);
             const liveQuarterStatsFromLog = computeQuarterTeamStatsFromLog(currentLiveGameLog);
             const frozenQuarterStatsByQuarter = new Map((periodSnapshots || []).map((snapshot) => [Number(snapshot?.quarter || 0), snapshot]));
             const maxLiveQuarter = Math.max(
@@ -3815,6 +3930,36 @@
             const displayPeriodActionIsEnd = liveGameplayControlDisplay.periodActionIsEnd;
             const displayPeriodActionIsPause = liveGameplayControlDisplay.periodActionIsPause;
             const displayPeriodActionIsPositive = liveGameplayControlDisplay.periodActionIsPositive;
+            const armedActionBanner = (showLoggingModal && activeAction && bannerRect.width > 0) ? (
+                <div
+                    className="banner-shake-in fixed z-40 rounded-b-xl border shadow-lg px-3 py-2.5"
+                    style={{ ...activeActionTone.solidSurfaceStyle, top: bannerRect.top, left: bannerRect.left, width: bannerRect.width }}
+                >
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 space-y-1.5">
+                            <div className={`text-[9px] font-black uppercase tracking-[0.2em] ${activeActionTone.textClass}`}>Recording</div>
+                            <div className="text-lg font-black uppercase tracking-wide text-white leading-tight truncate">
+                                {activeActionLabelOverride || activeAction.label}
+                                <span className="ml-2 text-[10px] font-bold text-slate-300 normal-case">· {operatorHandledTeamLabel}</span>
+                            </div>
+                            {!displayIsPeriodClockRunning && hasMatchStarted && !canBackfillEndedPeriodStats && !isAwaitingPeriodStart && !awaitingOvertimeDecision && (
+                                <div className="text-[9px] font-black text-red-200 flex items-center gap-1.5">
+                                    <Icons.Timer />
+                                    CLOCK STOPPED{!isAutoResumeActionArmed ? ' — you will be asked to resume' : ''}
+                                </div>
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleCancelActionModal}
+                            className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide bg-red-600 text-white border border-red-400/60 shadow-md hover:bg-red-500 active:bg-red-700 cursor-pointer"
+                        >
+                            <Icons.X />
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            ) : null;
             useEffect(() => {
                 if (isLiveGameplayModalActive) return;
                 liveGameplayControlSnapshotRef.current = {
@@ -3844,9 +3989,7 @@
                 localFoulPauseTriggerIdRef.current = '';
             }, [latestPauseMetaType]);
 
-            const alwaysAllowedActionIds = new Set(['pf_technical']);
             const stoppedClockActionIds = new Set(['pts_1', 'ft_miss']);
-            const canTriggerAlwaysAction = (action) => Boolean(action && isGameLive && alwaysAllowedActionIds.has(action.id));
             const canTriggerStoppedClockAction = (action) => Boolean(
                 action
                 && isGameLive
@@ -3902,11 +4045,7 @@
             const undoDelta = Number(latestUndoEntry?.changeAmount || 0);
             const undoDeltaText = `${undoDelta >= 0 ? '+' : ''}${undoDelta}`;
             const undoStatLabel = latestUndoEntry?.statField ? (undoStatLabelMap[latestUndoEntry.statField] || String(latestUndoEntry.statField).toUpperCase()) : '';
-            const undoTargetSummary = undoLockedByQuarterEnd
-                ? ''
-                : (latestUndoEntry && latestUndoPlayer
-                    ? `Undo target: #${latestUndoPlayer.number || '-'} ${latestUndoPlayer.name} ${undoDeltaText} ${undoStatLabel}`
-                    : '');
+            const showUndoTargetSummary = !undoLockedByQuarterEnd && Boolean(latestUndoEntry && latestUndoPlayer);
             const undoTargetBlockedReason = undoLockedByQuarterEnd
                 ? 'locked after period end'
                 : isProtectedLogEntry(latestUndoLog, finalizedPeriods)
@@ -4225,6 +4364,10 @@
                     // Guard against the one extra tick that fires between
                     // setIsPeriodClockRunning(false) and the effect cleanup.
                     if (!isPeriodClockRunningRef.current) return;
+                    // Snapshot before decrementing so we know whether this tick is the
+                    // expiry tick (handled by the gameLog-triggered recompute below)
+                    // or an ordinary tick (handled by the cheap bump below).
+                    const isExpiryTick = Number(periodClockSecondsRef.current || 0) <= 1;
                     setPeriodClockSeconds((prev) => {
                         if (prev <= 1) {
                             handlePeriodClockExpired();
@@ -4232,6 +4375,22 @@
                         }
                         return prev - 1;
                     });
+                    if (!isExpiryTick) {
+                        // Cheap incremental bump instead of replaying the whole gameLog
+                        // every second via deriveTotalPlayerSecondsFromTimeline below —
+                        // the on-court set can't change without a gameLog entry, which
+                        // re-triggers the full recompute effect on its own.
+                        setLivePlayerSeconds((prev) => {
+                            const onCourtIds = [...teamALineupRef.current, ...teamBLineupRef.current];
+                            if (!onCourtIds.length) return prev;
+                            const next = { ...prev };
+                            onCourtIds.forEach((playerId) => {
+                                if (!playerId) return;
+                                next[playerId] = Math.round(Number(next[playerId] || 0)) + 1;
+                            });
+                            return next;
+                        });
+                    }
                 }, 1000);
 
                 return () => window.clearInterval(timerId);
@@ -4255,7 +4414,10 @@
                     const changed = nextKeys.some((playerId) => Math.round(Number(prev?.[playerId] || 0)) !== Math.round(Number(recomputed?.[playerId] || 0)));
                     return changed ? recomputed : prev;
                 });
-            }, [isGameLive, gameLog, currentQuarter, periodClockSeconds]);
+                // periodClockSeconds is intentionally excluded here: the interval tick
+                // above keeps on-court totals current with a cheap +1 bump instead of
+                // paying for a full gameLog replay every second.
+            }, [isGameLive, gameLog, currentQuarter]);
 
             useEffect(() => {
                 if (isGameLive) return;
@@ -4347,7 +4509,6 @@
                     || showNewPlayerModal
                     || showSubstitutionModal
                     || showAddFromBenchModal
-                    || showLoggingModal
                     || isAdvancedPlayerModalOpen
                     || isConfirmDialogOpen
                     || isFoulAlertOpen
@@ -4388,7 +4549,7 @@
                         bodyScrollLockedRef.current = false;
                     }
                 };
-            }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, showLoggingModal, isAdvancedPlayerModalOpen, isConfirmDialogOpen, isFoulAlertOpen, showAuthModal, isLiveLogEditModalOpen]);
+            }, [showNewTeamModal, showNewPlayerModal, showSubstitutionModal, showAddFromBenchModal, isAdvancedPlayerModalOpen, isConfirmDialogOpen, isFoulAlertOpen, showAuthModal, isLiveLogEditModalOpen]);
 
             const handleImportCSV = (e) => {
                 const file = e.target.files[0];
@@ -4671,12 +4832,6 @@
                         && !isLiveSessionStale(localCachedSession)
                         && !isLiveSessionOlderThanLatestEndedGame(localCachedSession, latestEndedGameTimestampRef.current)
                     );
-                    const isRecentLocalCachedSession = () => {
-                        const touched = getLiveSessionLastTouchedAt(localCachedSession);
-                        if (touched <= 0) return false;
-                        return (Date.now() - touched) <= 2 * 60 * 1000;
-                    };
-
                     let hydratedFromRemote = false;
                     let serverReachable = false;
                     try {
@@ -6945,6 +7100,7 @@
                 try {
                     const putResult = await apiRequest('/api/active-session', {
                         method: 'PUT',
+                        compress: true,
                         body: JSON.stringify({ session, sourceClientId: syncClientIdRef.current })
                     });
                     if (putResult?.applied === false) {
@@ -7211,13 +7367,12 @@
                 }
             };
 
-            const handlePlayerClick = (playerId, isTeamA, options = {}) => {
-                const skipAccessChecks = Boolean(options?.skipAccessChecks);
-                if (!skipAccessChecks && !canUseLiveControls) {
+            const handlePlayerClick = (playerId, isTeamA) => {
+                if (!canUseLiveControls) {
                     showToast('Live controls are locked right now.', 'info');
                     return;
                 }
-                if (!skipAccessChecks && !ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
+                if (!ensureTeamOperationAccess(isTeamA, 'log stats for this team')) return;
                 if (!activeAction) {
                     showToast('Select a stat action first.', 'info');
                     return;
@@ -7714,14 +7869,24 @@
                 if (!entry) return;
                 const entryIndex = gameLog.findIndex((log) => log.id === logId);
 
+                if (!isEditableStatLogEntry(entry) && !isDeletableMetaLogEntry(entry)) {
+                    showToast('This type of log entry cannot be deleted.', 'info');
+                    return;
+                }
+
                 const entryQuarter = Number(getEffectiveQuarterFromLogEntry(entry, gameLog));
                 const isCurrentPeriodEntry = entryQuarter === Number(currentQuarter);
-                if (!isCurrentPeriodEntry) {
+                const isAdminUnlock = !isCurrentPeriodEntry
+                    && authRole === 'admin'
+                    && isAdminUnlockDeletableEntry(entry)
+                    && isAdminUnlockableEndedPeriodEntry(entry, gameLog, finalizedPeriods);
+
+                if (!isCurrentPeriodEntry && !isAdminUnlock) {
                     showToast('Delete is only allowed for the current period.', 'info');
                     return;
                 }
 
-                if (isProtectedLogEntry(entry, finalizedPeriods)) {
+                if (!isAdminUnlock && isProtectedLogEntry(entry, finalizedPeriods)) {
                     const lockReason = String(entry?.lockReason || '').includes('checkpoint10')
                         ? 'checkpoint lock (every 10 entries)'
                         : 'period-end lock';
@@ -7768,9 +7933,14 @@
                 const remainingHistory = loggedHistory.filter((item) => !idsToDelete.has(String(item?.id || '')));
 
                 const historyMatch = loggedHistory.find(item => item.id === logId) || loggedHistory.find(item => item.logText === entry.text);
-                const statSource = (entry.kind === 'stat' && entry.playerId && entry.statField)
+                // The surgical fast-path below only adjusts the *current* liveStats snapshot — it
+                // never touches the periodCheckpoint that a future replay would restart from. For a
+                // current-period entry that's harmless (no checkpoint exists yet for this period),
+                // but for an admin-unlocked ended-period entry it would silently regress the next
+                // time anything triggers a full replay, so force the checkpoint-aware path instead.
+                const statSource = (!isAdminUnlock && entry.kind === 'stat' && entry.playerId && entry.statField)
                     ? entry
-                    : (historyMatch && historyMatch.playerId && historyMatch.statField ? historyMatch : null);
+                    : (!isAdminUnlock && historyMatch && historyMatch.playerId && historyMatch.statField ? historyMatch : null);
 
                 if (statSource) {
                     setLiveStats(prev => {
@@ -7816,17 +7986,32 @@
                     return;
                 }
 
-                const replayed = buildLiveStateFromEvents(liveGameSnapshot, remainingGameLog);
+                let replayGameLog = remainingGameLog;
+                if (isAdminUnlock && isEditableStatLogEntry(entry)) {
+                    const revertDelta = -(Number(entry.changeAmount) || 0);
+                    const revertTrackingDelta = entry.attachedTrackingStat
+                        ? -(Number.isFinite(entry.trackingDelta) ? entry.trackingDelta : ((entry.changeAmount || 0) > 0 ? 1 : -1))
+                        : 0;
+                    const patchedLog = patchCheckpointForQuarter(remainingGameLog, entryQuarter, (snap) =>
+                        applyStatDeltaToCheckpointSnapshot(snap, entry.playerId, entry.statField, revertDelta, entry.attachedTrackingStat, revertTrackingDelta)
+                    );
+                    if (!patchedLog) {
+                        showToast("Couldn't locate this period's checkpoint to apply the correction.", 'error');
+                        return;
+                    }
+                    replayGameLog = patchedLog;
+                }
+                const replayed = buildLiveStateFromEvents(liveGameSnapshot, replayGameLog);
 
                 if (!replayed) {
-                    setGameLog(remainingGameLog);
+                    setGameLog(replayGameLog);
                     setLoggedHistory(remainingHistory);
-                    restoreClockFromLatestLog(remainingGameLog, currentQuarter);
+                    restoreClockFromLatestLog(replayGameLog, currentQuarter);
                     showToast('Removed log entry. Full state replay unavailable for this legacy session.', 'info');
                     return;
                 }
 
-                setGameLog(remainingGameLog);
+                setGameLog(replayGameLog);
                 setLoggedHistory(remainingHistory);
                 setLiveStats(replayed.liveStats);
                 setTeamAScore(replayed.teamAScore);
@@ -7837,7 +8022,8 @@
                 setTeamBLineup(replayed.teamBLineup);
                 setTeamBBench(replayed.teamBBench);
                 setPlayedPlayers(replayed.playedPlayers);
-                restoreClockFromLatestLog(remainingGameLog, replayed.currentQuarter || currentQuarter);
+                restoreClockFromLatestLog(replayGameLog, replayed.currentQuarter || currentQuarter);
+                showToast(isAdminUnlock ? 'Ended-period log deleted (admin override).' : 'Log entry removed.', 'success');
             };
 
             const handleOpenLiveLogEdit = (logId) => {
@@ -7850,12 +8036,17 @@
                     return;
                 }
 
-                if (Number(getEffectiveQuarterFromLogEntry(targetEntry, gameLog)) !== Number(currentQuarter)) {
+                const isCurrentPeriodEntry = Number(getEffectiveQuarterFromLogEntry(targetEntry, gameLog)) === Number(currentQuarter);
+                const isAdminUnlock = !isCurrentPeriodEntry
+                    && authRole === 'admin'
+                    && isAdminUnlockableEndedPeriodEntry(targetEntry, gameLog, finalizedPeriods);
+
+                if (!isCurrentPeriodEntry && !isAdminUnlock) {
                     showToast('Edit is only allowed for the current period.', 'info');
                     return;
                 }
 
-                if (isProtectedLogEntry(targetEntry, finalizedPeriods)) {
+                if (!isAdminUnlock && isProtectedLogEntry(targetEntry, finalizedPeriods)) {
                     const lockReason = String(targetEntry?.lockReason || '').includes('checkpoint10')
                         ? 'checkpoint lock (every 10 entries)'
                         : 'period-end lock';
@@ -7890,13 +8081,19 @@
                     return;
                 }
 
-                if (Number(getEffectiveQuarterFromLogEntry(liveLogEditTarget, gameLog)) !== Number(currentQuarter)) {
+                const entryQuarter = Number(getEffectiveQuarterFromLogEntry(liveLogEditTarget, gameLog));
+                const isCurrentPeriodEntry = entryQuarter === Number(currentQuarter);
+                const isAdminUnlock = !isCurrentPeriodEntry
+                    && authRole === 'admin'
+                    && isAdminUnlockableEndedPeriodEntry(liveLogEditTarget, gameLog, finalizedPeriods);
+
+                if (!isCurrentPeriodEntry && !isAdminUnlock) {
                     showToast('Edit is only allowed for the current period.', 'info');
                     handleCloseLiveLogEdit();
                     return;
                 }
 
-                if (isProtectedLogEntry(liveLogEditTarget, finalizedPeriods)) {
+                if (!isAdminUnlock && isProtectedLogEntry(liveLogEditTarget, finalizedPeriods)) {
                     const lockReason = String(liveLogEditTarget?.lockReason || '').includes('checkpoint10')
                         ? 'checkpoint lock (every 10 entries)'
                         : 'period-end lock';
@@ -7955,13 +8152,42 @@
                     };
                 });
 
-                const replayed = buildLiveStateFromEvents(liveGameSnapshot, nextGameLog);
+                let replayGameLog = nextGameLog;
+                if (isAdminUnlock) {
+                    const oldTrackingDelta = liveLogEditTarget.attachedTrackingStat
+                        ? -(Number.isFinite(liveLogEditTarget.trackingDelta) ? liveLogEditTarget.trackingDelta : ((liveLogEditTarget.changeAmount || 0) > 0 ? 1 : -1))
+                        : 0;
+                    const patchedLog = patchCheckpointForQuarter(nextGameLog, entryQuarter, (snap) => {
+                        const reverted = applyStatDeltaToCheckpointSnapshot(
+                            snap,
+                            liveLogEditTarget.playerId,
+                            liveLogEditTarget.statField,
+                            -(Number(liveLogEditTarget.changeAmount) || 0),
+                            liveLogEditTarget.attachedTrackingStat,
+                            oldTrackingDelta
+                        );
+                        return applyStatDeltaToCheckpointSnapshot(
+                            reverted,
+                            resolvedPlayerId || liveLogEditTarget.playerId,
+                            nextAction.stat,
+                            nextChangeAmount,
+                            nextAction.trackingStat,
+                            nextTrackingDelta
+                        );
+                    });
+                    if (!patchedLog) {
+                        showToast("Couldn't locate this period's checkpoint to apply the correction.", 'error');
+                        return;
+                    }
+                    replayGameLog = patchedLog;
+                }
+                const replayed = buildLiveStateFromEvents(liveGameSnapshot, replayGameLog);
 
-                setGameLog(nextGameLog);
+                setGameLog(replayGameLog);
                 setLoggedHistory(nextLoggedHistory);
 
                 if (!replayed) {
-                    restoreClockFromLatestLog(nextGameLog, currentQuarter);
+                    restoreClockFromLatestLog(replayGameLog, currentQuarter);
                     handleCloseLiveLogEdit();
                     showToast('Log edited. Replay unavailable for this legacy session, so totals may be stale.', 'info');
                     return;
@@ -7976,7 +8202,7 @@
                 setTeamBLineup(replayed.teamBLineup);
                 setTeamBBench(replayed.teamBBench);
                 setPlayedPlayers(replayed.playedPlayers);
-                restoreClockFromLatestLog(nextGameLog, replayed.currentQuarter || currentQuarter);
+                restoreClockFromLatestLog(replayGameLog, replayed.currentQuarter || currentQuarter);
 
                 if (resolvedPlayerId) {
                     triggerPlayerFlash(resolvedPlayerId);
@@ -7984,7 +8210,7 @@
                 }
 
                 handleCloseLiveLogEdit();
-                showToast('Log edited.', 'success');
+                showToast(isAdminUnlock ? 'Ended-period log corrected (admin override).' : 'Log edited.', 'success');
             };
 
             const autoFinalizeEndedPeriodAndStartNextPeriod = async () => {
@@ -8355,8 +8581,9 @@
 
             const deriveTotalPlayerSecondsFromTimeline = (events = [], activeQuarter = currentQuarter, activeClockSeconds = periodClockSeconds) => {
                 const resolvedQuarter = Math.max(1, Number.parseInt(activeQuarter, 10) || 1);
-                const chronological = getChronologicalEvents(events || []);
-                const maxQuarterInLog = chronological.reduce((maxQuarter, event) => {
+                // Finding the max quarter doesn't need chronological order, so this
+                // skips the sort getChronologicalEvents would otherwise do here.
+                const maxQuarterInLog = (events || []).reduce((maxQuarter, event) => {
                     const eventQuarter = getQuarterFromEvent(event);
                     return eventQuarter > maxQuarter ? eventQuarter : maxQuarter;
                 }, resolvedQuarter);
@@ -8668,20 +8895,6 @@
                 setGameLog((prev) => [clearEvent, ...prev.slice(0, MAX_LIVE_LOG_ENTRIES)]);
 
                 showToast(`On-court cleared for ${isTeamA ? 'home' : 'away'} team.`, 'info');
-            };
-
-            const handleToggleBenchAdder = (isTeamA) => {
-                if (!canUseLiveControls) return;
-                const lineup = isTeamA ? teamALineup : teamBLineup;
-                if (lineup.length >= 5) {
-                    showToast('On-court already has 5 players.', 'info');
-                    return;
-                }
-                if (isTeamA) {
-                    setShowHomeBenchAdder((prev) => !prev);
-                } else {
-                    setShowAwayBenchAdder((prev) => !prev);
-                }
             };
 
             const handleOpenAddFromBenchModal = (isTeamA) => {
@@ -12043,6 +12256,7 @@
                 const pfValue = stats.pf || 0;
 
                 const isDisqualified = stats.pf >= 5;
+                const isFoulTrouble = pfValue === 4;
                 const teamAccessAllowed = canOperateTeam(isTeamA);
                 const canSelect = hasActionArmed && teamAccessAllowed && !isDisqualified;
                 const canSubstitute = !hasActionArmed && canOperateLive && teamAccessAllowed && !isDisqualified;
@@ -12062,9 +12276,11 @@
                         }}
                         className={`bg-slate-955/90 border p-3 rounded-xl flex flex-row items-stretch justify-between gap-2 transition-all duration-300 ${
                             hasActionArmed && teamAccessAllowed
-                                ? 'armed-target hover:bg-slate-900 border-emerald-500/50' 
-                                : 'border-slate-800 hover:border-slate-700/60'
-                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${isLoggedIn && !teamAccessAllowed ? 'opacity-55 saturate-50' : ''} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${!isLiveGameplayModalActive && flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${!isLiveGameplayModalActive && subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
+                                ? 'animate-pulse ring-2 ring-sky-400/70 shadow-[0_0_22px_rgba(56,189,248,0.35)] hover:bg-slate-900 border-sky-400/60'
+                                : (isFoulTrouble
+                                    ? 'ring-2 ring-amber-400/70 shadow-[0_0_18px_rgba(251,191,36,0.3)] border-amber-500/60 hover:border-amber-400/70'
+                                    : 'border-slate-800 hover:border-slate-700/60')
+                        } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${hasActionArmed && !teamAccessAllowed ? 'opacity-30 saturate-0' : (isLoggedIn && !teamAccessAllowed ? 'opacity-55 saturate-50' : '')} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${!isLiveGameplayModalActive && flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${!isLiveGameplayModalActive && subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
                     >
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                             <span className="w-12 md:w-14 min-h-[52px] text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0 inline-flex items-center justify-center">{player.number}</span>
@@ -12132,6 +12348,8 @@
                             {toast.message}
                         </div>
                     )}
+
+                    {armedActionBanner}
 
                     {SHOW_LIVE_SYNC_DEBUG && isGameLive && (
                         <div className="fixed bottom-3 right-3 z-40 w-[320px] max-w-[92vw] rounded-xl border border-cyan-500/40 bg-slate-950/95 text-[10px] text-cyan-100 font-mono p-2.5 space-y-1 shadow-2xl">
@@ -12398,7 +12616,7 @@
                                         )}
                                         <div className={`grid grid-cols-1 lg:grid-cols-12 gap-4 ${isLiveGameplayModalActive ? 'pointer-events-none select-none [&_*]:!animate-none [&_*]:!transition-none [&_*]:!transform-none [&_*]:!shadow-none' : ''}`}>
                                         {/* MOBILE BOTTOM STICKY COMPACT 2-ROW SCOREBAR */}
-                                        <div className="md:hidden col-span-12 sticky top-2 z-20">
+                                        <div ref={mobileScorebarRef} className="md:hidden col-span-12 sticky top-2 z-20">
                                             <div className="bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl p-1.5 backdrop-blur-sm">
                                                 <div className="grid grid-cols-7 items-center px-1.5 py-1 rounded-lg bg-slate-950 border border-slate-900">
                                                     <div className="col-span-3 text-center">
@@ -12442,7 +12660,8 @@
                                         </div>
 
                                         {/* DESKTOP / TABLET TOP SCOREBAR */}
-                                        <div className="hidden md:block col-span-12 sticky top-2 z-30 bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-xl">
+                                        <div ref={desktopScorebarRef} className="hidden md:block col-span-12 sticky top-2 z-30">
+                                            <div className="bg-slate-900 border border-slate-800 p-2 rounded-xl shadow-xl">
                                             <div className="grid grid-cols-7 items-center bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-lg">
                                                 <div className="col-span-3 relative text-center pb-4">
                                                     <div className="absolute top-0 left-0 flex items-center gap-1 pointer-events-none">
@@ -12494,10 +12713,11 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                            </div>
                                         </div>
 
                                         {canOperateLive && (
-                                            <div className={`col-span-12 ${isOperatorScreenLockedByAdminBoth ? 'pointer-events-none select-none opacity-70 cursor-not-allowed ring-1 ring-amber-400/35 bg-slate-950/35 rounded-xl [&_*]:!cursor-not-allowed' : ''}`}>
+                                            <div className={`col-span-12 transition-opacity duration-200 ${isOperatorScreenLockedByAdminBoth ? 'pointer-events-none select-none opacity-70 cursor-not-allowed ring-1 ring-amber-400/35 bg-slate-950/35 rounded-xl [&_*]:!cursor-not-allowed' : (showLoggingModal && activeAction ? 'opacity-40 saturate-50 pointer-events-none select-none' : '')}`}>
                                                 {/* Permanent Global Match Controls Row */}
                                                 <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-2.5 space-y-2">
                                                     <div className="flex items-center justify-between gap-2 mb-2">
@@ -12914,7 +13134,7 @@
                                         )}
 
                                         {/* Main Courtside tracking zones */}
-                                        <div className={`col-span-12 ${canOperateLive ? `lg:col-span-9 grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'}` : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]'} gap-4`}>
+                                        <div ref={onCourtZoneRef} className={`col-span-12 scroll-mt-64 ${canOperateLive ? `lg:col-span-9 grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'}` : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]'} gap-4`}>
                                             {showHomeLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'home' || !showAwayLivePanel ? 'block' : 'hidden md:block'}`}>
                                                 <div className="flex items-center justify-between gap-2 mb-1">
                                                     <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - {homeTeamLabel}</div>
@@ -13137,9 +13357,9 @@
                                                             </button>
                                                         )}
                                                     </div>
-                                                    {isLoggedIn && canOperateLive && undoTargetSummary && (
+                                                    {isLoggedIn && canOperateLive && showUndoTargetSummary && (
                                                         <div className="mt-1 text-[9px] font-mono text-slate-500">
-                                                            {undoTargetSummary}
+                                                            Undo target: #{latestUndoPlayer.number || '-'} {renderLiveDisplayName(latestUndoPlayer.name)} {undoDeltaText} {undoStatLabel}
                                                             {undoTargetBlockedReason ? ` (${undoTargetBlockedReason})` : ''}
                                                         </div>
                                                     )}
@@ -13151,8 +13371,15 @@
                                                         const isConvertBlocked = isProtectedLogEntry(log, finalizedPeriods);
                                                         const isCurrentPeriodLog = Number(getEffectiveQuarterFromLogEntry(log, gameLog)) === Number(currentQuarter);
                                                         const isStatLog = isEditableStatLogEntry(log);
-                                                        const canDeleteLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
-                                                        const canEditLiveLog = isCurrentPeriodLog && !isConvertBlocked && isStatLog;
+                                                        const isDeletableMetaLog = isDeletableMetaLogEntry(log);
+                                                        const isAdminEndedPeriodUnlock = !isCurrentPeriodLog
+                                                            && authRole === 'admin'
+                                                            && isAdminUnlockDeletableEntry(log)
+                                                            && isAdminUnlockableEndedPeriodEntry(log, gameLog, finalizedPeriods);
+                                                        const canDeleteLiveLog = (isCurrentPeriodLog && !isConvertBlocked && (isStatLog || isDeletableMetaLog))
+                                                            || (isAdminEndedPeriodUnlock && (isStatLog || isDeletableMetaLog));
+                                                        const canEditLiveLog = (isCurrentPeriodLog && !isConvertBlocked && isStatLog)
+                                                            || (isAdminEndedPeriodUnlock && isStatLog);
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
                                                         const hasAwayTag = typeof log.text === 'string' && log.text.startsWith('[AWAY] ');
                                                         const cleanText = typeof log.text === 'string' ? log.text.replace(/^\[(HOME|AWAY)\]\s*/, '') : log.text;
@@ -13188,15 +13415,20 @@
                                                                     <span className="flex-1 min-w-0 break-words">{cleanText}</span>
                                                                 </div>
                                                                 {/* Bottom row: edit/delete icons left, wall-clock timestamp right */}
-                                                                <div className="mt-1 flex items-center justify-between">
+                                                                <div className="mt-1.5 flex items-center justify-between">
                                                                     {isLoggedIn && canOperateLive && (canEditLiveLog || canDeleteLiveLog) ? (
-                                                                        <div className="inline-flex items-center gap-1">
+                                                                        <div className="inline-flex items-center gap-1.5">
+                                                                            {isAdminEndedPeriodUnlock && (
+                                                                                <span className="inline-flex items-center rounded-full border border-amber-500/50 bg-amber-500/15 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wide text-amber-300">
+                                                                                    Admin
+                                                                                </span>
+                                                                            )}
                                                                             {canEditLiveLog && (
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => handleOpenLiveLogEdit(log.id)}
-                                                                                    className="h-4 w-4 inline-flex items-center justify-center text-slate-600 hover:text-slate-400 cursor-pointer"
-                                                                                    title="Edit action (current period only)"
+                                                                                    className={`h-6 w-6 inline-flex items-center justify-center rounded-md border cursor-pointer transition-colors ${isAdminEndedPeriodUnlock ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20' : 'border-slate-700/70 bg-slate-900/70 text-sky-400 hover:bg-sky-500/15 hover:text-sky-300'}`}
+                                                                                    title={isAdminEndedPeriodUnlock ? 'Admin override: edit this ended-period entry' : 'Edit action (current period only)'}
                                                                                 >
                                                                                     <Icons.Edit />
                                                                                 </button>
@@ -13205,15 +13437,17 @@
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => setConfirmDialog({
-                                                                                        title: 'Delete live log entry?',
-                                                                                        text: 'This will remove the selected current-period log and replay the live state.',
+                                                                                        title: isAdminEndedPeriodUnlock ? 'Admin override: delete ended-period entry?' : 'Delete live log entry?',
+                                                                                        text: isAdminEndedPeriodUnlock
+                                                                                            ? 'This entry is from an already-ended period. Deleting it will recompute the live score, stats, and lineup from the start of the game to correctly reflect the change.'
+                                                                                            : 'This will remove the selected current-period log and replay the live state.',
                                                                                         onConfirm: () => {
                                                                                             setConfirmDialog(null);
                                                                                             handleDeleteLogEntry(log.id);
                                                                                         }
                                                                                     })}
-                                                                                    className="h-4 w-4 inline-flex items-center justify-center text-slate-600 hover:text-rose-400 cursor-pointer"
-                                                                                    title="Delete this log (current period only)"
+                                                                                    className={`h-6 w-6 inline-flex items-center justify-center rounded-md border cursor-pointer transition-colors ${isAdminEndedPeriodUnlock ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20' : 'border-slate-700/70 bg-slate-900/70 text-rose-400 hover:bg-rose-500/15 hover:text-rose-300'}`}
+                                                                                    title={isAdminEndedPeriodUnlock ? 'Admin override: delete this ended-period entry' : 'Delete this log (current period only)'}
                                                                                 >
                                                                                     <Icons.Trash />
                                                                                 </button>
@@ -17346,10 +17580,13 @@
                                             return { benchId, p, matchCount, height, slotScore, purityBonus, fouls };
                                         });
 
+                                        const preferShorterForTarget = targetSlot === 'PG' || targetSlot === 'SG';
                                         const orderedBenchEntries = benchEntries.slice().sort((a, b) => {
                                             if (b.slotScore !== a.slotScore) return b.slotScore - a.slotScore;
-                                            const heightDiff = b.height - a.height;
-                                            if (heightDiff !== 0) return heightDiff;
+                                            if (a.height > 0 && b.height > 0) {
+                                                const heightDiff = preferShorterForTarget ? (a.height - b.height) : (b.height - a.height);
+                                                if (heightDiff !== 0) return heightDiff;
+                                            }
                                             if (b.purityBonus !== a.purityBonus) return b.purityBonus - a.purityBonus;
                                             if (a.fouls !== b.fouls) return a.fouls - b.fouls;
                                             if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
@@ -17499,69 +17736,16 @@
                     )}
 
                     {/* RECONFIGURED SINGLE TAP WORKFLOW MODAL DIALOG CONTAINER */}
-                    {showLoggingModal && activeAction && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
-                            <div className={`bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full shadow-2xl relative my-0 md:my-auto max-h-[85vh] overflow-y-auto ${isCompactRecordActionModal ? 'max-w-xl p-4' : 'max-w-2xl p-5'}`}>
-                                <div className={`rounded-xl border ${isCompactRecordActionModal ? 'p-2 mb-2' : 'p-3 mb-3'}`} style={activeActionTone.surfaceStyle}>
-                                    <div className="text-center">
-                                        <div className={`text-[10px] font-black uppercase tracking-[0.2em] ${activeActionTone.textClass}`}>Armed Stat Action</div>
-                                        <h3 className={`${isCompactRecordActionModal ? 'text-base mt-1' : 'text-xl mt-1'} font-black text-white leading-tight`}>
-                                            Record Action:
-                                            <span className={`ml-2 inline-flex items-center rounded-md border px-2 py-0.5 font-mono tracking-wide ${activeActionTone.textClass}`} style={activeActionTone.badgeStyle}>
-                                                {activeActionLabelOverride || activeAction.label}
-                                            </span>
-                                        </h3>
-                                    </div>
-                                </div>
-                                <div className={`text-center font-bold uppercase tracking-wider text-slate-400 ${isCompactRecordActionModal ? 'mb-2 text-[9px]' : 'mb-3 text-[10px]'}`}>
-                                    Operator Handling: <span className="text-orange-300">{operatorHandledTeamLabel}</span>
-                                </div>
-                                {!displayIsPeriodClockRunning && hasMatchStarted && !canBackfillEndedPeriodStats && !isAwaitingPeriodStart && !awaitingOvertimeDecision && (
-                                    <div className={`mb-2 rounded-lg border border-red-500/45 bg-red-500/12 px-2.5 py-2 text-[10px] font-black text-red-200 ${isCompactRecordActionModal ? '' : 'mb-3'}`}>
-                                        <span className="inline-flex items-center gap-1.5">
-                                            <Icons.Timer />
-                                            CLOCK STOPPED: this action may require clock resume.
-                                        </span>
-                                        {!isAutoResumeActionArmed && (
-                                            <span className="ml-1 text-amber-200">You will be asked to Resume & Record.</span>
-                                        )}
-                                    </div>
-                                )}
-                                <div className={`grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'} ${isCompactRecordActionModal ? 'gap-2.5' : 'gap-4'}`}>
-                                    {showHomeLivePanel && <div className={`bg-slate-950/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
-                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{homeTeamLabel} On Court</div>
-                                        <div className="space-y-1">
-                                            {getOrderedLiveLineupEntries(teamAId, teamALineup).map(({ playerId: id }) => {
-                                                const p = teams.flatMap(t => t.players).find(x => x.id === id);
-                                                const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
-                                                const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, true, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{renderLiveDisplayName(p.name) || p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
-                                            })}
-                                        </div>
-                                    </div>}
-                                    {showAwayLivePanel && <div className={`bg-slate-955/60 rounded-xl border border-slate-855 ${isCompactRecordActionModal ? 'p-2.5' : 'p-3'}`}>
-                                        <div className={`font-extrabold text-slate-400 uppercase ${isCompactRecordActionModal ? 'text-[9px] mb-1.5' : 'text-[10px] mb-2'}`}>{awayTeamLabel} On Court</div>
-                                        <div className="space-y-1">
-                                            {getOrderedLiveLineupEntries(teamBId, teamBLineup).map(({ playerId: id }) => {
-                                                const p = teams.flatMap(t => t.players).find(x => x.id === id);
-                                                const isFouledOut = (liveStats[id]?.pf || 0) >= 5;
-                                                const initials = (p?.name || '?').split(/[\s,]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || '?';
-                                                return p ? <button key={id} type="button" disabled={isFouledOut} onClick={() => handlePlayerClick(id, false, { skipAccessChecks: true })} className={`w-full bg-slate-900 border border-slate-800/55 text-left rounded-xl hover:border-emerald-500/45 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-slate-800/55 cursor-pointer ${isCompactRecordActionModal ? 'p-1' : 'p-1.5'}`}><div className="flex items-center gap-2"><span className={`${isCompactRecordActionModal ? 'w-8 h-8 text-sm' : 'w-9 h-9 text-base'} rounded-lg border border-slate-700/70 bg-slate-950 shrink-0 inline-flex items-center justify-center font-mono font-black text-slate-100`}>{p.number}</span><div className="min-w-0 flex-1"><div className={`${isCompactRecordActionModal ? 'text-[11px]' : 'text-[12px]'} font-black text-white truncate leading-tight`}>{renderLiveDisplayName(p.name) || p.name}</div></div><div className={`${isCompactRecordActionModal ? 'w-8 h-8' : 'w-9 h-9'} rounded-lg overflow-hidden border border-slate-700/70 bg-slate-950 shrink-0 flex items-center justify-center text-[9px] font-black text-slate-400`}>{p.pictureUrl ? <img src={p.pictureUrl} alt={p.name} className="w-full h-full object-cover" /> : <span>{initials}</span>}</div></div></button> : null;
-                                            })}
-                                        </div>
-                                    </div>}
-                                </div>
-                                <button onClick={handleCancelActionModal} className={`w-full py-2 bg-slate-950 text-slate-400 text-xs rounded-xl font-bold cursor-pointer ${isCompactRecordActionModal ? 'mt-3' : 'mt-4'}`}>Cancel Action</button>
-                            </div>
-                        </div>
-                    )}
-
                     {isLoggedIn && canOperateLive && liveLogEditTarget && (
                         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4">
                             <div className="bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 shadow-2xl relative my-0 md:my-auto space-y-3 max-h-[85vh] overflow-y-auto">
                                 <div>
                                     <h3 className="text-sm font-black text-white uppercase tracking-wider">Edit Live Log Action</h3>
-                                    <p className="mt-1 text-[11px] text-slate-400">Current-period entries only. Prior periods remain locked.</p>
+                                    <p className="mt-1 text-[11px] text-slate-400">
+                                        {isAdminUnlockEditTarget
+                                            ? 'Admin override: this entry is from an already-ended period. Saving will recompute the game from the start to reflect the correction.'
+                                            : 'Current-period entries only. Prior periods remain locked.'}
+                                    </p>
                                 </div>
                                 <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 text-[11px] text-slate-300">
                                     <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Selected Log</div>
