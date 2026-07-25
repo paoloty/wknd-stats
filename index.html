@@ -88,6 +88,14 @@
             animation: targetPulse 1.8s infinite ease-in-out;
             cursor: pointer;
         }
+        /* Soft glow on the likely-possession team's on-court container while an action is armed */
+        @keyframes possessionGlow {
+            0%, 100% { border-color: rgba(16, 185, 129, 0.35); box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2); }
+            50% { border-color: rgba(16, 185, 129, 0.85); box-shadow: 0 0 20px 3px rgba(16, 185, 129, 0.35); }
+        }
+        .possession-glow {
+            animation: possessionGlow 1.8s infinite ease-in-out;
+        }
         /* Quick attention shake for the armed-action recording banner popping in */
         @keyframes bannerShakeIn {
             0% { transform: translateX(0); }

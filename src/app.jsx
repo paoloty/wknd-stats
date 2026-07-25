@@ -1303,6 +1303,7 @@
                     );
                     if (isPauseEvent) {
                         setIsPlayPaused(true);
+                        isPeriodClockRunningRef.current = false;
                         setIsPeriodClockRunning(false);
                     } else if (isResumeEvent) {
                         setIsPlayPaused(false);
@@ -3930,6 +3931,37 @@
             const displayPeriodActionIsEnd = liveGameplayControlDisplay.periodActionIsEnd;
             const displayPeriodActionIsPause = liveGameplayControlDisplay.periodActionIsPause;
             const displayPeriodActionIsPositive = liveGameplayControlDisplay.periodActionIsPositive;
+            // Soft possession guess so the armed-action banner can hint which side's on-court
+            // zone is likely next, without ever restricting the other side. Only shot makes,
+            // assists, rebounds, steals, and turnovers give a reliable signal; misses/fouls are
+            // skipped since they don't resolve who ends up with the ball.
+            //
+            // A made shot and its assist are companion stats of the SAME team's play, and
+            // statisticians log them in whichever order is convenient (score then assist, or
+            // assist then score). So if the most recent entry is a basket and we're now arming
+            // the assist (or vice versa), stay on that same team instead of flipping to the
+            // opponent - the flip only happens once that pair (or a standalone score/assist) is
+            // fully behind us and something else gets armed next.
+            const likelyPossessionIsTeamA = (() => {
+                const isMadeShotId = (id) => id === 'pts_1' || id === 'pts_2' || id === 'pts_3';
+                const armedActionId = String(activeAction?.id || '');
+                for (const entry of (gameLog || [])) {
+                    if (!entry || entry.kind !== 'stat' || entry.isUndoCompensation) continue;
+                    const entryActionId = String(entry.actionId || '');
+                    const isAssistPairing = (isMadeShotId(entryActionId) && armedActionId === 'ast')
+                        || (entryActionId === 'ast' && isMadeShotId(armedActionId));
+                    if (isAssistPairing) {
+                        return Boolean(entry.isTeamA);
+                    }
+                    if (isMadeShotId(entryActionId) || entryActionId === 'ast' || entryActionId === 'to') {
+                        return !entry.isTeamA;
+                    }
+                    if (entryActionId === 'reb' || entryActionId === 'stl') {
+                        return Boolean(entry.isTeamA);
+                    }
+                }
+                return null;
+            })();
             const armedActionBanner = (showLoggingModal && activeAction && bannerRect.width > 0) ? (
                 <div
                     className="banner-shake-in fixed z-40 rounded-b-xl border shadow-lg px-3 py-2.5"
@@ -7181,7 +7213,12 @@
                                     const pp = portalPlayers.find(
                                         p => p.name.trim().toUpperCase() === lp.name.trim().toUpperCase()
                                     );
-                                    return pp ? { ...lp, id: pp.id } : lp;
+                                    if (!pp) return lp;
+                                    return {
+                                        ...lp,
+                                        id: pp.id,
+                                        positions: Array.isArray(pp.positions) ? pp.positions : lp.positions
+                                    };
                                 });
                                 return { ...localTeam, id: portalTeam.id, players };
                             };
@@ -8640,6 +8677,7 @@
                 setIsEditingClockInput(false);
                 setShowSyncClockEditor(false);
                 setIsPlayPaused(true);
+                isPeriodClockRunningRef.current = false;
                 setIsPeriodClockRunning(false);
                 if (nextSeconds > 1 && (isAwaitingPeriodStart || awaitingOvertimeDecision)) {
                     setAwaitingPeriodStart(false);
@@ -13135,7 +13173,7 @@
 
                                         {/* Main Courtside tracking zones */}
                                         <div ref={onCourtZoneRef} className={`col-span-12 scroll-mt-64 ${canOperateLive ? `lg:col-span-9 grid grid-cols-1 ${showHomeLivePanel && showAwayLivePanel ? 'md:grid-cols-2' : 'md:grid-cols-1'}` : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.62fr)_minmax(0,1fr)]'} gap-4`}>
-                                            {showHomeLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'home' || !showAwayLivePanel ? 'block' : 'hidden md:block'}`}>
+                                            {showHomeLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'home' || !showAwayLivePanel ? 'block' : 'hidden md:block'} ${showLoggingModal && activeAction && likelyPossessionIsTeamA === true ? 'possession-glow' : ''}`}>
                                                 <div className="flex items-center justify-between gap-2 mb-1">
                                                     <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - {homeTeamLabel}</div>
                                                     {canOperateLive && (
@@ -13264,7 +13302,7 @@
                                                 </div>
                                             </div>}
 
-                                            {showAwayLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'away' || !showHomeLivePanel ? 'block' : 'hidden md:block'}`}>
+                                            {showAwayLivePanel && <div className={`bg-slate-900/80 border border-slate-800 p-3 rounded-xl space-y-2 ${activeMobileConsoleTab === 'away' || !showHomeLivePanel ? 'block' : 'hidden md:block'} ${showLoggingModal && activeAction && likelyPossessionIsTeamA === false ? 'possession-glow' : ''}`}>
                                                 <div className="flex items-center justify-between gap-2 mb-1">
                                                     <div className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">ON COURT - {awayTeamLabel}</div>
                                                     {canOperateLive && (
