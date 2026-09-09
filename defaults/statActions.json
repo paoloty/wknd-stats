@@ -27,6 +27,15 @@
     "trackingStat": "fg3m"
   },
   {
+    "id": "pts_4",
+    "label": "4pt Made",
+    "category": "score",
+    "stat": "pts",
+    "val": 4,
+    "colorClass": "bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500 shadow-md",
+    "trackingStat": "fg4m"
+  },
+  {
     "id": "ast",
     "label": "+1 AST",
     "category": "play",
@@ -71,6 +80,14 @@
     "label": "3pt Miss",
     "category": "miss",
     "stat": "fg3m_miss",
+    "val": 1,
+    "colorClass": "bg-red-600 hover:bg-red-500 text-white border-red-500 shadow-md"
+  },
+  {
+    "id": "fg4m_miss",
+    "label": "4pt Miss",
+    "category": "miss",
+    "stat": "fg4m_miss",
     "val": 1,
     "colorClass": "bg-red-600 hover:bg-red-500 text-white border-red-500 shadow-md"
   },

@@ -283,7 +283,7 @@ if (!fs.existsSync(playerImagesDir)) {
 const dbPath = path.join(dataDir, 'wknd-stats.db');
 const db = new Database(dbPath);
 
-const STAT_FIELDS = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg2m_miss', 'fg3m_miss', 'ftm', 'ft_miss'];
+const STAT_FIELDS = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg4m', 'fg2m_miss', 'fg3m_miss', 'fg4m_miss', 'ftm', 'ft_miss'];
 
 function ensureGamesLogColumn() {
   const columns = db.prepare('PRAGMA table_info(games)').all();
@@ -421,8 +421,10 @@ function ensurePlayerTotalsTable() {
       pf INTEGER NOT NULL DEFAULT 0,
       fg2m INTEGER NOT NULL DEFAULT 0,
       fg3m INTEGER NOT NULL DEFAULT 0,
+      fg4m INTEGER NOT NULL DEFAULT 0,
       fg2m_miss INTEGER NOT NULL DEFAULT 0,
       fg3m_miss INTEGER NOT NULL DEFAULT 0,
+      fg4m_miss INTEGER NOT NULL DEFAULT 0,
       ftm INTEGER NOT NULL DEFAULT 0,
       ft_miss INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
@@ -437,10 +439,10 @@ function ensurePlayerTotalsTable() {
 
   db.exec(`
     INSERT INTO player_totals (
-      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss
+      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss
     )
     SELECT
-      p.id, p.games_played, p.pts, p.ast, p.reb, p.stl, p.blk, p.turnover, p.pf, p.fg2m, p.fg3m, p.fg2m_miss, p.fg3m_miss, p.ftm, p.ft_miss
+      p.id, p.games_played, p.pts, p.ast, p.reb, p.stl, p.blk, p.turnover, p.pf, p.fg2m, p.fg3m, p.fg4m, p.fg2m_miss, p.fg3m_miss, p.fg4m_miss, p.ftm, p.ft_miss
     FROM players p
     LEFT JOIN player_totals t ON t.player_id = p.id
     WHERE t.player_id IS NULL;
@@ -467,18 +469,20 @@ function ensurePlayersTableWithoutLegacyStats() {
       pf INTEGER NOT NULL DEFAULT 0,
       fg2m INTEGER NOT NULL DEFAULT 0,
       fg3m INTEGER NOT NULL DEFAULT 0,
+      fg4m INTEGER NOT NULL DEFAULT 0,
       fg2m_miss INTEGER NOT NULL DEFAULT 0,
       fg3m_miss INTEGER NOT NULL DEFAULT 0,
+      fg4m_miss INTEGER NOT NULL DEFAULT 0,
       ftm INTEGER NOT NULL DEFAULT 0,
       ft_miss INTEGER NOT NULL DEFAULT 0
     );
 
     DELETE FROM player_totals_backup;
     INSERT INTO player_totals_backup (
-      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss
+      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss
     )
     SELECT
-      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss
+      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss
     FROM player_totals;
 
     CREATE TABLE IF NOT EXISTS players_new (
@@ -508,10 +512,10 @@ function ensurePlayersTableWithoutLegacyStats() {
     ALTER TABLE players_new RENAME TO players;
 
     INSERT INTO player_totals (
-      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss
+      player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss
     )
     SELECT
-      b.player_id, b.games_played, b.pts, b.ast, b.reb, b.stl, b.blk, b.turnover, b.pf, b.fg2m, b.fg3m, b.fg2m_miss, b.fg3m_miss, b.ftm, b.ft_miss
+      b.player_id, b.games_played, b.pts, b.ast, b.reb, b.stl, b.blk, b.turnover, b.pf, b.fg2m, b.fg3m, b.fg4m, b.fg2m_miss, b.fg3m_miss, b.fg4m_miss, b.ftm, b.ft_miss
     FROM player_totals_backup b
     INNER JOIN players p ON p.id = b.player_id
     ON CONFLICT(player_id) DO UPDATE SET
@@ -525,8 +529,10 @@ function ensurePlayersTableWithoutLegacyStats() {
       pf = excluded.pf,
       fg2m = excluded.fg2m,
       fg3m = excluded.fg3m,
+      fg4m = excluded.fg4m,
       fg2m_miss = excluded.fg2m_miss,
       fg3m_miss = excluded.fg3m_miss,
+      fg4m_miss = excluded.fg4m_miss,
       ftm = excluded.ftm,
       ft_miss = excluded.ft_miss;
 
@@ -561,6 +567,24 @@ function ensureGamePlayerStatsMinutesColumn() {
   const hasMinutes = columns.some((column) => column.name === 'minutes');
   if (!hasMinutes) {
     db.exec("ALTER TABLE game_player_stats ADD COLUMN minutes TEXT NOT NULL DEFAULT ''");
+  }
+}
+
+function ensureFg4mColumns() {
+  const gpsColumns = db.prepare('PRAGMA table_info(game_player_stats)').all();
+  if (!gpsColumns.some((column) => column.name === 'fg4m')) {
+    db.exec('ALTER TABLE game_player_stats ADD COLUMN fg4m INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!gpsColumns.some((column) => column.name === 'fg4m_miss')) {
+    db.exec('ALTER TABLE game_player_stats ADD COLUMN fg4m_miss INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const totalsColumns = db.prepare('PRAGMA table_info(player_totals)').all();
+  if (!totalsColumns.some((column) => column.name === 'fg4m')) {
+    db.exec('ALTER TABLE player_totals ADD COLUMN fg4m INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!totalsColumns.some((column) => column.name === 'fg4m_miss')) {
+    db.exec('ALTER TABLE player_totals ADD COLUMN fg4m_miss INTEGER NOT NULL DEFAULT 0');
   }
 }
 
@@ -645,8 +669,10 @@ db.exec(`
     pf INTEGER NOT NULL DEFAULT 0,
     fg2m INTEGER NOT NULL DEFAULT 0,
     fg3m INTEGER NOT NULL DEFAULT 0,
+    fg4m INTEGER NOT NULL DEFAULT 0,
     fg2m_miss INTEGER NOT NULL DEFAULT 0,
     fg3m_miss INTEGER NOT NULL DEFAULT 0,
+    fg4m_miss INTEGER NOT NULL DEFAULT 0,
     ftm INTEGER NOT NULL DEFAULT 0,
     ft_miss INTEGER NOT NULL DEFAULT 0,
     minutes TEXT NOT NULL DEFAULT '',
@@ -718,6 +744,7 @@ ensurePlayerTotalsTable();
 ensurePlayersTableWithoutLegacyStats();
 ensureGamePlayerStatsTeamColumn();
 ensureGamePlayerStatsMinutesColumn();
+ensureFg4mColumns();
 ensureIndexes();
 
 const selectLegacyStateStmt = db.prepare('SELECT teams_json, games_json FROM app_state WHERE id = 1');
@@ -750,9 +777,9 @@ const insertPlayerStmt = db.prepare(`
 
 const upsertPlayerTotalsStmt = db.prepare(`
   INSERT INTO player_totals (
-    player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss
+    player_id, games_played, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss
   ) VALUES (
-    @player_id, @games_played, @pts, @ast, @reb, @stl, @blk, @turnover, @pf, @fg2m, @fg3m, @fg2m_miss, @fg3m_miss, @ftm, @ft_miss
+    @player_id, @games_played, @pts, @ast, @reb, @stl, @blk, @turnover, @pf, @fg2m, @fg3m, @fg4m, @fg2m_miss, @fg3m_miss, @fg4m_miss, @ftm, @ft_miss
   )
   ON CONFLICT(player_id) DO UPDATE SET
     games_played = excluded.games_played,
@@ -765,8 +792,10 @@ const upsertPlayerTotalsStmt = db.prepare(`
     pf = excluded.pf,
     fg2m = excluded.fg2m,
     fg3m = excluded.fg3m,
+    fg4m = excluded.fg4m,
     fg2m_miss = excluded.fg2m_miss,
     fg3m_miss = excluded.fg3m_miss,
+    fg4m_miss = excluded.fg4m_miss,
     ftm = excluded.ftm,
     ft_miss = excluded.ft_miss
 `);
@@ -781,9 +810,9 @@ const insertGameStmt = db.prepare(`
 
 const insertGamePlayerStatStmt = db.prepare(`
   INSERT INTO game_player_stats (
-    game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
+    game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss, minutes
   ) VALUES (
-    @game_id, @team_id, @player_id, @pts, @ast, @reb, @stl, @blk, @turnover, @pf, @fg2m, @fg3m, @fg2m_miss, @fg3m_miss, @ftm, @ft_miss, @minutes
+    @game_id, @team_id, @player_id, @pts, @ast, @reb, @stl, @blk, @turnover, @pf, @fg2m, @fg3m, @fg4m, @fg2m_miss, @fg3m_miss, @fg4m_miss, @ftm, @ft_miss, @minutes
   )
 `);
 
@@ -817,8 +846,10 @@ const selectPlayersStmt = db.prepare(`
     COALESCE(t.pf, 0) AS pf,
     COALESCE(t.fg2m, 0) AS fg2m,
     COALESCE(t.fg3m, 0) AS fg3m,
+    COALESCE(t.fg4m, 0) AS fg4m,
     COALESCE(t.fg2m_miss, 0) AS fg2m_miss,
     COALESCE(t.fg3m_miss, 0) AS fg3m_miss,
+    COALESCE(t.fg4m_miss, 0) AS fg4m_miss,
     COALESCE(t.ftm, 0) AS ftm,
     COALESCE(t.ft_miss, 0) AS ft_miss
   FROM players p
@@ -839,16 +870,16 @@ const updateGameCoverStmt = db.prepare('UPDATE games SET social_cover_data_url =
 const selectGameDetailByIdStmt = db.prepare('SELECT game_log_json, period_snapshots_json, season, game_type, playoff_round, series_id FROM games WHERE id = ?');
 const selectAllGameLogsStmt = db.prepare('SELECT id, game_log_json, period_snapshots_json FROM games');
 const selectGamePlayerStatsStmt = db.prepare(`
-  SELECT game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
+  SELECT game_id, team_id, player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss, minutes
   FROM game_player_stats
 `);
 const selectGamePlayerStatsByIdStmt = db.prepare(`
-  SELECT player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
+  SELECT player_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss, minutes
   FROM game_player_stats
   WHERE game_id = ?
 `);
 const selectGameStatsByPlayerIdStmt = db.prepare(`
-  SELECT game_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg2m_miss, fg3m_miss, ftm, ft_miss, minutes
+  SELECT game_id, pts, ast, reb, stl, blk, turnover, pf, fg2m, fg3m, fg4m, fg2m_miss, fg3m_miss, fg4m_miss, ftm, ft_miss, minutes
   FROM game_player_stats
   WHERE player_id = ?
 `);
@@ -891,8 +922,10 @@ const selectRelationalStatsStmt = db.prepare(`
     gps.pf,
     gps.fg2m,
     gps.fg3m,
+    gps.fg4m,
     gps.fg2m_miss,
     gps.fg3m_miss,
+    gps.fg4m_miss,
     gps.ftm,
     gps.ft_miss,
     gps.minutes
@@ -915,8 +948,10 @@ const selectPlayerTotalsAggregateStmt = db.prepare(`
     COALESCE(SUM(pf), 0) AS pf,
     COALESCE(SUM(fg2m), 0) AS fg2m,
     COALESCE(SUM(fg3m), 0) AS fg3m,
+    COALESCE(SUM(fg4m), 0) AS fg4m,
     COALESCE(SUM(fg2m_miss), 0) AS fg2m_miss,
     COALESCE(SUM(fg3m_miss), 0) AS fg3m_miss,
+    COALESCE(SUM(fg4m_miss), 0) AS fg4m_miss,
     COALESCE(SUM(ftm), 0) AS ftm,
     COALESCE(SUM(ft_miss), 0) AS ft_miss
   FROM game_player_stats
@@ -1704,8 +1739,8 @@ async function buildSocialCoverPng(game, teams = [], baseOrigin = '') {
 function derivePlayerOfTheGameFromState(game, teams) {
   const POINTS_LEADER_BONUS = 1.25;
   const computePerStyleScore = (stats = {}) => {
-    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
-    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0) + Number(stats.fg4m || 0);
+    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0) + Number(stats.fg4m_miss || 0);
     const ftMade = Number(stats.ftm || 0);
     const ftAtt = ftMade + Number(stats.ft_miss || 0);
     return (
@@ -2055,8 +2090,8 @@ async function buildPlayerSocialCoverPng(player, team, baseOrigin = '') {
   const ptsAvg = gp > 0 ? (Number(stats.pts || 0) / gp).toFixed(1) : '–';
   const rebAvg = gp > 0 ? (Number(stats.reb || 0) / gp).toFixed(1) : '–';
   const astAvg = gp > 0 ? (Number(stats.ast || 0) / gp).toFixed(1) : '–';
-  const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
-  const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+  const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0) + Number(stats.fg4m || 0);
+  const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0) + Number(stats.fg4m_miss || 0);
   const fgPct = fgAtt > 0 ? `${Math.round((fgMade / fgAtt) * 100)}%` : '–';
 
   const nameParts = playerName.split(' ');
@@ -2438,8 +2473,10 @@ function readState() {
         pf: toInt(player.pf),
         fg2m: toInt(player.fg2m),
         fg3m: toInt(player.fg3m),
+        fg4m: toInt(player.fg4m),
         fg2m_miss: toInt(player.fg2m_miss),
         fg3m_miss: toInt(player.fg3m_miss),
+        fg4m_miss: toInt(player.fg4m_miss),
         ftm: toInt(player.ftm),
         ft_miss: toInt(player.ft_miss)
       }
@@ -2529,8 +2566,10 @@ const writeTeamsTransaction = db.transaction((nextTeams) => {
         pf: toInt(totalStats.pf),
         fg2m: toInt(totalStats.fg2m),
         fg3m: toInt(totalStats.fg3m),
+        fg4m: toInt(totalStats.fg4m),
         fg2m_miss: toInt(totalStats.fg2m_miss),
         fg3m_miss: toInt(totalStats.fg3m_miss),
+        fg4m_miss: toInt(totalStats.fg4m_miss),
         ftm: toInt(totalStats.ftm),
         ft_miss: toInt(totalStats.ft_miss)
       });
@@ -2586,8 +2625,10 @@ const writeGamesTransaction = db.transaction((nextGames) => {
         pf: toInt(stats.pf),
         fg2m: toInt(stats.fg2m),
         fg3m: toInt(stats.fg3m),
+        fg4m: toInt(stats.fg4m),
         fg2m_miss: toInt(stats.fg2m_miss),
         fg3m_miss: toInt(stats.fg3m_miss),
+        fg4m_miss: toInt(stats.fg4m_miss),
         ftm: toInt(stats.ftm),
         ft_miss: toInt(stats.ft_miss),
         minutes: typeof stats.min === 'string' ? stats.min : ''
@@ -2624,8 +2665,10 @@ function rebuildPlayerTotalsFromGameStats() {
       pf: toInt(row.pf),
       fg2m: toInt(row.fg2m),
       fg3m: toInt(row.fg3m),
+        fg4m: toInt(row.fg4m),
       fg2m_miss: toInt(row.fg2m_miss),
       fg3m_miss: toInt(row.fg3m_miss),
+        fg4m_miss: toInt(row.fg4m_miss),
       ftm: toInt(row.ftm),
       ft_miss: toInt(row.ft_miss)
     });
@@ -3170,7 +3213,28 @@ function migrateLegacyIfNeeded() {
   }
 }
 
+function ensureFg4mStatActions() {
+  const existingIds = new Set(db.prepare('SELECT id FROM stat_actions').all().map((row) => row.id));
+  const maxSortOrder = toInt((db.prepare('SELECT MAX(sort_order) AS m FROM stat_actions').get() || {}).m);
+  let nextSortOrder = maxSortOrder + 1;
+  DEFAULT_STAT_ACTIONS
+    .filter((action) => (action.id === 'pts_4' || action.id === 'fg4m_miss') && !existingIds.has(action.id))
+    .forEach((action) => {
+      insertStatActionStmt.run({
+        id: action.id,
+        label: action.label,
+        category: action.category,
+        stat: action.stat,
+        val: toInt(action.val),
+        color_class: action.colorClass || '',
+        tracking_stat: action.trackingStat || null,
+        sort_order: nextSortOrder++
+      });
+    });
+}
+
 migrateLegacyIfNeeded();
+ensureFg4mStatActions();
 hydrateLiveSessionGuards();
 clearOrphanedLiveEvents();
 
@@ -3408,7 +3472,7 @@ async function syncRosterFromPortal() {
           gamesPlayed: prev.gamesPlayed || 0,
           totalStats: prev.totalStats || {
             pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0,
-            fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0
+            fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0
           }
         };
       })
@@ -3476,8 +3540,10 @@ app.get('/api/stats', (_req, res) => {
       pf: toInt(row.pf),
       fg2m: toInt(row.fg2m),
       fg3m: toInt(row.fg3m),
+        fg4m: toInt(row.fg4m),
       fg2m_miss: toInt(row.fg2m_miss),
       fg3m_miss: toInt(row.fg3m_miss),
+        fg4m_miss: toInt(row.fg4m_miss),
       ftm: toInt(row.ftm),
       ft_miss: toInt(row.ft_miss)
     }
@@ -3537,8 +3603,8 @@ app.get('/api/social-cover/:gameId.png', async (req, res) => {
       statRows.forEach((row) => {
         playerStats[row.player_id] = {
           pts: row.pts, ast: row.ast, reb: row.reb, stl: row.stl, blk: row.blk,
-          to: row.turnover, pf: row.pf, fg2m: row.fg2m, fg3m: row.fg3m,
-          fg2m_miss: row.fg2m_miss, fg3m_miss: row.fg3m_miss, ftm: row.ftm, ft_miss: row.ft_miss,
+          to: row.turnover, pf: row.pf, fg2m: row.fg2m, fg3m: row.fg3m, fg4m: row.fg4m,
+          fg2m_miss: row.fg2m_miss, fg3m_miss: row.fg3m_miss, fg4m_miss: row.fg4m_miss, ftm: row.ftm, ft_miss: row.ft_miss,
           minutes: row.minutes
         };
       });
@@ -3902,8 +3968,8 @@ app.post('/api/generate-potg-writeup', async (req, res) => {
     .slice(0, 6);
 
   const formatStatsLine = (stats = {}) => {
-    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
-    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0) + Number(stats.fg4m || 0);
+    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0) + Number(stats.fg4m_miss || 0);
     const fgPct = fgAtt > 0 ? `${Math.round((fgMade / fgAtt) * 100)}% FG` : '0% FG';
     return `PTS ${Number(stats.pts || 0)}, REB ${Number(stats.reb || 0)}, AST ${Number(stats.ast || 0)}, STL ${Number(stats.stl || 0)}, BLK ${Number(stats.blk || 0)}, TO ${Number(stats.to || 0)}, ${fgPct}`;
   };
@@ -4311,8 +4377,10 @@ app.put('/api/games/:gameId', (req, res) => {
           pf: toInt(stats.pf),
           fg2m: toInt(stats.fg2m),
           fg3m: toInt(stats.fg3m),
+        fg4m: toInt(stats.fg4m),
           fg2m_miss: toInt(stats.fg2m_miss),
           fg3m_miss: toInt(stats.fg3m_miss),
+        fg4m_miss: toInt(stats.fg4m_miss),
           ftm: toInt(stats.ftm),
           ft_miss: toInt(stats.ft_miss),
           minutes: typeof stats.min === 'string' ? stats.min : ''
@@ -4501,8 +4569,10 @@ app.post('/api/games/import-results/confirm', (req, res) => {
           pf: toInt(p.pf),
           fg2m: toInt(p.fg2m),
           fg3m: toInt(p.fg3m),
+          fg4m: toInt(p.fg4m),
           fg2m_miss: toInt(p.fg2m_miss) || Math.max(0, toInt(p.fg2a) - toInt(p.fg2m)),
           fg3m_miss: toInt(p.fg3m_miss) || Math.max(0, toInt(p.fg3a) - toInt(p.fg3m)),
+          fg4m_miss: toInt(p.fg4m_miss) || Math.max(0, toInt(p.fg4a) - toInt(p.fg4m)),
           ftm: toInt(p.ftm),
           ft_miss: toInt(p.ft_miss) || Math.max(0, toInt(p.fta) - toInt(p.ftm)),
           minutes: String(p.min || p.minutes || '')
@@ -4541,8 +4611,8 @@ app.put('/api/state', async (req, res) => {
       gameStats[row.player_id] = {
         pts: toInt(row.pts), ast: toInt(row.ast), reb: toInt(row.reb),
         stl: toInt(row.stl), blk: toInt(row.blk), to: toInt(row.turnover),
-        pf: toInt(row.pf), fg2m: toInt(row.fg2m), fg3m: toInt(row.fg3m),
-        fg2m_miss: toInt(row.fg2m_miss), fg3m_miss: toInt(row.fg3m_miss),
+        pf: toInt(row.pf), fg2m: toInt(row.fg2m), fg3m: toInt(row.fg3m), fg4m: toInt(row.fg4m),
+        fg2m_miss: toInt(row.fg2m_miss), fg3m_miss: toInt(row.fg3m_miss), fg4m_miss: toInt(row.fg4m_miss),
         ftm: toInt(row.ftm), ft_miss: toInt(row.ft_miss),
         min: String(row.minutes || '').trim()
       };
@@ -4701,8 +4771,8 @@ app.get('/api/players/:playerId/game-stats', (req, res) => {
     statsByGame[r.game_id] = {
       pts: toInt(r.pts), ast: toInt(r.ast), reb: toInt(r.reb),
       stl: toInt(r.stl), blk: toInt(r.blk), to: toInt(r.turnover),
-      pf: toInt(r.pf), fg2m: toInt(r.fg2m), fg3m: toInt(r.fg3m),
-      fg2m_miss: toInt(r.fg2m_miss), fg3m_miss: toInt(r.fg3m_miss),
+      pf: toInt(r.pf), fg2m: toInt(r.fg2m), fg3m: toInt(r.fg3m), fg4m: toInt(r.fg4m),
+      fg2m_miss: toInt(r.fg2m_miss), fg3m_miss: toInt(r.fg3m_miss), fg4m_miss: toInt(r.fg4m_miss),
       ftm: toInt(r.ftm), ft_miss: toInt(r.ft_miss),
       min: String(r.minutes || '').trim()
     };
@@ -4788,8 +4858,8 @@ app.get('/api/games/recent-potg', (req, res) => {
     statRows.forEach((row) => {
       playerStats[row.player_id] = {
         pts: row.pts, ast: row.ast, reb: row.reb, stl: row.stl, blk: row.blk,
-        to: row.turnover, pf: row.pf, fg2m: row.fg2m, fg3m: row.fg3m,
-        fg2m_miss: row.fg2m_miss, fg3m_miss: row.fg3m_miss, ftm: row.ftm, ft_miss: row.ft_miss
+        to: row.turnover, pf: row.pf, fg2m: row.fg2m, fg3m: row.fg3m, fg4m: row.fg4m,
+        fg2m_miss: row.fg2m_miss, fg3m_miss: row.fg3m_miss, fg4m_miss: row.fg4m_miss, ftm: row.ftm, ft_miss: row.ft_miss
       };
     });
     const gameWithStats = { ...game, playerStats };
@@ -4836,8 +4906,10 @@ app.get('/api/games/:gameId/detail', (req, res) => {
       pf: toInt(r.pf),
       fg2m: toInt(r.fg2m),
       fg3m: toInt(r.fg3m),
+        fg4m: toInt(r.fg4m),
       fg2m_miss: toInt(r.fg2m_miss),
       fg3m_miss: toInt(r.fg3m_miss),
+        fg4m_miss: toInt(r.fg4m_miss),
       ftm: toInt(r.ftm),
       ft_miss: toInt(r.ft_miss),
       min: String(r.minutes || '').trim()

@@ -176,7 +176,7 @@
             const [rosterViewMode, setRosterViewMode] = useState('averages');
             const [selectedRosterPlayer, setSelectedRosterPlayer] = useState(null);
             const [selectedPlayerGameStats, setSelectedPlayerGameStats] = useState(null);
-            const CURRENT_SEASON = 3;
+            const CURRENT_SEASON = 4;
 
             const parseDateForInput = (dateStr) => {
                 if (!dateStr) return '';
@@ -232,7 +232,11 @@
             const [liveGameSnapshot, setLiveGameSnapshot] = useState(null);
             const [playedPlayers, setPlayedPlayers] = useState([]); 
             const [dnpPlayers, setDnpPlayers] = useState([]);
-            
+            // Session-only jersey number overrides (e.g. a player wearing a different number
+            // tonight). Local display state only — never synced, broadcast, or persisted, and
+            // reset whenever a live session starts or is torn down.
+            const [numberOverrides, setNumberOverrides] = useState({});
+
             const [loggedHistory, setLoggedHistory] = useState([]);
             const [periodSnapshots, setPeriodSnapshots] = useState([]);
             const [activeAction, setActiveAction] = useState(null); 
@@ -1117,7 +1121,7 @@
             const resolveActionToneClasses = (action) => {
                 const source = String(action?.colorClass || '');
                 const actionId = String(action?.id || '');
-                const shouldForceRed = new Set(['fg2m_miss', 'fg3m_miss', 'pf', 'to', 'pf_offensive']).has(actionId);
+                const shouldForceRed = new Set(['fg2m_miss', 'fg3m_miss', 'fg4m_miss', 'pf', 'to', 'pf_offensive']).has(actionId);
                 if (shouldForceRed || /\bred-|\brose-/.test(source)) {
                     return {
                         textClass: 'text-red-200',
@@ -2774,8 +2778,10 @@
                             pf: 0,
                             fg2m: 0,
                             fg3m: 0,
+                            fg4m: 0,
                             fg2m_miss: 0,
                             fg3m_miss: 0,
+                            fg4m_miss: 0,
                             ftm: 0,
                             ft_miss: 0
                         };
@@ -3179,13 +3185,13 @@
                     .sort((a, b) => orderMap.get(a.id) - orderMap.get(b.id));
             };
 
-            const scoringActions = getActionsByOrder(['pts_2', 'fg2m_miss', 'pts_3', 'fg3m_miss', 'pts_1', 'ft_miss']);
+            const scoringActions = getActionsByOrder(['pts_2', 'fg2m_miss', 'pts_3', 'fg3m_miss', 'pts_4', 'fg4m_miss', 'pts_1', 'ft_miss']);
             const flowActions = getActionsByOrder(['ast', 'stl', 'blk']);
             const whistleActions = getActionsByOrder(['to', 'pf', 'pf_offensive']);
             const reboundAction = liveActionById.get('reb') || null;
             const technicalFoulAction = liveActionById.get('pf_technical') || null;
             const scoringActionIds = new Set(scoringActions.map((action) => String(action?.id || '')));
-            const autoResumeActionIds = new Set(['pts_2', 'pts_3', 'fg2m_miss', 'fg3m_miss', 'reb', 'ast', 'to', 'stl', 'blk']);
+            const autoResumeActionIds = new Set(['pts_2', 'pts_3', 'pts_4', 'fg2m_miss', 'fg3m_miss', 'fg4m_miss', 'reb', 'ast', 'to', 'stl', 'blk']);
             const isAutoResumeActionArmed = autoResumeActionIds.has(String(activeAction?.id || ''));
             const getActionDisplayLabel = (action, fallbackLabel = '') => {
                 const actionId = String(action?.id || '');
@@ -3194,6 +3200,8 @@
                     fg2m_miss: '2PT MISS',
                     pts_3: '3PT MADE',
                     fg3m_miss: '3PT MISS',
+                    pts_4: '4PT MADE',
+                    fg4m_miss: '4PT MISS',
                     pts_1: 'FT MADE',
                     ft_miss: 'FT MISS',
                     ast: '+1 AST',
@@ -3210,6 +3218,17 @@
 
             const liveHomeTeam = teams.find(t => t.id === teamAId);
             const liveAwayTeam = teams.find(t => t.id === teamBId);
+            // Session-only jersey number overrides applied on top of the roster — used
+            // wherever a live-tab helper (POTG, Leaders) needs "number as worn tonight"
+            // without touching the shared team object or affecting historical games.
+            const applyNumberOverrides = (team) => !team ? team : {
+                ...team,
+                players: (team.players || []).map((p) => (
+                    numberOverrides[p.id] != null ? { ...p, number: numberOverrides[p.id] || p.number } : p
+                ))
+            };
+            const liveHomeTeamForDisplay = applyNumberOverrides(liveHomeTeam);
+            const liveAwayTeamForDisplay = applyNumberOverrides(liveAwayTeam);
             const homeTimeoutBtnStyles = getTeamColorStyles(liveHomeTeam?.color, liveHomeTeam?.textColor);
             const awayTimeoutBtnStyles = getTeamColorStyles(liveAwayTeam?.color, liveAwayTeam?.textColor);
             const homeTeamLabel = liveHomeTeam?.name || 'HOME';
@@ -3412,10 +3431,12 @@
                 { id: 'stl', label: 'STL', tabLabel: 'Steals' },
                 { id: 'blk', label: 'BLK', tabLabel: 'Blocks' },
                 { id: 'fg3m', label: '3PM', tabLabel: '3-Pointers Made' },
+                { id: 'fg4m', label: '4PM', tabLabel: '4-Pointers Made' },
                 { id: 'ftm', label: 'FTM', tabLabel: 'Free Throws Made' },
                 { id: 'to', label: 'TO', tabLabel: 'Turnovers' },
                 { id: 'fgPct', label: 'FG%', tabLabel: 'Field Goal %' },
                 { id: 'fg3Pct', label: '3P%', tabLabel: 'Three Point %' },
+                { id: 'fg4Pct', label: '4P%', tabLabel: 'Four Point %' },
                 { id: 'ftPct', label: 'FT%', tabLabel: 'Free Throw %' },
                 { id: 'pf', label: 'PF', tabLabel: 'Fouls' }
             ];
@@ -3434,19 +3455,26 @@
                     acc.fg2m_miss += Number(s.fg2m_miss || 0);
                     acc.fg3m += Number(s.fg3m || 0);
                     acc.fg3m_miss += Number(s.fg3m_miss || 0);
+                    acc.fg4m += Number(s.fg4m || 0);
+                    acc.fg4m_miss += Number(s.fg4m_miss || 0);
                     acc.ftm += Number(s.ftm || 0);
                     acc.ft_miss += Number(s.ft_miss || 0);
                     return acc;
-                }, { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg2m_miss: 0, fg3m: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 });
+                }, { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg2m_miss: 0, fg3m: 0, fg3m_miss: 0, fg4m: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 });
 
                 if (key === 'fgPct') {
-                    const made = totals.fg2m + totals.fg3m;
-                    const att = made + totals.fg2m_miss + totals.fg3m_miss;
+                    const made = totals.fg2m + totals.fg3m + totals.fg4m;
+                    const att = made + totals.fg2m_miss + totals.fg3m_miss + totals.fg4m_miss;
                     return att > 0 ? (made / att) * 100 : 0;
                 }
                 if (key === 'fg3Pct') {
                     const made = totals.fg3m;
                     const att = made + totals.fg3m_miss;
+                    return att > 0 ? (made / att) * 100 : 0;
+                }
+                if (key === 'fg4Pct') {
+                    const made = totals.fg4m;
+                    const att = made + totals.fg4m_miss;
                     return att > 0 ? (made / att) * 100 : 0;
                 }
                 if (key === 'ftPct') {
@@ -3943,7 +3971,7 @@
             // opponent - the flip only happens once that pair (or a standalone score/assist) is
             // fully behind us and something else gets armed next.
             const likelyPossessionIsTeamA = (() => {
-                const isMadeShotId = (id) => id === 'pts_1' || id === 'pts_2' || id === 'pts_3';
+                const isMadeShotId = (id) => id === 'pts_1' || id === 'pts_2' || id === 'pts_3' || id === 'pts_4';
                 const armedActionId = String(activeAction?.id || '');
                 for (const entry of (gameLog || [])) {
                     if (!entry || entry.kind !== 'stat' || entry.isUndoCompensation) continue;
@@ -4069,8 +4097,10 @@
                 pf: 'PF',
                 fg2m: '2FGM',
                 fg3m: '3FGM',
+                fg4m: '4FGM',
                 fg2m_miss: '2FG Miss',
                 fg3m_miss: '3FG Miss',
+                fg4m_miss: '4FG Miss',
                 ftm: 'FTM',
                 ft_miss: 'FT Miss'
             };
@@ -4645,7 +4675,7 @@
                                 number: playerNo,
                                 positions: [],
                                 gamesPlayed: 0,
-                                totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+                                totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 }
                             });
                         }
 
@@ -5332,7 +5362,7 @@
                     return;
                 }
 
-                const watchedFields = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg2m_miss', 'fg3m_miss', 'ftm', 'ft_miss'];
+                const watchedFields = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg4m', 'fg2m_miss', 'fg3m_miss', 'fg4m_miss', 'ftm', 'ft_miss'];
                 const changedPlayers = new Set();
 
                 new Set([...Object.keys(previous), ...Object.keys(next)]).forEach((playerId) => {
@@ -5583,8 +5613,10 @@
                         pf: 0,
                         fg2m: 0,
                         fg3m: 0,
+                        fg4m: 0,
                         fg2m_miss: 0,
                         fg3m_miss: 0,
+                        fg4m_miss: 0,
                         ftm: 0,
                         ft_miss: 0,
                         ...(safePlayer.totalStats || {})
@@ -6761,7 +6793,7 @@
                                         number: impPlayerObj.number,
                                         positions: normalizePlayerPositions(impPlayerObj),
                                         gamesPlayed: 0,
-                                        totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+                                        totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 }
                                     };
                                     targetLocalTeam.players.push(localPlayer);
                                 }
@@ -6776,8 +6808,10 @@
                                 localPlayer.totalStats.pf = (localPlayer.totalStats.pf || 0) + (stats.pf || 0);
                                 localPlayer.totalStats.fg2m = (localPlayer.totalStats.fg2m || 0) + (stats.fg2m || 0);
                                 localPlayer.totalStats.fg3m = (localPlayer.totalStats.fg3m || 0) + (stats.fg3m || 0);
+                                localPlayer.totalStats.fg4m = (localPlayer.totalStats.fg4m || 0) + (stats.fg4m || 0);
                                 localPlayer.totalStats.fg2m_miss = (localPlayer.totalStats.fg2m_miss || 0) + (stats.fg2m_miss || 0);
                                 localPlayer.totalStats.fg3m_miss = (localPlayer.totalStats.fg3m_miss || 0) + (stats.fg3m_miss || 0);
+                                localPlayer.totalStats.fg4m_miss = (localPlayer.totalStats.fg4m_miss || 0) + (stats.fg4m_miss || 0);
                                 localPlayer.totalStats.ftm = (localPlayer.totalStats.ftm || 0) + (stats.ftm || 0);
                                 localPlayer.totalStats.ft_miss = (localPlayer.totalStats.ft_miss || 0) + (stats.ft_miss || 0);
 
@@ -6831,7 +6865,7 @@
                             number: p.number,
                             positions: normalizePlayerPositions(p),
                             gamesPlayed: 0,
-                            totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+                            totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 }
                         }))
                     }));
                     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(rostersOnly));
@@ -6975,6 +7009,7 @@
                 setLoggedHistory([]);
                 setPlayedPlayers([]);
                 setDnpPlayers([]);
+                setNumberOverrides({});
                 setLineupRevision(0);
                 lineupRevisionRef.current = 0;
                 sessionRevisionRef.current = 0;
@@ -7264,10 +7299,11 @@
 
                 setPlayedPlayers([...startersA, ...startersB]);
                 setDnpPlayers([]);
+                setNumberOverrides({});
 
                 const initializedStats = {};
-                resolvedTeamAObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
-                resolvedTeamBObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }; });
+                resolvedTeamAObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 }; });
+                resolvedTeamBObj.players.forEach(p => { initializedStats[p.id] = { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 }; });
 
                 const initialLiveSnapshot = {
                     teamAId: resolvedTeamAId,
@@ -9404,7 +9440,7 @@
                     if (team.id !== teamAId && team.id !== teamBId) return team;
 
                     const updatedPlayers = team.players.map(player => {
-                        const statsLive = finalizedLiveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                        const statsLive = finalizedLiveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
                         const hasStatLine = Object.values(statsLive).some(val => Number(val || 0) > 0);
                         const didParticipate = !dnpPlayers.includes(player.id) && (playedPlayers.includes(player.id) || hasStatLine);
 
@@ -9428,8 +9464,10 @@
                                 pf: (player.totalStats.pf || 0) + (statsLive.pf || 0),
                                 fg2m: (player.totalStats.fg2m || 0) + (statsLive.fg2m || 0),
                                 fg3m: (player.totalStats.fg3m || 0) + (statsLive.fg3m || 0),
+                                fg4m: (player.totalStats.fg4m || 0) + (statsLive.fg4m || 0),
                                 fg2m_miss: (player.totalStats.fg2m_miss || 0) + (statsLive.fg2m_miss || 0),
                                 fg3m_miss: (player.totalStats.fg3m_miss || 0) + (statsLive.fg3m_miss || 0),
+                                fg4m_miss: (player.totalStats.fg4m_miss || 0) + (statsLive.fg4m_miss || 0),
                                 ftm: (player.totalStats.ftm || 0) + (statsLive.ftm || 0),
                                 ft_miss: (player.totalStats.ft_miss || 0) + (statsLive.ft_miss || 0)
                             }
@@ -9760,7 +9798,7 @@
                 handlePlayerClick(playerId, isTeamA);
             };
 
-            const PLAYER_STAT_FIELDS = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg2m_miss', 'fg3m_miss', 'ftm', 'ft_miss'];
+            const PLAYER_STAT_FIELDS = ['pts', 'ast', 'reb', 'stl', 'blk', 'to', 'pf', 'fg2m', 'fg3m', 'fg4m', 'fg2m_miss', 'fg3m_miss', 'fg4m_miss', 'ftm', 'ft_miss'];
 
             const createEmptyPlayerTotals = () => ({
                 pts: 0,
@@ -9772,8 +9810,10 @@
                 pf: 0,
                 fg2m: 0,
                 fg3m: 0,
+                fg4m: 0,
                 fg2m_miss: 0,
                 fg3m_miss: 0,
+                fg4m_miss: 0,
                 ftm: 0,
                 ft_miss: 0
             });
@@ -9857,8 +9897,8 @@
                     if (t.id !== editingGame.teamAId && t.id !== editingGame.teamBId) return t;
 
                     const updatedPlayers = t.players.map(p => {
-                        const oldPStats = editingGame.playerStats[p.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
-                        const newPStats = editStatsTemp[p.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                        const oldPStats = editingGame.playerStats[p.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
+                        const newPStats = editStatsTemp[p.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
 
                         const delta = (field) => parseInt(newPStats[field] || 0, 10) - parseInt(oldPStats[field] || 0, 10);
 
@@ -9874,8 +9914,10 @@
                                 pf: Math.max(0, (p.totalStats.pf || 0) + delta('pf')),
                                 fg2m: Math.max(0, (p.totalStats.fg2m || 0) + delta('fg2m')),
                                 fg3m: Math.max(0, (p.totalStats.fg3m || 0) + delta('fg3m')),
+                                fg4m: Math.max(0, (p.totalStats.fg4m || 0) + delta('fg4m')),
                                 fg2m_miss: Math.max(0, (p.totalStats.fg2m_miss || 0) + delta('fg2m_miss')),
                                 fg3m_miss: Math.max(0, (p.totalStats.fg3m_miss || 0) + delta('fg3m_miss')),
+                                fg4m_miss: Math.max(0, (p.totalStats.fg4m_miss || 0) + delta('fg4m_miss')),
                                 ftm: Math.max(0, (p.totalStats.ftm || 0) + delta('ftm')),
                                 ft_miss: Math.max(0, (p.totalStats.ft_miss || 0) + delta('ft_miss'))
                             }
@@ -10110,8 +10152,10 @@
                                         pf: Math.max(0, (player.totalStats.pf || 0) - (pstats.pf || 0)),
                                         fg2m: Math.max(0, (player.totalStats.fg2m || 0) - (pstats.fg2m || 0)),
                                         fg3m: Math.max(0, (player.totalStats.fg3m || 0) - (pstats.fg3m || 0)),
+                                        fg4m: Math.max(0, (player.totalStats.fg4m || 0) - (pstats.fg4m || 0)),
                                         fg2m_miss: Math.max(0, (player.totalStats.fg2m_miss || 0) - (pstats.fg2m_miss || 0)),
                                         fg3m_miss: Math.max(0, (player.totalStats.fg3m_miss || 0) - (pstats.fg3m_miss || 0)),
+                                        fg4m_miss: Math.max(0, (player.totalStats.fg4m_miss || 0) - (pstats.fg4m_miss || 0)),
                                         ftm: Math.max(0, (player.totalStats.ftm || 0) - (pstats.ftm || 0)),
                                         ft_miss: Math.max(0, (player.totalStats.ft_miss || 0) - (pstats.ft_miss || 0))
                                     }
@@ -10224,7 +10268,7 @@
                     contact: '',
                     writeup: '',
                     gamesPlayed: 0,
-                    totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 }
+                    totalStats: { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 }
                 };
                 const updatedTeams = teams.map(t => t.id === selectedTeamIdForPlayer ? { ...t, players: [...t.players, newPlayer] } : t);
                 saveTeamState(updatedTeams);
@@ -10399,16 +10443,19 @@
 
             const computeShootingPercentages = (stats, options = {}) => {
                 const showNAWhenNoAttempts = Boolean(options?.showNAWhenNoAttempts);
-                const totalMade = (stats.fg2m || 0) + (stats.fg3m || 0);
-                const totalAttempts = totalMade + (stats.fg2m_miss || 0) + (stats.fg3m_miss || 0);
+                const totalMade = (stats.fg2m || 0) + (stats.fg3m || 0) + (stats.fg4m || 0);
+                const totalAttempts = totalMade + (stats.fg2m_miss || 0) + (stats.fg3m_miss || 0) + (stats.fg4m_miss || 0);
                 const total3PtAttempts = (stats.fg3m || 0) + (stats.fg3m_miss || 0);
+                const total4PtAttempts = (stats.fg4m || 0) + (stats.fg4m_miss || 0);
                 const ftAttempts = (stats.ftm || 0) + (stats.ft_miss || 0);
                 return {
                     fgPct: totalAttempts === 0 ? (showNAWhenNoAttempts ? '—' : "0%") : `${Math.round((totalMade / totalAttempts) * 100)}%`,
                     fg3Pct: total3PtAttempts === 0 ? (showNAWhenNoAttempts ? '—' : "0%") : `${Math.round(((stats.fg3m || 0) / total3PtAttempts) * 100)}%`,
+                    fg4Pct: total4PtAttempts === 0 ? (showNAWhenNoAttempts ? '—' : "0%") : `${Math.round(((stats.fg4m || 0) / total4PtAttempts) * 100)}%`,
                     ftPct: ftAttempts === 0 ? (showNAWhenNoAttempts ? '—' : "0%") : `${Math.round(((stats.ftm || 0) / ftAttempts) * 100)}%`,
                     fgMadeAtt: formatMadeAttempts(totalMade, totalAttempts),
                     fg3MadeAtt: formatMadeAttempts(stats.fg3m, total3PtAttempts),
+                    fg4MadeAtt: formatMadeAttempts(stats.fg4m, total4PtAttempts),
                     ftm: stats.ftm || 0,
                     fta: ftAttempts
                 };
@@ -10424,8 +10471,10 @@
                 pf: 0,
                 fg2m: 0,
                 fg3m: 0,
+                fg4m: 0,
                 fg2m_miss: 0,
                 fg3m_miss: 0,
+                fg4m_miss: 0,
                 ftm: 0,
                 ft_miss: 0
             });
@@ -10453,8 +10502,10 @@
                     totalStats.pf += Number(statLine.pf || 0);
                     totalStats.fg2m += Number(statLine.fg2m || 0);
                     totalStats.fg3m += Number(statLine.fg3m || 0);
+                    totalStats.fg4m += Number(statLine.fg4m || 0);
                     totalStats.fg2m_miss += Number(statLine.fg2m_miss || 0);
                     totalStats.fg3m_miss += Number(statLine.fg3m_miss || 0);
+                    totalStats.fg4m_miss += Number(statLine.fg4m_miss || 0);
                     totalStats.ftm += Number(statLine.ftm || 0);
                     totalStats.ft_miss += Number(statLine.ft_miss || 0);
                 });
@@ -10476,9 +10527,11 @@
                     to: ((stats.to || 0) / gp).toFixed(1),
                     pf: ((stats.pf || 0) / gp).toFixed(1),
                     fg3m: ((stats.fg3m || 0) / gp).toFixed(1),
+                    fg4m: ((stats.fg4m || 0) / gp).toFixed(1),
                     ftm: ((stats.ftm || 0) / gp).toFixed(1),
                     fgPct: pctSummary.fgPct,
                     fg3Pct: pctSummary.fg3Pct,
+                    fg4Pct: pctSummary.fg4Pct,
                     ftPct: pctSummary.ftPct,
                     spg: ((stats.stl || 0) / gp).toFixed(1),
                     bpg: ((stats.blk || 0) / gp).toFixed(1)
@@ -10595,8 +10648,8 @@
                 : null;
 
             const getPlayerPerStyleScore = (stats = {}) => {
-                const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
-                const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+                const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0) + Number(stats.fg4m || 0);
+                const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0) + Number(stats.fg4m_miss || 0);
                 const ftMade = Number(stats.ftm || 0);
                 const ftAtt = ftMade + Number(stats.ft_miss || 0);
 
@@ -10623,8 +10676,10 @@
                     pts: Number(stats.pts || 0) / gp,
                     fg2m: Number(stats.fg2m || 0) / gp,
                     fg3m: Number(stats.fg3m || 0) / gp,
+                    fg4m: Number(stats.fg4m || 0) / gp,
                     fg2m_miss: Number(stats.fg2m_miss || 0) / gp,
                     fg3m_miss: Number(stats.fg3m_miss || 0) / gp,
+                    fg4m_miss: Number(stats.fg4m_miss || 0) / gp,
                     ftm: Number(stats.ftm || 0) / gp,
                     ft_miss: Number(stats.ft_miss || 0) / gp,
                     reb: Number(stats.reb || 0) / gp,
@@ -10752,7 +10807,7 @@
             const getLeaderMetric = (player, metricKey, mode) => {
                 const stats = player?.totalStats || {};
                 const avg = getAverages(player);
-                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct' || metricKey === 'ftPct';
+                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct' || metricKey === 'fg4Pct' || metricKey === 'ftPct';
                 if (mode === 'perGame') {
                     return parseFloat(avg[metricKey] || 0);
                 }
@@ -10765,7 +10820,7 @@
             const formatLeaderMetric = (player, metricKey, mode) => {
                 const avg = getAverages(player);
                 const stats = player?.totalStats || {};
-                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct' || metricKey === 'ftPct';
+                const isPctMetric = metricKey === 'fgPct' || metricKey === 'fg3Pct' || metricKey === 'fg4Pct' || metricKey === 'ftPct';
                 if (mode === 'perGame') {
                     return isPctMetric ? (avg[metricKey] || '0%') : (avg[metricKey] || '0.0');
                 }
@@ -10781,7 +10836,7 @@
 
                 const colorMap = {
                     pts: '#fb923c', reb: '#34d399', ast: '#60a5fa', stl: '#2dd4bf',
-                    blk: '#a78bfa', to: '#f87171', fgPct: '#22d3ee', fg3Pct: '#38bdf8', pf: '#fb7185'
+                    blk: '#a78bfa', to: '#f87171', fgPct: '#22d3ee', fg3Pct: '#38bdf8', fg4Pct: '#e879f9', fg4m: '#e879f9', pf: '#fb7185'
                 };
                 const accent = colorMap[entry.id] || '#f97316';
 
@@ -11101,8 +11156,10 @@
                     pf: 0,
                     fg2m: 0,
                     fg3m: 0,
+                    fg4m: 0,
                     fg2m_miss: 0,
                     fg3m_miss: 0,
+                    fg4m_miss: 0,
                     ftm: 0,
                     ft_miss: 0
                 };
@@ -11119,21 +11176,25 @@
                     totals.pf += pstats.pf || 0;
                     totals.fg2m += pstats.fg2m || 0;
                     totals.fg3m += pstats.fg3m || 0;
+                    totals.fg4m += pstats.fg4m || 0;
                     totals.fg2m_miss += pstats.fg2m_miss || 0;
                     totals.fg3m_miss += pstats.fg3m_miss || 0;
+                    totals.fg4m_miss += pstats.fg4m_miss || 0;
                     totals.ftm += pstats.ftm || 0;
                     totals.ft_miss += pstats.ft_miss || 0;
                 });
 
-                const fgMade = totals.fg2m + totals.fg3m;
-                const fgAtt = fgMade + totals.fg2m_miss + totals.fg3m_miss;
+                const fgMade = totals.fg2m + totals.fg3m + totals.fg4m;
+                const fgAtt = fgMade + totals.fg2m_miss + totals.fg3m_miss + totals.fg4m_miss;
                 const fg3Att = totals.fg3m + totals.fg3m_miss;
+                const fg4Att = totals.fg4m + totals.fg4m_miss;
                 const ftAtt = totals.ftm + totals.ft_miss;
 
                 return {
                     ...totals,
                     fgPct: fgAtt === 0 ? '0%' : `${Math.round((fgMade / fgAtt) * 100)}%`,
                     fg3Pct: fg3Att === 0 ? '0%' : `${Math.round((totals.fg3m / fg3Att) * 100)}%`,
+                    fg4Pct: fg4Att === 0 ? '0%' : `${Math.round((totals.fg4m / fg4Att) * 100)}%`,
                     ftPct: ftAtt === 0 ? '0%' : `${Math.round((totals.ftm / ftAtt) * 100)}%`
                 };
             };
@@ -11142,8 +11203,8 @@
                 const manualPotgPlayerId = String(game?.manualPotgPlayerId || '').trim();
                 const POINTS_LEADER_BONUS = 1.25;
                 const computePerStyleScore = (stats = {}) => {
-                    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
-                    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+                    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0) + Number(stats.fg4m || 0);
+                    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0) + Number(stats.fg4m_miss || 0);
                     const ftMade = Number(stats.ftm || 0);
                     const ftAtt = ftMade + Number(stats.ft_miss || 0);
                     return (
@@ -12117,8 +12178,8 @@
                 if (!team || !game) return [];
 
                 const computePerStyleScore = (stats = {}) => {
-                    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0);
-                    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0);
+                    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0) + Number(stats.fg4m || 0);
+                    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0) + Number(stats.fg4m_miss || 0);
                     const ftMade = Number(stats.ftm || 0);
                     const ftAtt = ftMade + Number(stats.ft_miss || 0);
                     return (
@@ -12217,8 +12278,10 @@
                     pf: 0,
                     fg2m: 0,
                     fg3m: 0,
+                    fg4m: 0,
                     fg2m_miss: 0,
                     fg3m_miss: 0,
+                    fg4m_miss: 0,
                     ftm: 0,
                     ft_miss: 0
                 };
@@ -12234,8 +12297,10 @@
                     totals.pf += stats.pf || 0;
                     totals.fg2m += stats.fg2m || 0;
                     totals.fg3m += stats.fg3m || 0;
+                    totals.fg4m += stats.fg4m || 0;
                     totals.fg2m_miss += stats.fg2m_miss || 0;
                     totals.fg3m_miss += stats.fg3m_miss || 0;
+                    totals.fg4m_miss += stats.fg4m_miss || 0;
                     totals.ftm += stats.ftm || 0;
                     totals.ft_miss += stats.ft_miss || 0;
                 });
@@ -12269,7 +12334,7 @@
                 const player = teams && teams.length > 0 ? teams.flatMap(t => t?.players || []).find(p => p?.id === playerId) : null;
                 if (!player) return null;
                 const onCourtDisplayName = renderLiveDisplayName(player.name) || player.name;
-                const stats = liveStats[playerId] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                const stats = liveStats[playerId] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
                 const hasActionArmed = activeAction !== null && !isLiveGameplayModalActive;
 
                 const performancePool = [
@@ -12321,7 +12386,7 @@
                         } ${isDisqualified ? 'bg-red-950/25 border-red-700/55 opacity-80 pointer-events-none' : ''} ${hasActionArmed && !teamAccessAllowed ? 'opacity-30 saturate-0' : (isLoggedIn && !teamAccessAllowed ? 'opacity-55 saturate-50' : '')} ${isDisqualified ? 'cursor-not-allowed' : (canSubstitute ? 'cursor-pointer' : (canSelect ? 'cursor-pointer' : 'cursor-default'))} ${!isLiveGameplayModalActive && flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_24px_rgba(16,185,129,0.32)]' : ''} ${!isLiveGameplayModalActive && subFlashPlayers[player.id] ? 'sub-glow-flash ring-4 ring-amber-300/80 border-amber-300/70 shadow-[0_0_36px_rgba(251,191,36,0.45)]' : ''}`}
                     >
                         <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <span className="w-12 md:w-14 min-h-[52px] text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0 inline-flex items-center justify-center">{player.number}</span>
+                            <span className="w-12 md:w-14 min-h-[52px] text-center font-mono text-xl md:text-2xl font-black text-slate-100 bg-slate-900 px-2 py-1 rounded border border-slate-700 leading-none shrink-0 inline-flex items-center justify-center">{numberOverrides[player.id] ?? player.number}</span>
                             <div className="min-w-0 flex-1">
                                 <span className="font-extrabold text-[11px] text-white block truncate leading-tight md:hidden">{onCourtDisplayName}</span>
                                 <span className="font-extrabold text-xs text-white hidden md:block whitespace-normal leading-tight">{onCourtDisplayName}</span>
@@ -12985,10 +13050,11 @@
                                                         <div className="flex items-center justify-between gap-2">
                                                             <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">PRIMARY SCORING ACTIONS</span>
                                                         </div>
-                                                        <div className="grid grid-cols-3 gap-1.5">
+                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
                                                             {[
                                                                 ['pts_2', 'fg2m_miss'],
                                                                 ['pts_3', 'fg3m_miss'],
+                                                                ['pts_4', 'fg4m_miss'],
                                                                 ['pts_1', 'ft_miss']
                                                             ].map(([madeId, missId]) => {
                                                                 const madeAction = liveActionById.get(madeId);
@@ -12997,6 +13063,10 @@
                                                                 const missLabel = String(getActionDisplayLabel(missAction) || '').toUpperCase();
                                                                 const madeIcon = madeId === 'pts_1' ? (
                                                                     <Icons.Zap />
+                                                                ) : madeId === 'pts_4' ? (
+                                                                    <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                        <path d="M12 2l2.6 6.2 6.4.6-4.9 4.2 1.5 6.3L12 16.3 6.4 19.3l1.5-6.3-4.9-4.2 6.4-.6z" />
+                                                                    </svg>
                                                                 ) : madeId === 'pts_3' ? (
                                                                     <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                                                         <circle cx="12" cy="12" r="8" />
@@ -13589,6 +13659,7 @@
                                                                         <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                         <th className="py-2 px-2 text-center">FG</th>
                                                                         <th className="py-2 px-2 text-center">3PT</th>
+                                                                        <th className="py-2 px-2 text-center">4PT</th>
                                                                         <th className="py-2 px-2 text-center">FT</th>
                                                                         <th className="py-2 px-2 text-center">REB</th>
                                                                         <th className="py-2 px-2 text-center">AST</th>
@@ -13601,10 +13672,11 @@
                                                                 </thead>
                                                                 <tbody className="divide-y divide-slate-800/50 font-mono text-slate-300">
                                                                     {(teams.find(t => t.id === teamAId)?.players || []).map(player => {
-                                                                        const pstats = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
-                                                                        const totalMade = (pstats.fg2m || 0) + (pstats.fg3m || 0);
-                                                                        const totalAtt = totalMade + (pstats.fg2m_miss || 0) + (pstats.fg3m_miss || 0);
+                                                                        const pstats = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
+                                                                        const totalMade = (pstats.fg2m || 0) + (pstats.fg3m || 0) + (pstats.fg4m || 0);
+                                                                        const totalAtt = totalMade + (pstats.fg2m_miss || 0) + (pstats.fg3m_miss || 0) + (pstats.fg4m_miss || 0);
                                                                         const fg3Att = (pstats.fg3m || 0) + (pstats.fg3m_miss || 0);
+                                                                        const fg4Att = (pstats.fg4m || 0) + (pstats.fg4m_miss || 0);
                                                                         const ftAtt = (pstats.ftm || 0) + (pstats.ft_miss || 0);
                                                                         const onCourt = teamALineup.includes(player.id);
                                                                         const isMarkedDnp = dnpPlayers.includes(player.id);
@@ -13613,7 +13685,20 @@
                                                                         return (
                                                                             <tr key={player.id} data-player-id={player.id} className={`hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? 'bg-emerald-500/5 font-semibold text-white' : 'opacity-70'} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10' : ''}`}>
                                                                                 <td className="py-1.5 px-3 truncate font-sans">
-                                                                                    <span className="font-mono text-slate-500 text-[10px] mr-1 inline-block w-6 text-right">#{player.number}</span>
+                                                                                    <span className="inline-flex items-center mr-1" title="Jersey number for this session only — doesn't change the roster">
+                                                                                        <span className="font-mono text-slate-500 text-[10px]">#</span>
+                                                                                        <input
+                                                                                            type="text"
+                                                                                            inputMode="numeric"
+                                                                                            value={numberOverrides[player.id] ?? player.number}
+                                                                                            onClick={(e) => e.stopPropagation()}
+                                                                                            onChange={(e) => {
+                                                                                                const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 3);
+                                                                                                setNumberOverrides(prev => ({ ...prev, [player.id]: val }));
+                                                                                            }}
+                                                                                            className="w-6 bg-transparent text-slate-500 hover:text-slate-300 focus:text-white text-[10px] font-mono text-right border-b border-transparent hover:border-slate-700 focus:border-cyan-500 outline-none"
+                                                                                        />
+                                                                                    </span>
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => {
@@ -13630,6 +13715,7 @@
                                                                                 <td className="py-1.5 px-2 text-center text-orange-400 font-bold">{pstats.pts}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{totalMade}/{totalAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.fg3m || 0}/{fg3Att}</td>
+                                                                                <td className="py-1.5 px-2 text-center">{pstats.fg4m || 0}/{fg4Att}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.ftm || 0}/{ftAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-emerald-400">{pstats.reb}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-blue-400">{pstats.ast}</td>
@@ -13678,6 +13764,7 @@
                                                                         <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                         <th className="py-2 px-2 text-center">FG</th>
                                                                         <th className="py-2 px-2 text-center">3PT</th>
+                                                                        <th className="py-2 px-2 text-center">4PT</th>
                                                                         <th className="py-2 px-2 text-center">FT</th>
                                                                         <th className="py-2 px-2 text-center">REB</th>
                                                                         <th className="py-2 px-2 text-center">AST</th>
@@ -13690,10 +13777,11 @@
                                                                 </thead>
                                                                 <tbody className="divide-y divide-slate-800/50 font-mono text-slate-300">
                                                                     {(teams.find(t => t.id === teamBId)?.players || []).map(player => {
-                                                                        const pstats = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
-                                                                        const totalMade = (pstats.fg2m || 0) + (pstats.fg3m || 0);
-                                                                        const totalAtt = totalMade + (pstats.fg2m_miss || 0) + (pstats.fg3m_miss || 0);
+                                                                        const pstats = liveStats[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
+                                                                        const totalMade = (pstats.fg2m || 0) + (pstats.fg3m || 0) + (pstats.fg4m || 0);
+                                                                        const totalAtt = totalMade + (pstats.fg2m_miss || 0) + (pstats.fg3m_miss || 0) + (pstats.fg4m_miss || 0);
                                                                         const fg3Att = (pstats.fg3m || 0) + (pstats.fg3m_miss || 0);
+                                                                        const fg4Att = (pstats.fg4m || 0) + (pstats.fg4m_miss || 0);
                                                                         const ftAtt = (pstats.ftm || 0) + (pstats.ft_miss || 0);
                                                                         const onCourt = teamBLineup.includes(player.id);
                                                                         const isMarkedDnp = dnpPlayers.includes(player.id);
@@ -13702,7 +13790,20 @@
                                                                         return (
                                                                             <tr key={player.id} data-player-id={player.id} className={`hover:bg-slate-800/20 transition-all duration-300 ${onCourt ? 'bg-emerald-500/5 font-semibold text-white' : 'opacity-70'} ${flashPlayers[player.id] ? 'animate-pulse ring-2 ring-emerald-400/70 shadow-[0_0_26px_rgba(16,185,129,0.3)] bg-emerald-500/10' : ''} ${subFlashPlayers[player.id] ? 'sub-glow-flash ring-2 ring-amber-300/70 shadow-[0_0_30px_rgba(251,191,36,0.4)] bg-amber-500/10' : ''}`}>
                                                                                 <td className="py-1.5 px-3 truncate font-sans">
-                                                                                    <span className="font-mono text-slate-500 text-[10px] mr-1 inline-block w-6 text-right">#{player.number}</span>
+                                                                                    <span className="inline-flex items-center mr-1" title="Jersey number for this session only — doesn't change the roster">
+                                                                                        <span className="font-mono text-slate-500 text-[10px]">#</span>
+                                                                                        <input
+                                                                                            type="text"
+                                                                                            inputMode="numeric"
+                                                                                            value={numberOverrides[player.id] ?? player.number}
+                                                                                            onClick={(e) => e.stopPropagation()}
+                                                                                            onChange={(e) => {
+                                                                                                const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 3);
+                                                                                                setNumberOverrides(prev => ({ ...prev, [player.id]: val }));
+                                                                                            }}
+                                                                                            className="w-6 bg-transparent text-slate-500 hover:text-slate-300 focus:text-white text-[10px] font-mono text-right border-b border-transparent hover:border-slate-700 focus:border-cyan-500 outline-none"
+                                                                                        />
+                                                                                    </span>
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={() => {
@@ -13719,6 +13820,7 @@
                                                                                 <td className="py-1.5 px-2 text-center text-orange-400 font-bold">{pstats.pts}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{totalMade}/{totalAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.fg3m || 0}/{fg3Att}</td>
+                                                                                <td className="py-1.5 px-2 text-center">{pstats.fg4m || 0}/{fg4Att}</td>
                                                                                 <td className="py-1.5 px-2 text-center">{pstats.ftm || 0}/{ftAtt}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-emerald-400">{pstats.reb}</td>
                                                                                 <td className="py-1.5 px-2 text-center text-blue-400">{pstats.ast}</td>
@@ -13794,10 +13896,10 @@
                                                         };
                                                         const liveTeamATotals = summarizeGameTeamStats(liveHomeTeam, livePseudoGame);
                                                         const liveTeamBTotals = summarizeGameTeamStats(liveAwayTeam, livePseudoGame);
-                                                        const liveTeamAFgMade = (Number(liveTeamATotals.fg2m) || 0) + (Number(liveTeamATotals.fg3m) || 0);
-                                                        const liveTeamBFgMade = (Number(liveTeamBTotals.fg2m) || 0) + (Number(liveTeamBTotals.fg3m) || 0);
-                                                        const liveTeamAFgMiss = (Number(liveTeamATotals.fg2m_miss) || 0) + (Number(liveTeamATotals.fg3m_miss) || 0);
-                                                        const liveTeamBFgMiss = (Number(liveTeamBTotals.fg2m_miss) || 0) + (Number(liveTeamBTotals.fg3m_miss) || 0);
+                                                        const liveTeamAFgMade = (Number(liveTeamATotals.fg2m) || 0) + (Number(liveTeamATotals.fg3m) || 0) + (Number(liveTeamATotals.fg4m) || 0);
+                                                        const liveTeamBFgMade = (Number(liveTeamBTotals.fg2m) || 0) + (Number(liveTeamBTotals.fg3m) || 0) + (Number(liveTeamBTotals.fg4m) || 0);
+                                                        const liveTeamAFgMiss = (Number(liveTeamATotals.fg2m_miss) || 0) + (Number(liveTeamATotals.fg3m_miss) || 0) + (Number(liveTeamATotals.fg4m_miss) || 0);
+                                                        const liveTeamBFgMiss = (Number(liveTeamBTotals.fg2m_miss) || 0) + (Number(liveTeamBTotals.fg3m_miss) || 0) + (Number(liveTeamBTotals.fg4m_miss) || 0);
                                                         const liveTeamAFgAtt = liveTeamAFgMade + liveTeamAFgMiss;
                                                         const liveTeamBFgAtt = liveTeamBFgMade + liveTeamBFgMiss;
                                                         const liveTeamA3PMade = Number(liveTeamATotals.fg3m) || 0;
@@ -13806,6 +13908,12 @@
                                                         const liveTeamB3PMiss = Number(liveTeamBTotals.fg3m_miss) || 0;
                                                         const liveTeamA3PAtt = liveTeamA3PMade + liveTeamA3PMiss;
                                                         const liveTeamB3PAtt = liveTeamB3PMade + liveTeamB3PMiss;
+                                                        const liveTeamA4PMade = Number(liveTeamATotals.fg4m) || 0;
+                                                        const liveTeamB4PMade = Number(liveTeamBTotals.fg4m) || 0;
+                                                        const liveTeamA4PMiss = Number(liveTeamATotals.fg4m_miss) || 0;
+                                                        const liveTeamB4PMiss = Number(liveTeamBTotals.fg4m_miss) || 0;
+                                                        const liveTeamA4PAtt = liveTeamA4PMade + liveTeamA4PMiss;
+                                                        const liveTeamB4PAtt = liveTeamB4PMade + liveTeamB4PMiss;
                                                         const liveTeamAFtMade = Number(liveTeamATotals.ftm) || 0;
                                                         const liveTeamBFtMade = Number(liveTeamBTotals.ftm) || 0;
                                                         const liveTeamAFtMiss = Number(liveTeamATotals.ft_miss) || 0;
@@ -13818,6 +13926,8 @@
                                                             { label: 'FG%', teamAValue: formatPercentOrNA(liveTeamAFgMade, liveTeamAFgAtt), teamBValue: formatPercentOrNA(liveTeamBFgMade, liveTeamBFgAtt), teamACompare: toPercent(liveTeamAFgMade, liveTeamAFgAtt), teamBCompare: toPercent(liveTeamBFgMade, liveTeamBFgAtt) },
                                                             { label: '3PT', teamAValue: formatMadeAttempts(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatMadeAttempts(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: liveTeamA3PMade, teamBCompare: liveTeamB3PMade },
                                                             { label: '3P%', teamAValue: formatPercentOrNA(liveTeamA3PMade, liveTeamA3PAtt), teamBValue: formatPercentOrNA(liveTeamB3PMade, liveTeamB3PAtt), teamACompare: toPercent(liveTeamA3PMade, liveTeamA3PAtt), teamBCompare: toPercent(liveTeamB3PMade, liveTeamB3PAtt) },
+                                                            { label: '4PT', teamAValue: formatMadeAttempts(liveTeamA4PMade, liveTeamA4PAtt), teamBValue: formatMadeAttempts(liveTeamB4PMade, liveTeamB4PAtt), teamACompare: liveTeamA4PMade, teamBCompare: liveTeamB4PMade },
+                                                            { label: '4P%', teamAValue: formatPercentOrNA(liveTeamA4PMade, liveTeamA4PAtt), teamBValue: formatPercentOrNA(liveTeamB4PMade, liveTeamB4PAtt), teamACompare: toPercent(liveTeamA4PMade, liveTeamA4PAtt), teamBCompare: toPercent(liveTeamB4PMade, liveTeamB4PAtt) },
                                                             { label: 'FT', teamAValue: formatMadeAttempts(liveTeamAFtMade, liveTeamAFtAtt), teamBValue: formatMadeAttempts(liveTeamBFtMade, liveTeamBFtAtt), teamACompare: liveTeamAFtMade, teamBCompare: liveTeamBFtMade },
                                                             { label: 'REB', teamAValue: Math.round(Number(liveTeamATotals.reb) || 0), teamBValue: Math.round(Number(liveTeamBTotals.reb) || 0), teamACompare: Number(liveTeamATotals.reb) || 0, teamBCompare: Number(liveTeamBTotals.reb) || 0 },
                                                             { label: 'AST', teamAValue: Math.round(Number(liveTeamATotals.ast) || 0), teamBValue: Math.round(Number(liveTeamBTotals.ast) || 0), teamACompare: Number(liveTeamATotals.ast) || 0, teamBCompare: Number(liveTeamBTotals.ast) || 0 },
@@ -13882,9 +13992,9 @@
                                                             teamBScore,
                                                             playerStats: liveStats
                                                         };
-                                                        const livePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeam, liveAwayTeam);
-                                                        const liveTopTeamAPerformers = getTopTeamPerformers(liveHomeTeam, livePseudoGame, 3);
-                                                        const liveTopTeamBPerformers = getTopTeamPerformers(liveAwayTeam, livePseudoGame, 3);
+                                                        const livePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeamForDisplay, liveAwayTeamForDisplay);
+                                                        const liveTopTeamAPerformers = getTopTeamPerformers(liveHomeTeamForDisplay, livePseudoGame, 3);
+                                                        const liveTopTeamBPerformers = getTopTeamPerformers(liveAwayTeamForDisplay, livePseudoGame, 3);
 
                                                         if (!livePlayerOfTheGame) {
                                                             return (
@@ -13959,7 +14069,7 @@
                                                                         const baseLiveTopPerformers = [...liveTopTeamAPerformers, ...liveTopTeamBPerformers]
                                                                             .sort((a, b) => Number(b.stats?.pts || 0) - Number(a.stats?.pts || 0) || Number(b.perScore || 0) - Number(a.perScore || 0))
                                                                             .slice(0, 6);
-                                                                        const selectedLivePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeam, liveAwayTeam);
+                                                                        const selectedLivePlayerOfTheGame = getPlayerOfTheGame(livePseudoGame, liveHomeTeamForDisplay, liveAwayTeamForDisplay);
                                                                         const specialLivePotgEntries = [selectedLivePlayerOfTheGame]
                                                                             .filter(Boolean)
                                                                             .filter((entry, index, allEntries) => allEntries.findIndex((candidate) => candidate?.id === entry?.id) === index)
@@ -13988,6 +14098,7 @@
                                                                                                 <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
                                                                                                 <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                                                 <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
+                                                                                                <th className="py-2.5 px-2 text-center text-fuchsia-400 font-bold">4PT M/A</th>
                                                                                                 <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                                                 <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
                                                                                                 <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
@@ -14020,6 +14131,7 @@
                                                                                                         <td className="py-2 px-2 text-center text-orange-400 font-black">{entry.stats?.pts || 0}</td>
                                                                                                         <td className="py-2 px-2 text-center text-emerald-400 font-bold">{shooting.fgMadeAtt}</td>
                                                                                                         <td className="py-2 px-2 text-center text-cyan-400 font-bold">{shooting.fg3MadeAtt}</td>
+                                                                                                        <td className="py-2 px-2 text-center text-fuchsia-400 font-bold">{shooting.fg4MadeAtt}</td>
                                                                                                         <td className="py-2 px-2 text-center text-pink-400 font-bold">{shooting.ftPct}</td>
                                                                                                         <td className="py-2 px-2 text-center text-emerald-400">{entry.stats?.reb || 0}</td>
                                                                                                         <td className="py-2 px-2 text-center text-blue-400">{entry.stats?.ast || 0}</td>
@@ -14043,8 +14155,8 @@
                                                     })()
                                                     ) : liveBoxscoreTab === 'leaders' ? (
                                                     (() => {
-                                                        const teamALeaders = getGameTeamLeaders(liveHomeTeam || { players: [] }, { playerStats: liveStats });
-                                                        const teamBLeaders = getGameTeamLeaders(liveAwayTeam || { players: [] }, { playerStats: liveStats });
+                                                        const teamALeaders = getGameTeamLeaders(liveHomeTeamForDisplay || { players: [] }, { playerStats: liveStats });
+                                                        const teamBLeaders = getGameTeamLeaders(liveAwayTeamForDisplay || { players: [] }, { playerStats: liveStats });
                                                         return (
                                                             <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-3">
                                                                 <div className="flex items-center justify-between gap-2">
@@ -14161,7 +14273,7 @@
                                                                                     )}
                                                                                 </span>
                                                                                 <div className="min-w-0">
-                                                                                    <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
+                                                                                    <div className="text-[11px] font-bold text-white truncate">#{numberOverrides[player.id] ?? player.number} {player.name}</div>
                                                                                     <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : ((player.isHighRiskFoulPace || player.isThreeFoulConcern) ? 'text-amber-300' : 'text-slate-400')}`}>
                                                                                         {player.fouls >= 5
                                                                                             ? 'Disqualified'
@@ -14209,7 +14321,7 @@
                                                                                     )}
                                                                                 </span>
                                                                                 <div className="min-w-0">
-                                                                                    <div className="text-[11px] font-bold text-white truncate">#{player.number} {player.name}</div>
+                                                                                    <div className="text-[11px] font-bold text-white truncate">#{numberOverrides[player.id] ?? player.number} {player.name}</div>
                                                                                     <div className={`text-[10px] font-bold ${player.fouls >= 5 ? 'text-red-300' : ((player.isHighRiskFoulPace || player.isThreeFoulConcern) ? 'text-amber-300' : 'text-slate-400')}`}>
                                                                                         {player.fouls >= 5
                                                                                             ? 'Disqualified'
@@ -14348,12 +14460,13 @@
                                             <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
                                                 <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Season Averages</div>
                                                 <div className="space-y-2 font-mono">
-                                                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
+                                                    <div className="grid grid-cols-3 md:grid-cols-7 gap-2 text-center">
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">STL</div><div className="text-sm font-black text-teal-300">{selectedRosterAthleteAverages?.stl || '0.0'}</div></div>
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">BLK</div><div className="text-sm font-black text-violet-300">{selectedRosterAthleteAverages?.blk || '0.0'}</div></div>
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">TO</div><div className="text-sm font-black text-amber-400">{selectedRosterAthleteAverages?.to || '0.0'}</div></div>
-                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">FG M/A</div><div className="text-sm font-black text-emerald-400">{`${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg2m_miss || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m_miss || 0)}`}</div></div>
+                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">FG M/A</div><div className="text-sm font-black text-emerald-400">{`${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg4m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg2m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg4m || 0) + Number(selectedRosterAthlete?.totalStats?.fg2m_miss || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m_miss || 0) + Number(selectedRosterAthlete?.totalStats?.fg4m_miss || 0)}`}</div></div>
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">3PT M/A</div><div className="text-sm font-black text-cyan-400">{`${Number(selectedRosterAthlete?.totalStats?.fg3m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg3m || 0) + Number(selectedRosterAthlete?.totalStats?.fg3m_miss || 0)}`}</div></div>
+                                                        <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">4PT M/A</div><div className="text-sm font-black text-fuchsia-400">{`${Number(selectedRosterAthlete?.totalStats?.fg4m || 0)}/${Number(selectedRosterAthlete?.totalStats?.fg4m || 0) + Number(selectedRosterAthlete?.totalStats?.fg4m_miss || 0)}`}</div></div>
                                                         <div className="bg-slate-900/80 border border-slate-800 rounded-md py-2"><div className="text-[9px] text-slate-500">FT%</div><div className="text-sm font-black text-pink-400">{selectedRosterAthleteAverages?.ftPct || '0%'}</div></div>
                                                     </div>
                                                 </div>
@@ -14376,6 +14489,7 @@
                                                                 <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                 <th className="py-2 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                 <th className="py-2 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
+                                                                <th className="py-2 px-2 text-center text-fuchsia-400 font-bold">4PT M/A</th>
                                                                 <th className="py-2 px-2 text-center">REB</th>
                                                                 <th className="py-2 px-2 text-center">AST</th>
                                                                 <th className="py-2 px-2 text-center">STL</th>
@@ -14409,8 +14523,9 @@
                                                                     <td className="py-2 px-2 font-bold text-slate-200 whitespace-nowrap">vs {game.opponentName}</td>
                                                                     <td className="py-2 px-2 text-center text-slate-400 whitespace-nowrap">{game.playerTeamName || selectedRosterTeam.name} {game.teamScore} - {game.opponentScore}</td>
                                                                     <td className="py-2 px-2 text-center font-black text-orange-400">{game.didPlay ? (game.stats?.pts || 0) : '-'}</td>
-                                                                    <td className="py-2 px-2 text-center text-emerald-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0) + Number(game.stats?.fg2m_miss || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
+                                                                    <td className="py-2 px-2 text-center text-emerald-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0) + Number(game.stats?.fg4m || 0)}/${Number(game.stats?.fg2m || 0) + Number(game.stats?.fg3m || 0) + Number(game.stats?.fg4m || 0) + Number(game.stats?.fg2m_miss || 0) + Number(game.stats?.fg3m_miss || 0) + Number(game.stats?.fg4m_miss || 0)}` : '-'}</td>
                                                                     <td className="py-2 px-2 text-center text-cyan-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg3m || 0)}/${Number(game.stats?.fg3m || 0) + Number(game.stats?.fg3m_miss || 0)}` : '-'}</td>
+                                                                    <td className="py-2 px-2 text-center text-fuchsia-400 font-bold">{game.didPlay ? `${Number(game.stats?.fg4m || 0)}/${Number(game.stats?.fg4m || 0) + Number(game.stats?.fg4m_miss || 0)}` : '-'}</td>
                                                                     <td className="py-2 px-2 text-center">{game.didPlay ? (game.stats?.reb || 0) : '-'}</td>
                                                                     <td className="py-2 px-2 text-center">{game.didPlay ? (game.stats?.ast || 0) : '-'}</td>
                                                                     <td className="py-2 px-2 text-center">{game.didPlay ? (game.stats?.stl || 0) : '-'}</td>
@@ -14504,6 +14619,7 @@
                                                                         <th className="py-2 px-2 text-center text-orange-400">PPG</th>
                                                                         <th className="py-2 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                         <th className="py-2 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
+                                                                        <th className="py-2 px-2 text-center text-fuchsia-400 font-bold">4PT M/A</th>
                                                                         <th className="py-2 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                         <th className="py-2 px-2 text-center text-emerald-400">RPG</th>
                                                                         <th className="py-2 px-2 text-center text-blue-400">APG</th>
@@ -14553,8 +14669,9 @@
                                                                                 </td>
                                                                                 <td className="py-2.5 px-2 text-center">{gp}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-orange-400">{avgs.pts}</td>
-                                                                                <td className="py-2.5 px-2 text-center font-bold text-emerald-400">{`${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0)}/${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg2m_miss || 0) + Number(p.totalStats?.fg3m_miss || 0)}`}</td>
+                                                                                <td className="py-2.5 px-2 text-center font-bold text-emerald-400">{`${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg4m || 0)}/${Number(p.totalStats?.fg2m || 0) + Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg4m || 0) + Number(p.totalStats?.fg2m_miss || 0) + Number(p.totalStats?.fg3m_miss || 0) + Number(p.totalStats?.fg4m_miss || 0)}`}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-cyan-400">{`${Number(p.totalStats?.fg3m || 0)}/${Number(p.totalStats?.fg3m || 0) + Number(p.totalStats?.fg3m_miss || 0)}`}</td>
+                                                                                <td className="py-2.5 px-2 text-center font-bold text-fuchsia-400">{`${Number(p.totalStats?.fg4m || 0)}/${Number(p.totalStats?.fg4m || 0) + Number(p.totalStats?.fg4m_miss || 0)}`}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-pink-400">{avgs.ftPct}</td>
                                                                                 <td className="py-2.5 px-2 text-center text-emerald-300">{avgs.reb}</td>
                                                                                 <td className="py-2.5 px-2 text-center text-blue-300">{avgs.ast}</td>
@@ -14595,6 +14712,7 @@
                                                                         <td className="py-3 px-2 text-center font-mono text-orange-400">{teamStats.avgs.pts}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-emerald-400">{teamStats.shooters.fgMadeAtt}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-cyan-400">{teamStats.shooters.fg3MadeAtt}</td>
+                                                                        <td className="py-3 px-2 text-center font-mono text-fuchsia-400">{teamStats.shooters.fg4MadeAtt}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-pink-400">{teamStats.shooters.ftPct}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-emerald-300">{teamStats.avgs.reb}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-blue-300">{teamStats.avgs.ast}</td>
@@ -14617,6 +14735,7 @@
                                                                         <th className="py-2 px-2 text-center text-orange-400">PTS</th>
                                                                         <th className="py-2 px-2 text-center text-emerald-400 font-bold">FG (M/A)</th>
                                                                         <th className="py-2 px-2 text-center text-cyan-400 font-bold">3P (M/A)</th>
+                                                                        <th className="py-2 px-2 text-center text-fuchsia-400 font-bold">4P (M/A)</th>
                                                                         <th className="py-2 px-2 text-center text-pink-400 font-bold">FT (M/A)</th>
                                                                         <th className="py-2 px-2 text-center text-emerald-400">REB</th>
                                                                         <th className="py-2 px-2 text-center text-blue-400">AST</th>
@@ -14631,9 +14750,10 @@
                                                                     {team.players.filter(p => !p.released).map(p => {
                                                                         const gp = p.gamesPlayed || 0;
                                                                         const ts = p.totalStats || {};
-                                                                        const fgMade = (ts.fg2m || 0) + (ts.fg3m || 0);
-                                                                        const fgAtt = fgMade + (ts.fg2m_miss || 0) + (ts.fg3m_miss || 0);
+                                                                        const fgMade = (ts.fg2m || 0) + (ts.fg3m || 0) + (ts.fg4m || 0);
+                                                                        const fgAtt = fgMade + (ts.fg2m_miss || 0) + (ts.fg3m_miss || 0) + (ts.fg4m_miss || 0);
                                                                         const fg3Att = (ts.fg3m || 0) + (ts.fg3m_miss || 0);
+                                                                        const fg4Att = (ts.fg4m || 0) + (ts.fg4m_miss || 0);
                                                                         const ftAtt = (ts.ftm || 0) + (ts.ft_miss || 0);
                                                                         const isEditingPlayer = editingPlayer && editingPlayer.teamId === team.id && editingPlayer.playerId === p.id;
 
@@ -14673,6 +14793,7 @@
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-orange-400">{ts.pts || 0}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-emerald-400">{fgMade}/{fgAtt}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-cyan-400">{ts.fg3m || 0}/{fg3Att}</td>
+                                                                                <td className="py-2.5 px-2 text-center font-bold text-fuchsia-400">{ts.fg4m || 0}/{fg4Att}</td>
                                                                                 <td className="py-2.5 px-2 text-center font-bold text-pink-400">{ts.ftm || 0}/{ftAtt}</td>
                                                                                 <td className="py-2.5 px-2 text-center text-emerald-300">{ts.reb || 0}</td>
                                                                                 <td className="py-2.5 px-2 text-center text-blue-300">{ts.ast || 0}</td>
@@ -14712,12 +14833,16 @@
                                                                         <td className="py-3 px-2 text-center font-mono">-</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-orange-400">{teamStats.totals.pts}</td>
                                                                         <td className="py-3 px-2 text-center font-mono text-emerald-400">
-                                                                            {teamStats.totals.fg2m + teamStats.totals.fg3m}/
-                                                                            {(teamStats.totals.fg2m + teamStats.totals.fg3m + teamStats.totals.fg2m_miss + teamStats.totals.fg3m_miss)}
+                                                                            {teamStats.totals.fg2m + teamStats.totals.fg3m + teamStats.totals.fg4m}/
+                                                                            {(teamStats.totals.fg2m + teamStats.totals.fg3m + teamStats.totals.fg4m + teamStats.totals.fg2m_miss + teamStats.totals.fg3m_miss + teamStats.totals.fg4m_miss)}
                                                                         </td>
                                                                         <td className="py-3 px-2 text-center font-mono text-cyan-400">
                                                                             {teamStats.totals.fg3m}/
                                                                             {(teamStats.totals.fg3m + teamStats.totals.fg3m_miss)}
+                                                                        </td>
+                                                                        <td className="py-3 px-2 text-center font-mono text-fuchsia-400">
+                                                                            {teamStats.totals.fg4m}/
+                                                                            {(teamStats.totals.fg4m + teamStats.totals.fg4m_miss)}
                                                                         </td>
                                                                         <td className="py-3 px-2 text-center font-mono text-pink-400">
                                                                             {teamStats.totals.ftm}/
@@ -14758,8 +14883,9 @@
                                                                                 <td className="py-2 px-2 text-center">{p.gamesPlayed || 0}</td>
                                                                                 {rosterViewMode === 'averages' ? (<>
                                                                                     <td className="py-2 px-2 text-center text-orange-400">{avgs.pts}</td>
-                                                                                    <td className="py-2 px-2 text-center text-emerald-400">{(ts.fg2m||0)+(ts.fg3m||0)}/{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg2m_miss||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-emerald-400">{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg4m||0)}/{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg4m||0)+(ts.fg2m_miss||0)+(ts.fg3m_miss||0)+(ts.fg4m_miss||0)}</td>
                                                                                     <td className="py-2 px-2 text-center text-cyan-400">{ts.fg3m||0}/{(ts.fg3m||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-fuchsia-400">{ts.fg4m||0}/{(ts.fg4m||0)+(ts.fg4m_miss||0)}</td>
                                                                                     <td className="py-2 px-2 text-center text-pink-400">{avgs.ftPct}</td>
                                                                                     <td className="py-2 px-2 text-center text-emerald-300">{avgs.reb}</td>
                                                                                     <td className="py-2 px-2 text-center text-blue-300">{avgs.ast}</td>
@@ -14769,8 +14895,9 @@
                                                                                     <td className="py-2 px-2 text-center text-red-400">{avgs.pf}</td>
                                                                                 </>) : (<>
                                                                                     <td className="py-2 px-2 text-center text-orange-400">{ts.pts || 0}</td>
-                                                                                    <td className="py-2 px-2 text-center text-emerald-400">{(ts.fg2m||0)+(ts.fg3m||0)}/{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg2m_miss||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-emerald-400">{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg4m||0)}/{(ts.fg2m||0)+(ts.fg3m||0)+(ts.fg4m||0)+(ts.fg2m_miss||0)+(ts.fg3m_miss||0)+(ts.fg4m_miss||0)}</td>
                                                                                     <td className="py-2 px-2 text-center text-cyan-400">{ts.fg3m||0}/{(ts.fg3m||0)+(ts.fg3m_miss||0)}</td>
+                                                                                    <td className="py-2 px-2 text-center text-fuchsia-400">{ts.fg4m||0}/{(ts.fg4m||0)+(ts.fg4m_miss||0)}</td>
                                                                                     <td className="py-2 px-2 text-center text-pink-400">{ts.ftm||0}/{(ts.ftm||0)+(ts.ft_miss||0)}</td>
                                                                                     <td className="py-2 px-2 text-center text-emerald-300">{ts.reb||0}</td>
                                                                                     <td className="py-2 px-2 text-center text-blue-300">{ts.ast||0}</td>
@@ -14884,6 +15011,7 @@
                                 { id: 'stl',   label: 'STL', full: 'Steals',         color: '#a855f7' },
                                 { id: 'blk',   label: 'BLK', full: 'Blocks',         color: '#ef4444' },
                                 { id: 'fg3m',  label: '3PM', full: '3-Pointers Made',color: '#0ea5e9' },
+                                { id: 'fg4m',  label: '4PM', full: '4-Pointers Made',color: '#d946ef' },
                                 { id: 'ftm',   label: 'FTM', full: 'Free Throws Made',color:'#ec4899' },
                                 { id: 'fgPct', label: 'FG%', full: 'Field Goal %',   color: '#f59e0b', isPct: true },
                                 { id: 'fg3Pct',label: '3P%', full: 'Three-Point %',  color: '#06b6d4', isPct: true },
@@ -15552,10 +15680,10 @@
                                         const teamBObj = teams.find(t => t.id === game.teamBId);
                                         const teamATotals = summarizeGameTeamStats(teamAObj, game);
                                         const teamBTotals = summarizeGameTeamStats(teamBObj, game);
-                                        const teamAFgMade = (Number(teamATotals.fg2m) || 0) + (Number(teamATotals.fg3m) || 0);
-                                        const teamBFgMade = (Number(teamBTotals.fg2m) || 0) + (Number(teamBTotals.fg3m) || 0);
-                                        const teamAFgMiss = (Number(teamATotals.fg2m_miss) || 0) + (Number(teamATotals.fg3m_miss) || 0);
-                                        const teamBFgMiss = (Number(teamBTotals.fg2m_miss) || 0) + (Number(teamBTotals.fg3m_miss) || 0);
+                                        const teamAFgMade = (Number(teamATotals.fg2m) || 0) + (Number(teamATotals.fg3m) || 0) + (Number(teamATotals.fg4m) || 0);
+                                        const teamBFgMade = (Number(teamBTotals.fg2m) || 0) + (Number(teamBTotals.fg3m) || 0) + (Number(teamBTotals.fg4m) || 0);
+                                        const teamAFgMiss = (Number(teamATotals.fg2m_miss) || 0) + (Number(teamATotals.fg3m_miss) || 0) + (Number(teamATotals.fg4m_miss) || 0);
+                                        const teamBFgMiss = (Number(teamBTotals.fg2m_miss) || 0) + (Number(teamBTotals.fg3m_miss) || 0) + (Number(teamBTotals.fg4m_miss) || 0);
                                         const teamAFgAtt = teamAFgMade + teamAFgMiss;
                                         const teamBFgAtt = teamBFgMade + teamBFgMiss;
                                         const teamA3PMade = Number(teamATotals.fg3m) || 0;
@@ -15564,6 +15692,12 @@
                                         const teamB3PMiss = Number(teamBTotals.fg3m_miss) || 0;
                                         const teamA3PAtt = teamA3PMade + teamA3PMiss;
                                         const teamB3PAtt = teamB3PMade + teamB3PMiss;
+                                        const teamA4PMade = Number(teamATotals.fg4m) || 0;
+                                        const teamB4PMade = Number(teamBTotals.fg4m) || 0;
+                                        const teamA4PMiss = Number(teamATotals.fg4m_miss) || 0;
+                                        const teamB4PMiss = Number(teamBTotals.fg4m_miss) || 0;
+                                        const teamA4PAtt = teamA4PMade + teamA4PMiss;
+                                        const teamB4PAtt = teamB4PMade + teamB4PMiss;
                                         const teamAFtMade = Number(teamATotals.ftm) || 0;
                                         const teamBFtMade = Number(teamBTotals.ftm) || 0;
                                         const teamAFtMiss = Number(teamATotals.ft_miss) || 0;
@@ -15576,6 +15710,8 @@
                                             { label: 'FG%', teamAValue: formatPercentOrNA(teamAFgMade, teamAFgAtt), teamBValue: formatPercentOrNA(teamBFgMade, teamBFgAtt), teamACompare: toPercent(teamAFgMade, teamAFgAtt), teamBCompare: toPercent(teamBFgMade, teamBFgAtt) },
                                             { label: '3PT', teamAValue: formatMadeAttempts(teamA3PMade, teamA3PAtt), teamBValue: formatMadeAttempts(teamB3PMade, teamB3PAtt), teamACompare: teamA3PMade, teamBCompare: teamB3PMade },
                                             { label: '3P%', teamAValue: formatPercentOrNA(teamA3PMade, teamA3PAtt), teamBValue: formatPercentOrNA(teamB3PMade, teamB3PAtt), teamACompare: toPercent(teamA3PMade, teamA3PAtt), teamBCompare: toPercent(teamB3PMade, teamB3PAtt) },
+                                            { label: '4PT', teamAValue: formatMadeAttempts(teamA4PMade, teamA4PAtt), teamBValue: formatMadeAttempts(teamB4PMade, teamB4PAtt), teamACompare: teamA4PMade, teamBCompare: teamB4PMade },
+                                            { label: '4P%', teamAValue: formatPercentOrNA(teamA4PMade, teamA4PAtt), teamBValue: formatPercentOrNA(teamB4PMade, teamB4PAtt), teamACompare: toPercent(teamA4PMade, teamA4PAtt), teamBCompare: toPercent(teamB4PMade, teamB4PAtt) },
                                             { label: 'FT', teamAValue: formatMadeAttempts(teamAFtMade, teamAFtAtt), teamBValue: formatMadeAttempts(teamBFtMade, teamBFtAtt), teamACompare: teamAFtMade, teamBCompare: teamBFtMade },
                                             { label: 'REB', teamAValue: Math.round(Number(teamATotals.reb) || 0), teamBValue: Math.round(Number(teamBTotals.reb) || 0), teamACompare: Number(teamATotals.reb) || 0, teamBCompare: Number(teamBTotals.reb) || 0 },
                                             { label: 'AST', teamAValue: Math.round(Number(teamATotals.ast) || 0), teamBValue: Math.round(Number(teamBTotals.ast) || 0), teamACompare: Number(teamATotals.ast) || 0, teamBCompare: Number(teamBTotals.ast) || 0 },
@@ -16067,6 +16203,7 @@
                                                                                         <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
                                                                                         <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                                         <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
+                                                                                        <th className="py-2.5 px-2 text-center text-fuchsia-400 font-bold">4PT M/A</th>
                                                                                         <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                                         <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
                                                                                         <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
@@ -16111,6 +16248,7 @@
                                                                                                 <td className="py-2 px-2 text-center text-orange-400 font-black">{entry.stats?.pts || 0}</td>
                                                                                                 <td className="py-2 px-2 text-center text-emerald-400 font-bold">{shooting.fgMadeAtt}</td>
                                                                                                 <td className="py-2 px-2 text-center text-cyan-400 font-bold">{shooting.fg3MadeAtt}</td>
+                                                                                                <td className="py-2 px-2 text-center text-fuchsia-400 font-bold">{shooting.fg4MadeAtt}</td>
                                                                                                 <td className="py-2 px-2 text-center text-pink-400 font-bold">{shooting.ftPct}</td>
                                                                                                 <td className="py-2 px-2 text-center text-emerald-400">{entry.stats?.reb || 0}</td>
                                                                                                 <td className="py-2 px-2 text-center text-blue-400">{entry.stats?.ast || 0}</td>
@@ -16338,6 +16476,7 @@
                                                                     <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
+                                                                    <th className="py-2.5 px-2 text-center text-fuchsia-400 font-bold">4PT M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
                                                                     <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
@@ -16350,7 +16489,7 @@
                                                             <tbody className="divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300">
                                                                 {teamAObj?.players
                                                                     .map(player => {
-                                                                        const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                                                                        const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
                                                                         const pPct = computeShootingPercentages(pstats, { showNAWhenNoAttempts: true });
                                                                         const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
                                                                         const hasSavedRow = Boolean(game.playerStats?.[player.id]);
@@ -16392,6 +16531,7 @@
                                                                                 <td className="py-2 px-2 text-center text-orange-400 font-black">{isDnp ? '—' : pstats.pts}</td>
                                                                                 <td className="py-2 px-2 text-center text-emerald-400 font-bold">{isDnp ? '—' : pPct.fgMadeAtt}</td>
                                                                                 <td className="py-2 px-2 text-center text-cyan-400 font-bold">{isDnp ? '—' : pPct.fg3MadeAtt}</td>
+                                                                                <td className="py-2 px-2 text-center text-fuchsia-400 font-bold">{isDnp ? '—' : pPct.fg4MadeAtt}</td>
                                                                                 <td className="py-2 px-2 text-center text-pink-400 font-bold">{isDnp ? '—' : pPct.ftPct}</td>
                                                                                 <td className="py-2 px-2 text-center text-emerald-400">{isDnp ? '—' : pstats.reb}</td>
                                                                                 <td className="py-2 px-2 text-center text-blue-400">{isDnp ? '—' : pstats.ast}</td>
@@ -16424,6 +16564,7 @@
                                                                     <th className="py-2.5 px-2 text-center text-orange-400">PTS</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">FG M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-cyan-400 font-bold">3PT M/A</th>
+                                                                    <th className="py-2.5 px-2 text-center text-fuchsia-400 font-bold">4PT M/A</th>
                                                                     <th className="py-2.5 px-2 text-center text-pink-400 font-bold">FT%</th>
                                                                     <th className="py-2.5 px-2 text-center text-emerald-400">REB</th>
                                                                     <th className="py-2.5 px-2 text-center text-blue-400">AST</th>
@@ -16436,7 +16577,7 @@
                                                             <tbody className="divide-y divide-slate-800/60 bg-slate-950/20 font-medium font-mono text-slate-300">
                                                                 {teamBObj?.players
                                                                     .map(player => {
-                                                                        const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                                                                        const pstats = game.playerStats?.[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
                                                                         const pPct = computeShootingPercentages(pstats, { showNAWhenNoAttempts: true });
                                                                         const isExplicitDnp = Array.isArray(game.dnpPlayers) && game.dnpPlayers.includes(player.id);
                                                                         const hasSavedRow = Boolean(game.playerStats?.[player.id]);
@@ -16478,6 +16619,7 @@
                                                                                 <td className="py-2 px-2 text-center text-orange-400 font-black">{isDnp ? '—' : pstats.pts}</td>
                                                                                 <td className="py-2 px-2 text-center text-emerald-400 font-bold">{isDnp ? '—' : pPct.fgMadeAtt}</td>
                                                                                 <td className="py-2 px-2 text-center text-cyan-400 font-bold">{isDnp ? '—' : pPct.fg3MadeAtt}</td>
+                                                                                <td className="py-2 px-2 text-center text-fuchsia-400 font-bold">{isDnp ? '—' : pPct.fg4MadeAtt}</td>
                                                                                 <td className="py-2 px-2 text-center text-pink-400 font-bold">{isDnp ? '—' : pPct.ftPct}</td>
                                                                                 <td className="py-2 px-2 text-center text-emerald-400">{isDnp ? '—' : pstats.reb}</td>
                                                                                 <td className="py-2 px-2 text-center text-blue-400">{isDnp ? '—' : pstats.ast}</td>
@@ -16900,10 +17042,12 @@
                                             { id: 'stl', title: 'Steals', statLabel: 'STL', valueKey: 'stl', colorClass: 'text-teal-400' },
                                             { id: 'blk', title: 'Blocks', statLabel: 'BLK', valueKey: 'blk', colorClass: 'text-violet-400' },
                                             { id: 'fg3m', title: '3-Pointers Made', statLabel: '3PM', valueKey: 'fg3m', colorClass: 'text-sky-400' },
+                                            { id: 'fg4m', title: '4-Pointers Made', statLabel: '4PM', valueKey: 'fg4m', colorClass: 'text-fuchsia-400' },
                                             { id: 'ftm', title: 'Free Throws Made', statLabel: 'FTM', valueKey: 'ftm', colorClass: 'text-pink-400' },
                                             { id: 'to', title: 'Turnovers', statLabel: 'TO', valueKey: 'to', colorClass: 'text-red-400' },
                                             { id: 'fgPct', title: 'FG Accuracy', statLabel: 'FG%', valueKey: 'fgPct', colorClass: 'text-cyan-400' },
                                             { id: 'fg3Pct', title: '3PT Accuracy', statLabel: '3P%', valueKey: 'fg3Pct', colorClass: 'text-sky-300' },
+                                            { id: 'fg4Pct', title: '4PT Accuracy', statLabel: '4P%', valueKey: 'fg4Pct', colorClass: 'text-fuchsia-300' },
                                             { id: 'ftPct', title: 'FT Accuracy', statLabel: 'FT%', valueKey: 'ftPct', colorClass: 'text-fuchsia-400' },
                                             { id: 'pf', title: 'Fouls', statLabel: 'PF', valueKey: 'pf', colorClass: 'text-rose-400' }
                                         ];
@@ -17084,7 +17228,7 @@
                                                 {(teams.find(t => t.id === editingGame.teamAId)?.players || [])
                                                     .map(player => {
                                                         const isExpanded = expandedEditPlayerId === player.id;
-                                                        const pstats = editStatsTemp[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                                                        const pstats = editStatsTemp[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
                                                         return (
                                                             <div key={player.id} className="bg-slate-955/60 border border-slate-850 rounded-xl overflow-hidden">
                                                                 <div 
@@ -17137,12 +17281,20 @@
                                                                             <input type="number" min="0" value={pstats.fg3m || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
                                                                         </div>
                                                                         <div>
+                                                                            <label className="block text-[10px] text-slate-400 mb-1">4PM</label>
+                                                                            <input type="number" min="0" value={pstats.fg4m || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg4m: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
+                                                                        </div>
+                                                                        <div>
                                                                             <label className="block text-[10px] text-slate-400 mb-1">2P Miss</label>
                                                                             <input type="number" min="0" value={pstats.fg2m_miss || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg2m_miss: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
                                                                         </div>
                                                                         <div>
                                                                             <label className="block text-[10px] text-slate-400 mb-1">3P Miss</label>
                                                                             <input type="number" min="0" value={pstats.fg3m_miss || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m_miss: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-[10px] text-slate-400 mb-1">4P Miss</label>
+                                                                            <input type="number" min="0" value={pstats.fg4m_miss || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg4m_miss: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
                                                                         </div>
                                                                         <div>
                                                                             <label className="block text-[10px] text-slate-400 mb-1">FT Made</label>
@@ -17169,7 +17321,7 @@
                                                 {(teams.find(t => t.id === editingGame.teamBId)?.players || [])
                                                     .map(player => {
                                                         const isExpanded = expandedEditPlayerId === player.id;
-                                                        const pstats = editStatsTemp[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg2m_miss: 0, fg3m_miss: 0, ftm: 0, ft_miss: 0 };
+                                                        const pstats = editStatsTemp[player.id] || { pts: 0, ast: 0, reb: 0, stl: 0, blk: 0, to: 0, pf: 0, fg2m: 0, fg3m: 0, fg4m: 0, fg2m_miss: 0, fg3m_miss: 0, fg4m_miss: 0, ftm: 0, ft_miss: 0 };
                                                         return (
                                                             <div key={player.id} className="bg-slate-955/60 border border-slate-850 rounded-xl overflow-hidden">
                                                                 <div 
@@ -17222,12 +17374,20 @@
                                                                             <input type="number" min="0" value={pstats.fg3m || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
                                                                         </div>
                                                                         <div>
+                                                                            <label className="block text-[10px] text-slate-400 mb-1">4PM</label>
+                                                                            <input type="number" min="0" value={pstats.fg4m || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg4m: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
+                                                                        </div>
+                                                                        <div>
                                                                             <label className="block text-[10px] text-slate-400 mb-1">2P Miss</label>
                                                                             <input type="number" min="0" value={pstats.fg2m_miss || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg2m_miss: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
                                                                         </div>
                                                                         <div>
                                                                             <label className="block text-[10px] text-slate-400 mb-1">3P Miss</label>
                                                                             <input type="number" min="0" value={pstats.fg3m_miss || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg3m_miss: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-[10px] text-slate-400 mb-1">4P Miss</label>
+                                                                            <input type="number" min="0" value={pstats.fg4m_miss || 0} onChange={(e) => setEditStatsTemp({ ...editStatsTemp, [player.id]: { ...pstats, fg4m_miss: parseInt(e.target.value, 10) || 0 } })} className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono" />
                                                                         </div>
                                                                         <div>
                                                                             <label className="block text-[10px] text-slate-400 mb-1">FT Made</label>
@@ -17389,7 +17549,7 @@
                                     gameWriteup: gameMeta.gameWriteup || '',
                                     potgWriteup: gameMeta.potgWriteup || '',
                                     youtubeUrl: gameMeta.youtubeUrl || '',
-                                    season: scheduledGame.season || 3,
+                                    season: scheduledGame.season || CURRENT_SEASON,
                                     gameType: scheduledGame.gameType || 'regular'
                                 };
                                 await apiRequest(`/api/games/${encodeURIComponent(scheduledGame.id)}`, {
