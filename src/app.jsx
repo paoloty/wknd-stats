@@ -236,6 +236,7 @@
             // tonight). Local display state only — never synced, broadcast, or persisted, and
             // reset whenever a live session starts or is torn down.
             const [numberOverrides, setNumberOverrides] = useState({});
+            const [showJerseyEditModal, setShowJerseyEditModal] = useState(false);
 
             // Visual theme for the /live tab. Per-browser preference (localStorage), not
             // synced or tied to any session — persists across live games on this device.
@@ -12604,6 +12605,15 @@
                                                     </button>
                                                 ))}
                                             </div>
+                                            {isGameLive && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setShowJerseyEditModal(true); setMobileNavOpen(false); }}
+                                                    className="w-full rounded-md border border-slate-700 px-2 py-1.5 text-[9px] font-black tracking-wide text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                                                >
+                                                    Edit Jersey Numbers (This Game)
+                                                </button>
+                                            )}
                                         </div>
                                     )}
 
@@ -12694,6 +12704,15 @@
                                                         </button>
                                                     ))}
                                                 </div>
+                                                {isGameLive && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setShowJerseyEditModal(true); setShowAccountMenu(false); }}
+                                                        className="w-full mt-1.5 rounded-md border border-slate-700 px-2 py-1.5 text-[9px] font-black tracking-wide text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200 cursor-pointer"
+                                                    >
+                                                        Edit Jersey Numbers (This Game)
+                                                    </button>
+                                                )}
                                             </>
                                         )}
                                         <button
@@ -17984,6 +18003,70 @@
                                         {`Add Selected (${addFromBenchSelection.length})`}
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* BULK JERSEY NUMBER EDIT MODAL — session-only, never touches the roster */}
+                    {showJerseyEditModal && (
+                        <div className="fixed inset-0 z-50 bg-black/75 flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-2xl relative font-sans max-h-[85vh] overflow-hidden flex flex-col">
+                                <div className="flex items-center justify-between mb-1">
+                                    <h3 className="text-sm font-bold text-white">Edit Jersey Numbers</h3>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowJerseyEditModal(false)}
+                                        className="text-slate-400 hover:text-white cursor-pointer p-1"
+                                        aria-label="Close"
+                                    >
+                                        <Icons.X />
+                                    </button>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mb-3">This game only — the permanent roster isn't changed. Resets when the next live game starts.</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto pr-1" style={{ scrollbarGutter: 'stable' }}>
+                                    {[{ team: liveHomeTeam, label: liveHomeTeam?.name || 'Home' }, { team: liveAwayTeam, label: liveAwayTeam?.name || 'Away' }].map(({ team, label }, teamIdx) => (
+                                        <div key={`jersey-edit-team-${teamIdx}`} className="space-y-1.5">
+                                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</div>
+                                            {(team?.players || []).filter((p) => !p.released).map((player) => (
+                                                <div key={`jersey-edit-${player.id}`} className="flex items-center gap-2 bg-slate-955 border border-slate-800/60 rounded-lg px-2.5 py-1.5">
+                                                    <span className="text-[10px] font-mono text-slate-500">#</span>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="numeric"
+                                                        value={numberOverrides[player.id] ?? player.number}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 3);
+                                                            setNumberOverrides(prev => ({ ...prev, [player.id]: val }));
+                                                        }}
+                                                        className="w-12 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-white font-mono text-sm text-center focus:outline-none focus:border-cyan-500"
+                                                    />
+                                                    <span className="text-xs font-bold text-slate-200 truncate flex-1">{player.name}</span>
+                                                    {numberOverrides[player.id] != null && numberOverrides[player.id] !== '' && numberOverrides[player.id] !== player.number && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setNumberOverrides(prev => {
+                                                                const next = { ...prev };
+                                                                delete next[player.id];
+                                                                return next;
+                                                            })}
+                                                            title="Reset to roster number"
+                                                            className="text-[9px] text-slate-500 hover:text-slate-300 cursor-pointer shrink-0"
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ))}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowJerseyEditModal(false)}
+                                    className="mt-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer"
+                                >
+                                    Done
+                                </button>
                             </div>
                         </div>
                     )}

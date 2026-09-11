@@ -3460,7 +3460,7 @@ async function syncRosterFromPortal() {
           name: pp.name,
           number: String(pp.number || ''),
           positions: Array.isArray(pp.positions) ? pp.positions : [],
-          height: prev.height || '',
+          height: pp.height || prev.height || '',
           pictureUrl: pp.pictureUrl || prev.pictureUrl || '',
           birthday: prev.birthday || '',
           email: prev.email || '',
