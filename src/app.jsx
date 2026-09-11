@@ -237,6 +237,27 @@
             // reset whenever a live session starts or is torn down.
             const [numberOverrides, setNumberOverrides] = useState({});
 
+            // Visual theme for the /live tab. Per-browser preference (localStorage), not
+            // synced or tied to any session — persists across live games on this device.
+            const LIVE_THEMES = [
+                { id: 'midnight', label: 'Midnight' },
+                { id: 'daylight', label: 'Daylight' },
+                { id: 'broadcast', label: 'Broadcast' },
+                { id: 'focus', label: 'Focus' }
+            ];
+            const [liveTheme, setLiveTheme] = useState(() => {
+                try {
+                    const stored = localStorage.getItem('wknd_live_theme');
+                    return LIVE_THEMES.some((t) => t.id === stored) ? stored : 'midnight';
+                } catch (_) {
+                    return 'midnight';
+                }
+            });
+            const handleSetLiveTheme = (themeId) => {
+                setLiveTheme(themeId);
+                try { localStorage.setItem('wknd_live_theme', themeId); } catch (_) {}
+            };
+
             const [loggedHistory, setLoggedHistory] = useState([]);
             const [periodSnapshots, setPeriodSnapshots] = useState([]);
             const [activeAction, setActiveAction] = useState(null); 
@@ -12568,6 +12589,23 @@
                                             )}
                                         </div>
                                     )}
+                                    {activeTab === 'live' && (
+                                        <div className="border-t border-slate-800/70 px-3 py-2.5 space-y-1.5">
+                                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">Live Theme</div>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                {LIVE_THEMES.map((theme) => (
+                                                    <button
+                                                        key={`live-theme-mobile-${theme.id}`}
+                                                        type="button"
+                                                        onClick={() => handleSetLiveTheme(theme.id)}
+                                                        className={`rounded-md border px-2 py-1.5 text-[9px] font-black tracking-wide transition-all cursor-pointer ${liveTheme === theme.id ? 'border-orange-500/60 bg-orange-500/15 text-orange-200' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
+                                                    >
+                                                        {theme.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <button
                                         type="button"
@@ -12641,6 +12679,23 @@
                                                 </div>
                                             </>
                                         )}
+                                        {activeTab === 'live' && (
+                                            <>
+                                                <div className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Live Theme</div>
+                                                <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                                                    {LIVE_THEMES.map((theme) => (
+                                                        <button
+                                                            key={`live-theme-${theme.id}`}
+                                                            type="button"
+                                                            onClick={() => handleSetLiveTheme(theme.id)}
+                                                            className={`rounded-md border px-2 py-1.5 text-[9px] font-black tracking-wide transition-all cursor-pointer ${liveTheme === theme.id ? 'border-orange-500/60 bg-orange-500/15 text-orange-200' : 'border-slate-700 text-slate-400 bg-slate-900 hover:bg-slate-800 hover:text-slate-200'}`}
+                                                        >
+                                                            {theme.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => {
@@ -12661,7 +12716,7 @@
                     <main>
                         {/* TAB 1: DUAL CONSOLE WITH TIERED BUTTON HIERARCHY */}
                         {activeTab === 'live' && (
-                            <div>
+                            <div data-theme={liveTheme}>
                                 {!isGameLive ? (
                                     <div className="space-y-4 mt-4">
                                         {canAdminControlClock && (

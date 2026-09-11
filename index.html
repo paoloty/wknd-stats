@@ -122,6 +122,41 @@
         .leader-bg-fill-right {
             transform-origin: left center;
         }
+
+        /* /live tab visual themes — a CSS filter over the live-tab root, not a real
+           per-theme rewrite. Deliberate: the app has no design-token/CSS-variable layer,
+           every color is a literal hardcoded Tailwind class, and this app is loaded via
+           the Tailwind CDN JIT script (no build step) — so reskinning via filter is the
+           only option that doesn't mean rewriting thousands of classNames.
+           "midnight" is the default look and needs no rule (filter: none). */
+
+        /* Daylight: invert flips dark backgrounds to light while roughly preserving hue
+           relationships (make=green, miss/foul=red stay distinguishable). Player photos
+           would otherwise render as photo-negatives, so <img>/<video> get the identical
+           filter applied a second time — invert+hue-rotate is lossless, so two passes
+           cancel out and photos render normally again. */
+        [data-theme="daylight"] {
+            filter: invert(1) hue-rotate(180deg);
+        }
+        [data-theme="daylight"] img,
+        [data-theme="daylight"] video {
+            filter: invert(1) hue-rotate(180deg);
+        }
+
+        /* Broadcast: punchier and more saturated, no hue-rotate — rotating hue would
+           swap what counts as "red" vs "green" and break the make/miss color coding. */
+        [data-theme="broadcast"] {
+            filter: saturate(1.5) contrast(1.15) brightness(0.92);
+        }
+
+        /* Focus: an overall muted/desaturated pass to cut visual noise. Note this is
+           NOT "grayscale except the accent color" — a child element can't opt back out
+           of an ancestor's filter (grayscale is lossy, unlike invert above), so a true
+           single-accent-stays-vivid version would need real component/JSX changes, not
+           just CSS. This is the honest CSS-only version of that idea. */
+        [data-theme="focus"] {
+            filter: grayscale(0.65) contrast(1.1);
+        }
     </style>
 </head>
 <body class="min-h-screen">
