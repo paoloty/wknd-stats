@@ -373,6 +373,18 @@ function ensureGamesScheduledColumn() {
   db.exec('CREATE INDEX IF NOT EXISTS idx_games_date ON games(date)');
 }
 
+// Turnovers charged to the team as a whole rather than any individual player
+// (shot clock violation, backcourt/inbound violation, etc).
+function ensureGamesTeamTurnoverColumns() {
+  const columns = db.prepare('PRAGMA table_info(games)').all().map(c => c.name);
+  if (!columns.includes('team_a_team_turnovers')) {
+    db.exec('ALTER TABLE games ADD COLUMN team_a_team_turnovers INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!columns.includes('team_b_team_turnovers')) {
+    db.exec('ALTER TABLE games ADD COLUMN team_b_team_turnovers INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
 function ensureAwardsTable() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS awards (
@@ -738,6 +750,7 @@ ensureGamesDnpColumn();
 ensureGamesUnderReviewColumn();
 ensureGamesSeasonColumns();
 ensureGamesScheduledColumn();
+ensureGamesTeamTurnoverColumns();
 ensureAwardsTable();
 ensurePlayerProfileColumns();
 ensurePlayerTotalsTable();
@@ -802,9 +815,9 @@ const upsertPlayerTotalsStmt = db.prepare(`
 
 const insertGameStmt = db.prepare(`
   INSERT INTO games (
-    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review, season, game_type, playoff_round, series_id, sort_order, scheduled
+    id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score, team_a_team_turnovers, team_b_team_turnovers, game_log_json, period_snapshots_json, youtube_url, game_writeup, potg_writeup, manual_potg_player_id, social_cover_data_url, dnp_players_json, under_review, season, game_type, playoff_round, series_id, sort_order, scheduled
   ) VALUES (
-    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @manual_potg_player_id, @social_cover_data_url, @dnp_players_json, @under_review, @season, @game_type, @playoff_round, @series_id, @sort_order, @scheduled
+    @id, @date, @team_a_id, @team_b_id, @team_a_name, @team_b_name, @team_a_score, @team_b_score, @team_a_team_turnovers, @team_b_team_turnovers, @game_log_json, @period_snapshots_json, @youtube_url, @game_writeup, @potg_writeup, @manual_potg_player_id, @social_cover_data_url, @dnp_players_json, @under_review, @season, @game_type, @playoff_round, @series_id, @sort_order, @scheduled
   )
 `);
 
@@ -858,6 +871,7 @@ const selectPlayersStmt = db.prepare(`
 `);
 const selectGamesStmt = db.prepare(`
   SELECT id, date, team_a_id, team_b_id, team_a_name, team_b_name, team_a_score, team_b_score,
+         team_a_team_turnovers, team_b_team_turnovers,
          youtube_url, game_writeup, potg_writeup, manual_potg_player_id,
          LENGTH(social_cover_data_url) AS social_cover_data_len, dnp_players_json, under_review,
          season, game_type, playoff_round, series_id, scheduled
@@ -2501,6 +2515,8 @@ function readState() {
     teamBName: game.team_b_name,
     teamAScore: toInt(game.team_a_score),
     teamBScore: toInt(game.team_b_score),
+    teamATeamTurnovers: toInt(game.team_a_team_turnovers),
+    teamBTeamTurnovers: toInt(game.team_b_team_turnovers),
     playerStats: {},
     dnpPlayers: parseJsonSafe(game.dnp_players_json, []),
     underReview: toInt(game.under_review) === 1,
@@ -2591,6 +2607,8 @@ const writeGamesTransaction = db.transaction((nextGames) => {
       team_b_name: game.teamBName,
       team_a_score: toInt(game.teamAScore),
       team_b_score: toInt(game.teamBScore),
+      team_a_team_turnovers: toInt(game.teamATeamTurnovers),
+      team_b_team_turnovers: toInt(game.teamBTeamTurnovers),
       game_log_json: JSON.stringify(Array.isArray(game.gameLog) ? game.gameLog : []),
       period_snapshots_json: JSON.stringify(Array.isArray(game.periodSnapshots) ? game.periodSnapshots : []),
       dnp_players_json: JSON.stringify(Array.isArray(game.dnpPlayers) ? game.dnpPlayers : []),
@@ -4338,6 +4356,8 @@ app.put('/api/games/:gameId', (req, res) => {
         team_b_name: game.teamBName || '',
         team_a_score: toInt(game.teamAScore),
         team_b_score: toInt(game.teamBScore),
+        team_a_team_turnovers: toInt(game.teamATeamTurnovers),
+        team_b_team_turnovers: toInt(game.teamBTeamTurnovers),
         game_log_json: Array.isArray(game.gameLog) && game.gameLog.length > 0
           ? JSON.stringify(game.gameLog)
           : (existingDetailRow?.game_log_json || '[]'),
@@ -4460,6 +4480,8 @@ app.post('/api/games/schedule', (req, res) => {
       team_b_name: teamB.name,
       team_a_score: 0,
       team_b_score: 0,
+      team_a_team_turnovers: 0,
+      team_b_team_turnovers: 0,
       game_log_json: '[]',
       period_snapshots_json: '[]',
       dnp_players_json: '[]',

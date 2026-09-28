@@ -212,6 +212,8 @@
             const [liveSessionCreatedAt, setLiveSessionCreatedAt] = useState(0);
             const [teamAScore, setTeamAScore] = useState(0);
             const [teamBScore, setTeamBScore] = useState(0);
+            const [teamATeamTurnovers, setTeamATeamTurnovers] = useState(0);
+            const [teamBTeamTurnovers, setTeamBTeamTurnovers] = useState(0);
             const [currentQuarter, setCurrentQuarter] = useState(1);
             const [periodClockSeconds, setPeriodClockSeconds] = useState(12 * 60);
             const [isPeriodClockRunning, setIsPeriodClockRunning] = useState(false);
@@ -302,6 +304,7 @@
             const [editingInlineDateId, setEditingInlineDateId] = useState(null);
             const [editingInlineDateVal, setEditingInlineDateVal] = useState('');
             const [editStatsTemp, setEditStatsTemp] = useState({});
+            const [editTeamTurnoversTemp, setEditTeamTurnoversTemp] = useState({ teamA: 0, teamB: 0 });
             const [expandedEditPlayerId, setExpandedEditPlayerId] = useState(null);
             const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
             const [scheduleForm, setScheduleForm] = useState({ date: '', teamAId: '', teamBId: '', gameType: 'regular', season: CURRENT_SEASON });
@@ -419,6 +422,7 @@
             const [reasonInput, setReasonInput] = useState(null);
 
             const [confirmDialog, setConfirmDialog] = useState(null);
+            const [showTeamTurnoverPicker, setShowTeamTurnoverPicker] = useState(false);
             const [isAdminSupervisorPresent, setIsAdminSupervisorPresent] = useState(false);
             const [sharedAdminFocus, setSharedAdminFocus] = useState(null);
             const [isRoleCapacityExceeded, setIsRoleCapacityExceeded] = useState(false);
@@ -1350,6 +1354,8 @@
                         setLiveStats(replayed.liveStats);
                         setTeamAScore(replayed.teamAScore);
                         setTeamBScore(replayed.teamBScore);
+                        setTeamATeamTurnovers(replayed.teamATeamTurnovers || 0);
+                        setTeamBTeamTurnovers(replayed.teamBTeamTurnovers || 0);
                         setCurrentQuarter(replayed.currentQuarter || 1);
                         setTeamALineup(replayed.teamALineup);
                         setTeamABench(replayed.teamABench);
@@ -1854,6 +1860,7 @@
             const isDeletableMetaLogEntry = (entry) => {
                 if (!entry || typeof entry !== 'object') return false;
                 if (entry.kind === 'sub') return true;
+                if (entry.kind === 'stat' && entry.statField === 'team_to') return true;
                 return entry.kind === 'meta' && entry.metaType === 'timeout';
             };
             // Admin-unlocking an ended period is restricted to stat and timeout entries — a
@@ -2285,6 +2292,8 @@
                         teamBId: sourceSnapshot.teamBId || snapshot.teamBId || '',
                         teamAScore: sourceSnapshot.teamAScore || 0,
                         teamBScore: sourceSnapshot.teamBScore || 0,
+                        teamATeamTurnovers: sourceSnapshot.teamATeamTurnovers || 0,
+                        teamBTeamTurnovers: sourceSnapshot.teamBTeamTurnovers || 0,
                         currentQuarter: sourceSnapshot.currentQuarter || 1,
                         teamALineup: [...(sourceSnapshot.teamALineup || [])],
                         teamABench: [...(sourceSnapshot.teamABench || [])],
@@ -2347,6 +2356,8 @@
                 const buildBaseStateFromSnapshot = () => ({
                     teamAScore: replaySnapshot.teamAScore || 0,
                     teamBScore: replaySnapshot.teamBScore || 0,
+                    teamATeamTurnovers: replaySnapshot.teamATeamTurnovers || 0,
+                    teamBTeamTurnovers: replaySnapshot.teamBTeamTurnovers || 0,
                     currentQuarter: replaySnapshot.currentQuarter || 1,
                     teamALineup: [...(replaySnapshot.teamALineup || [])],
                     teamABench: [...(replaySnapshot.teamABench || [])],
@@ -2385,6 +2396,8 @@
                         const base = buildBaseStateFromSnapshot();
                         nextState.teamAScore = base.teamAScore;
                         nextState.teamBScore = base.teamBScore;
+                        nextState.teamATeamTurnovers = base.teamATeamTurnovers;
+                        nextState.teamBTeamTurnovers = base.teamBTeamTurnovers;
                         nextState.currentQuarter = base.currentQuarter;
                         nextState.teamALineup = base.teamALineup;
                         nextState.teamABench = base.teamABench;
@@ -2403,6 +2416,16 @@
                     }
 
                     if (event.kind === 'meta' && event.metaType === 'periodCheckpoint') {
+                        return;
+                    }
+
+                    if (event.kind === 'stat' && event.statField === 'team_to') {
+                        nextState.currentQuarter = Math.max(nextState.currentQuarter, getQuarterFromEvent(event));
+                        if (event.isTeamA) {
+                            nextState.teamATeamTurnovers = Math.max(0, (nextState.teamATeamTurnovers || 0) + (event.changeAmount || 0));
+                        } else if (event.isTeamA === false) {
+                            nextState.teamBTeamTurnovers = Math.max(0, (nextState.teamBTeamTurnovers || 0) + (event.changeAmount || 0));
+                        }
                         return;
                     }
 
@@ -2517,6 +2540,8 @@
                 teamBId: snap?.teamBId || '',
                 teamAScore: snap?.teamAScore || 0,
                 teamBScore: snap?.teamBScore || 0,
+                teamATeamTurnovers: snap?.teamATeamTurnovers || 0,
+                teamBTeamTurnovers: snap?.teamBTeamTurnovers || 0,
                 currentQuarter: snap?.currentQuarter || 1,
                 teamALineup: [...(snap?.teamALineup || [])],
                 teamABench: [...(snap?.teamABench || [])],
@@ -2815,6 +2840,8 @@
                     teamBId,
                     teamAScore: session.teamAScore || 0,
                     teamBScore: session.teamBScore || 0,
+                    teamATeamTurnovers: session.teamATeamTurnovers || 0,
+                    teamBTeamTurnovers: session.teamBTeamTurnovers || 0,
                     currentQuarter: session.currentQuarter || 1,
                     teamALineup: Array.isArray(session.teamALineup) ? session.teamALineup : [],
                     teamABench: Array.isArray(session.teamABench) ? session.teamABench : [],
@@ -3114,6 +3141,8 @@
                 setLiveSessionCreatedAt(remoteSessionCreatedAt);
                 setTeamAScore(replayed?.teamAScore || session.teamAScore || 0);
                 setTeamBScore(replayed?.teamBScore || session.teamBScore || 0);
+                setTeamATeamTurnovers(replayed?.teamATeamTurnovers || session.teamATeamTurnovers || 0);
+                setTeamBTeamTurnovers(replayed?.teamBTeamTurnovers || session.teamBTeamTurnovers || 0);
                 setCurrentQuarter(resolvedRemoteQuarter);
                 setTeamALineup(teamARotation.lineup);
                 setTeamABench(teamARotation.bench);
@@ -4003,7 +4032,7 @@
                     if (isAssistPairing) {
                         return Boolean(entry.isTeamA);
                     }
-                    if (isMadeShotId(entryActionId) || entryActionId === 'ast' || entryActionId === 'to') {
+                    if (isMadeShotId(entryActionId) || entryActionId === 'ast' || entryActionId === 'to' || entryActionId === 'to_team') {
                         return !entry.isTeamA;
                     }
                     if (entryActionId === 'reb' || entryActionId === 'stl') {
@@ -4124,12 +4153,14 @@
                 fg3m_miss: '3FG Miss',
                 fg4m_miss: '4FG Miss',
                 ftm: 'FTM',
-                ft_miss: 'FT Miss'
+                ft_miss: 'FT Miss',
+                team_to: 'TEAM TO'
             };
             const undoDelta = Number(latestUndoEntry?.changeAmount || 0);
             const undoDeltaText = `${undoDelta >= 0 ? '+' : ''}${undoDelta}`;
             const undoStatLabel = latestUndoEntry?.statField ? (undoStatLabelMap[latestUndoEntry.statField] || String(latestUndoEntry.statField).toUpperCase()) : '';
-            const showUndoTargetSummary = !undoLockedByQuarterEnd && Boolean(latestUndoEntry && latestUndoPlayer);
+            const latestUndoIsTeamTurnover = Boolean(latestUndoEntry) && latestUndoEntry.statField === 'team_to';
+            const showUndoTargetSummary = !undoLockedByQuarterEnd && Boolean(latestUndoEntry && (latestUndoPlayer || latestUndoIsTeamTurnover));
             const undoTargetBlockedReason = undoLockedByQuarterEnd
                 ? 'locked after period end'
                 : isProtectedLogEntry(latestUndoLog, finalizedPeriods)
@@ -5005,6 +5036,8 @@
                     teamBId,
                     teamAScore,
                     teamBScore,
+                    teamATeamTurnovers,
+                    teamBTeamTurnovers,
                     liveSessionInstanceId,
                     sessionCreatedAt: persistedSessionCreatedAt,
                     sessionRevision: nextSessionRevision,
@@ -5041,6 +5074,8 @@
                 teamBId,
                 teamAScore,
                 teamBScore,
+                teamATeamTurnovers,
+                teamBTeamTurnovers,
                 liveSessionInstanceId,
                 liveSessionCreatedAt,
                 currentQuarter,
@@ -5574,7 +5609,7 @@
                     const nextSessionRevision = Number(sessionRevisionRef.current || 0) + 1;
                     sessionRevisionRef.current = nextSessionRevision;
                     lastLocalSessionUpdatedAtRef.current = sessionUpdatedAt;
-                    const session = { teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, clockControlRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
+                    const session = { teamAId, teamBId, teamAScore, teamBScore, teamATeamTurnovers, teamBTeamTurnovers, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, clockControlRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
                     const persistedLocally = persistActiveLiveSessionToLocal(session);
                     hadLiveSessionRef.current = true;
                     setSyncDebug((prev) => ({
@@ -5598,7 +5633,7 @@
                         flushPendingActiveSessionSync();
                     }
                 }
-            }, [isGameLive, isEndingGame, teamAId, teamBId, teamAScore, teamBScore, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
+            }, [isGameLive, isEndingGame, teamAId, teamBId, teamAScore, teamBScore, teamATeamTurnovers, teamBTeamTurnovers, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
 
             const showToast = (message, type = 'success') => {
                 setToast({ message, type });
@@ -5813,6 +5848,8 @@
                     teamBName: game?.teamBName || '',
                     teamAScore: Number(game?.teamAScore || 0),
                     teamBScore: Number(game?.teamBScore || 0),
+                    teamATeamTurnovers: Number(game?.teamATeamTurnovers || 0),
+                    teamBTeamTurnovers: Number(game?.teamBTeamTurnovers || 0),
                     underReview: Boolean(game?.underReview),
                     playerStats: detail.playerStats || game?.playerStats || {},
                     gameLog: Array.isArray(detail.gameLog) ? detail.gameLog : (Array.isArray(game?.gameLog) ? game.gameLog : []),
@@ -5898,6 +5935,8 @@
                             teamBName: resolvedTeamBName || fallbackTeamBName,
                             teamAScore: Number(importedGameMeta?.teamAScore || 0),
                             teamBScore: Number(importedGameMeta?.teamBScore || 0),
+                            teamATeamTurnovers: Number(importedGameMeta?.teamATeamTurnovers || 0),
+                            teamBTeamTurnovers: Number(importedGameMeta?.teamBTeamTurnovers || 0),
                             underReview: Boolean(importedGameMeta?.underReview),
                             playerStats: importedPlayerStats,
                             dnpPlayers: Array.isArray(parsed?.dnpPlayers) ? parsed.dnpPlayers : [],
@@ -6621,6 +6660,8 @@
                         teamBId,
                         teamAScore,
                         teamBScore,
+                        teamATeamTurnovers,
+                        teamBTeamTurnovers,
                         liveSessionInstanceId,
                         sessionCreatedAt: Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now()),
                         sessionRevision: nextSessionRevision,
@@ -6939,6 +6980,8 @@
                 teamBId,
                 teamAScore,
                 teamBScore,
+                teamATeamTurnovers,
+                teamBTeamTurnovers,
                 currentQuarter: quarterValue || currentQuarter || 1,
                 teamALineup: [...teamALineup],
                 teamABench: [...teamABench],
@@ -7014,6 +7057,8 @@
                 setLiveSessionCreatedAt(0);
                 setTeamAScore(0);
                 setTeamBScore(0);
+                setTeamATeamTurnovers(0);
+                setTeamBTeamTurnovers(0);
                 setCurrentQuarter(1);
                 setPeriodClockSeconds(getPeriodDurationSeconds(1));
                 setIsPeriodClockRunning(false);
@@ -7159,6 +7204,8 @@
                     teamBId,
                     teamAScore,
                     teamBScore,
+                    teamATeamTurnovers,
+                    teamBTeamTurnovers,
                     liveSessionInstanceId: sessionId,
                     sessionCreatedAt: Number(liveSessionCreatedAtRef.current || liveSessionCreatedAt || Date.now()),
                     sessionRevision: nextSessionRevision,
@@ -7332,6 +7379,8 @@
                     teamBId: resolvedTeamBId,
                     teamAScore: 0,
                     teamBScore: 0,
+                    teamATeamTurnovers: 0,
+                    teamBTeamTurnovers: 0,
                     currentQuarter: 1,
                     teamALineup: startersA,
                     teamABench: benchA,
@@ -7348,6 +7397,8 @@
                 sessionRevisionRef.current = 0;
                 setTeamAScore(0);
                 setTeamBScore(0);
+                setTeamATeamTurnovers(0);
+                setTeamBTeamTurnovers(0);
                 setCurrentQuarter(1);
                 setPeriodClockSeconds(0);
                 setIsPlayPaused(false);
@@ -7406,6 +7457,8 @@
                     teamBId: resolvedTeamBId,
                     teamAScore: 0,
                     teamBScore: 0,
+                    teamATeamTurnovers: 0,
+                    teamBTeamTurnovers: 0,
                     liveSessionInstanceId: nextSessionInstanceId,
                     sessionCreatedAt: nextSessionCreatedAt,
                     sessionRevision: nextSessionRevision,
@@ -7803,6 +7856,73 @@
                 }
             };
 
+            // A turnover charged to the team as a whole rather than any individual player
+            // (shot clock violation, backcourt/inbound violation, etc). Unlike every other
+            // stat action this never opens the player roster - it just needs a team.
+            const handleTeamTurnover = (isTeamA) => {
+                if (!canUseLiveControls) {
+                    showToast('Live controls are locked right now.', 'info');
+                    return;
+                }
+                if (!canOperateTeam(isTeamA)) {
+                    ensureTeamOperationAccess(isTeamA, 'log a team turnover for this team');
+                    return;
+                }
+                if (!hasMatchStarted && !canBackfillEndedPeriodStats) {
+                    showToast('Match has not started yet.', 'info');
+                    return;
+                }
+                if (isAwaitingPeriodStart && !hasCurrentQuarterStarted && !canBackfillEndedPeriodStats) {
+                    showToast(`Press Start ${nextPeriodStartLabel} before logging stats.`, 'info');
+                    return;
+                }
+
+                const targetQuarterForLog = backfillTargetQuarter;
+                const targetClockLabelForLog = backfillClockLabel;
+                const multiplier = correctionMode ? -1 : 1;
+                const teamLabel = isTeamA ? homeTeamLabel : awayTeamLabel;
+                const logText = correctionMode
+                    ? `🔄 CORRECTION: ${teamLabel} team turnover adjusted`
+                    : `⚡ ${teamLabel}: TEAM TURNOVER`;
+                const logEntryId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+                const historyEntry = {
+                    id: logEntryId,
+                    isTeamA,
+                    statField: 'team_to',
+                    changeAmount: multiplier,
+                    previousTeamAScore: teamAScore,
+                    previousTeamBScore: teamBScore,
+                    logText,
+                    kind: 'stat',
+                    actionId: 'to_team'
+                };
+                setLoggedHistory(prev => [historyEntry, ...prev]);
+
+                if (isTeamA) {
+                    setTeamATeamTurnovers(prev => Math.max(0, prev + multiplier));
+                } else {
+                    setTeamBTeamTurnovers(prev => Math.max(0, prev + multiplier));
+                }
+
+                const statLogEvent = {
+                    id: logEntryId,
+                    time: getWallClockTime(),
+                    text: logText,
+                    kind: 'stat',
+                    quarter: targetQuarterForLog,
+                    clockRemaining: targetClockLabelForLog,
+                    isTeamA,
+                    actionId: 'to_team',
+                    statField: 'team_to',
+                    changeAmount: multiplier
+                };
+                markLocalSessionUpdated();
+                setGameLog((prev) => [statLogEvent, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES));
+                setCorrectionMode(false);
+                showToast(`Team turnover logged for ${teamLabel}.`, 'success');
+            };
+
             const restoreClockFromLatestLog = (logs = [], fallbackQuarter = currentQuarter) => {
                 const sourceLogs = Array.isArray(logs) ? logs : [];
                 const latestQuarterEvent = getLatestLogEvent(sourceLogs, (event) => {
@@ -7938,6 +8058,8 @@
                         setLiveStats(replayed.liveStats);
                         setTeamAScore(replayed.teamAScore);
                         setTeamBScore(replayed.teamBScore);
+                        setTeamATeamTurnovers(replayed.teamATeamTurnovers || 0);
+                        setTeamBTeamTurnovers(replayed.teamBTeamTurnovers || 0);
                         setCurrentQuarter(replayed.currentQuarter || 1);
                         setTeamALineup(replayed.teamALineup);
                         setTeamABench(replayed.teamABench);
@@ -8111,6 +8233,8 @@
                 setLiveStats(replayed.liveStats);
                 setTeamAScore(replayed.teamAScore);
                 setTeamBScore(replayed.teamBScore);
+                setTeamATeamTurnovers(replayed.teamATeamTurnovers || 0);
+                setTeamBTeamTurnovers(replayed.teamBTeamTurnovers || 0);
                 setCurrentQuarter(replayed.currentQuarter || 1);
                 setTeamALineup(replayed.teamALineup);
                 setTeamABench(replayed.teamABench);
@@ -8291,6 +8415,8 @@
                 setLiveStats(replayed.liveStats);
                 setTeamAScore(replayed.teamAScore);
                 setTeamBScore(replayed.teamBScore);
+                setTeamATeamTurnovers(replayed.teamATeamTurnovers || 0);
+                setTeamBTeamTurnovers(replayed.teamBTeamTurnovers || 0);
                 setCurrentQuarter(replayed.currentQuarter || 1);
                 setTeamALineup(replayed.teamALineup);
                 setTeamABench(replayed.teamABench);
@@ -9455,6 +9581,8 @@
                     const finalizedLiveStats = finalizedReplay?.liveStats || liveStats;
                     const finalizedTeamAScore = finalizedReplay?.teamAScore ?? teamAScore;
                     const finalizedTeamBScore = finalizedReplay?.teamBScore ?? teamBScore;
+                    const finalizedTeamATeamTurnovers = finalizedReplay?.teamATeamTurnovers ?? teamATeamTurnovers;
+                    const finalizedTeamBTeamTurnovers = finalizedReplay?.teamBTeamTurnovers ?? teamBTeamTurnovers;
 
                     const participantStats = {};
 
@@ -9508,6 +9636,8 @@
                     teamBName: teamBObj.name,
                     teamAScore: finalizedTeamAScore,
                     teamBScore: finalizedTeamBScore,
+                    teamATeamTurnovers: finalizedTeamATeamTurnovers,
+                    teamBTeamTurnovers: finalizedTeamBTeamTurnovers,
                     underReview: false,
                     playerStats: participantStats,
                     dnpPlayers: [...dnpPlayers],
@@ -9955,6 +10085,8 @@
                             date: editingGameDate || g.date,
                             teamAScore: newTeamAScore,
                             teamBScore: newTeamBScore,
+                            teamATeamTurnovers: Math.max(0, parseInt(editTeamTurnoversTemp.teamA, 10) || 0),
+                            teamBTeamTurnovers: Math.max(0, parseInt(editTeamTurnoversTemp.teamB, 10) || 0),
                             playerStats: editStatsTemp
                         };
                     }
@@ -13265,7 +13397,7 @@
                                                         <div className="flex items-center justify-between gap-2">
                                                             <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">WHISTLES & FOULS</span>
                                                         </div>
-                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                                                             {whistleActions.map((act) => (
                                                                 <button
                                                                     key={act.id}
@@ -13301,6 +13433,28 @@
                                                                     <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
                                                                 </button>
                                                             ))}
+                                                            <button
+                                                                type="button"
+                                                                disabled={isActionDisabled({ id: 'to_team' })}
+                                                                onClick={() => {
+                                                                    if (!canUseLiveControls) {
+                                                                        showToast('Live controls are locked right now.', 'info');
+                                                                        return;
+                                                                    }
+                                                                    setShowTeamTurnoverPicker(true);
+                                                                }}
+                                                                title="Team turnover - no individual player at fault (shot clock violation, backcourt/inbound violation, etc.)"
+                                                                className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50"
+                                                            >
+                                                                <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                                                    <path d="M3 12a9 9 0 0 1 9-9" />
+                                                                    <path d="M12 3h7v7" />
+                                                                    <path d="M21 12a9 9 0 0 1-9 9" />
+                                                                    <path d="M12 21H5v-7" />
+                                                                    <circle cx="12" cy="12" r="2.5" />
+                                                                </svg>
+                                                                <span>TEAM TO</span>
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -13541,7 +13695,9 @@
                                                     </div>
                                                     {isLoggedIn && canOperateLive && showUndoTargetSummary && (
                                                         <div className="mt-1 text-[9px] font-mono text-slate-500">
-                                                            Undo target: #{latestUndoPlayer.number || '-'} {renderLiveDisplayName(latestUndoPlayer.name)} {undoDeltaText} {undoStatLabel}
+                                                            {latestUndoIsTeamTurnover
+                                                                ? <>Undo target: {latestUndoLog?.isTeamA ? homeTeamLabel : awayTeamLabel} {undoDeltaText} {undoStatLabel}</>
+                                                                : <>Undo target: #{latestUndoPlayer.number || '-'} {renderLiveDisplayName(latestUndoPlayer.name)} {undoDeltaText} {undoStatLabel}</>}
                                                             {undoTargetBlockedReason ? ` (${undoTargetBlockedReason})` : ''}
                                                         </div>
                                                     )}
@@ -14007,7 +14163,7 @@
                                                             { label: 'AST', teamAValue: Math.round(Number(liveTeamATotals.ast) || 0), teamBValue: Math.round(Number(liveTeamBTotals.ast) || 0), teamACompare: Number(liveTeamATotals.ast) || 0, teamBCompare: Number(liveTeamBTotals.ast) || 0 },
                                                             { label: 'STL', teamAValue: Math.round(Number(liveTeamATotals.stl) || 0), teamBValue: Math.round(Number(liveTeamBTotals.stl) || 0), teamACompare: Number(liveTeamATotals.stl) || 0, teamBCompare: Number(liveTeamBTotals.stl) || 0 },
                                                             { label: 'BLK', teamAValue: Math.round(Number(liveTeamATotals.blk) || 0), teamBValue: Math.round(Number(liveTeamBTotals.blk) || 0), teamACompare: Number(liveTeamATotals.blk) || 0, teamBCompare: Number(liveTeamBTotals.blk) || 0 },
-                                                            { label: 'TO', teamAValue: Math.round(Number(liveTeamATotals.to) || 0), teamBValue: Math.round(Number(liveTeamBTotals.to) || 0), teamACompare: Number(liveTeamATotals.to) || 0, teamBCompare: Number(liveTeamBTotals.to) || 0 },
+                                                            { label: 'TO', teamAValue: Math.round((Number(liveTeamATotals.to) || 0) + (Number(teamATeamTurnovers) || 0)), teamBValue: Math.round((Number(liveTeamBTotals.to) || 0) + (Number(teamBTeamTurnovers) || 0)), teamACompare: (Number(liveTeamATotals.to) || 0) + (Number(teamATeamTurnovers) || 0), teamBCompare: (Number(liveTeamBTotals.to) || 0) + (Number(teamBTeamTurnovers) || 0) },
                                                             { label: 'PF', teamAValue: Math.round(Number(liveTeamATotals.pf) || 0), teamBValue: Math.round(Number(liveTeamBTotals.pf) || 0), teamACompare: Number(liveTeamATotals.pf) || 0, teamBCompare: Number(liveTeamBTotals.pf) || 0 }
                                                         ];
 
@@ -15791,7 +15947,7 @@
                                             { label: 'AST', teamAValue: Math.round(Number(teamATotals.ast) || 0), teamBValue: Math.round(Number(teamBTotals.ast) || 0), teamACompare: Number(teamATotals.ast) || 0, teamBCompare: Number(teamBTotals.ast) || 0 },
                                             { label: 'STL', teamAValue: Math.round(Number(teamATotals.stl) || 0), teamBValue: Math.round(Number(teamBTotals.stl) || 0), teamACompare: Number(teamATotals.stl) || 0, teamBCompare: Number(teamBTotals.stl) || 0 },
                                             { label: 'BLK', teamAValue: Math.round(Number(teamATotals.blk) || 0), teamBValue: Math.round(Number(teamBTotals.blk) || 0), teamACompare: Number(teamATotals.blk) || 0, teamBCompare: Number(teamBTotals.blk) || 0 },
-                                            { label: 'TO', teamAValue: Math.round(Number(teamATotals.to) || 0), teamBValue: Math.round(Number(teamBTotals.to) || 0), teamACompare: Number(teamATotals.to) || 0, teamBCompare: Number(teamBTotals.to) || 0 },
+                                            { label: 'TO', teamAValue: Math.round((Number(teamATotals.to) || 0) + (Number(game.teamATeamTurnovers) || 0)), teamBValue: Math.round((Number(teamBTotals.to) || 0) + (Number(game.teamBTeamTurnovers) || 0)), teamACompare: (Number(teamATotals.to) || 0) + (Number(game.teamATeamTurnovers) || 0), teamBCompare: (Number(teamBTotals.to) || 0) + (Number(game.teamBTeamTurnovers) || 0) },
                                             { label: 'PF', teamAValue: Math.round(Number(teamATotals.pf) || 0), teamBValue: Math.round(Number(teamBTotals.pf) || 0), teamACompare: Number(teamATotals.pf) || 0, teamBCompare: Number(teamBTotals.pf) || 0 }
                                         ];
                                         const hasFrozenQuarterSnapshots = Array.isArray(game.periodSnapshots) && game.periodSnapshots.length > 0;
@@ -15940,6 +16096,7 @@
                                                                             setEditingGame(game);
                                                                             setEditingGameDate(parseDateForInput(game.date));
                                                                             setEditStatsTemp(JSON.parse(JSON.stringify(game.playerStats)));
+                                                                            setEditTeamTurnoversTemp({ teamA: Number(game.teamATeamTurnovers || 0), teamB: Number(game.teamBTeamTurnovers || 0) });
                                                                             setExpandedEditPlayerId(null);
                                                                         }}
                                                                         className="px-2.5 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs rounded-lg cursor-pointer transition-colors"
@@ -17298,6 +17455,16 @@
                                             <h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" /> {editingGame.teamAName} (Home)
                                             </h4>
+                                            <div className="mb-2 flex items-center justify-between gap-2 bg-slate-955/60 border border-slate-850 rounded-xl px-3 py-2">
+                                                <label className="text-[11px] font-bold text-slate-300">Team Turnovers <span className="text-slate-500 font-normal">(no player at fault)</span></label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={editTeamTurnoversTemp.teamA || 0}
+                                                    onChange={(e) => setEditTeamTurnoversTemp({ ...editTeamTurnoversTemp, teamA: parseInt(e.target.value, 10) || 0 })}
+                                                    className="w-20 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
+                                                />
+                                            </div>
                                             <div className="space-y-2">
                                                 {(teams.find(t => t.id === editingGame.teamAId)?.players || [])
                                                     .map(player => {
@@ -17391,6 +17558,16 @@
                                             <h4 className="text-xs font-black text-red-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                                 <span className="w-2.5 h-2.5 rounded-full bg-red-400" /> {editingGame.teamBName} (Away)
                                             </h4>
+                                            <div className="mb-2 flex items-center justify-between gap-2 bg-slate-955/60 border border-slate-850 rounded-xl px-3 py-2">
+                                                <label className="text-[11px] font-bold text-slate-300">Team Turnovers <span className="text-slate-500 font-normal">(no player at fault)</span></label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={editTeamTurnoversTemp.teamB || 0}
+                                                    onChange={(e) => setEditTeamTurnoversTemp({ ...editTeamTurnoversTemp, teamB: parseInt(e.target.value, 10) || 0 })}
+                                                    className="w-20 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
+                                                />
+                                            </div>
                                             <div className="space-y-2">
                                                 {(teams.find(t => t.id === editingGame.teamBId)?.players || [])
                                                     .map(player => {
@@ -17530,6 +17707,8 @@
                                             teamBName: teamBObj?.name || '',
                                             teamAScore: 0,
                                             teamBScore: 0,
+                                            teamATeamTurnovers: 0,
+                                            teamBTeamTurnovers: 0,
                                             underReview: false,
                                             scheduled: true,
                                             playerStats: {},
@@ -17614,6 +17793,8 @@
                                     teamBName: scheduledBName || importedBName,
                                     teamAScore: Number(gameMeta.teamAScore || 0),
                                     teamBScore: Number(gameMeta.teamBScore || 0),
+                                    teamATeamTurnovers: Number(gameMeta.teamATeamTurnovers || 0),
+                                    teamBTeamTurnovers: Number(gameMeta.teamBTeamTurnovers || 0),
                                     underReview: false,
                                     scheduled: false,
                                     playerStats: gameMeta.playerStats || {},
@@ -17631,7 +17812,7 @@
                                     body: JSON.stringify({ game: mergedGame })
                                 });
                                 setGames(prev => prev.map(g => g.id === scheduledGame.id
-                                    ? { ...g, teamAScore: mergedGame.teamAScore, teamBScore: mergedGame.teamBScore, scheduled: false, gameWriteup: mergedGame.gameWriteup, potgWriteup: mergedGame.potgWriteup, youtubeUrl: mergedGame.youtubeUrl, _detailLoaded: false }
+                                    ? { ...g, teamAScore: mergedGame.teamAScore, teamBScore: mergedGame.teamBScore, teamATeamTurnovers: mergedGame.teamATeamTurnovers, teamBTeamTurnovers: mergedGame.teamBTeamTurnovers, scheduled: false, gameWriteup: mergedGame.gameWriteup, potgWriteup: mergedGame.potgWriteup, youtubeUrl: mergedGame.youtubeUrl, _detailLoaded: false }
                                     : g
                                 ));
                                 setImportResultsState(null);
@@ -18178,6 +18359,42 @@
                                     <button onClick={() => setConfirmDialog(null)} className="flex-1 py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer">{confirmDialog.cancelLabel || 'Cancel'}</button>
                                     <button onClick={confirmDialog.onConfirm} className="flex-1 py-2 bg-red-600 text-white rounded-xl cursor-pointer">{confirmDialog.confirmLabel || 'Confirm'}</button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showTeamTurnoverPicker && (
+                        <div className="fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4">
+                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto">
+                                <h3 className="text-md font-extrabold text-white mb-2">Team Turnover</h3>
+                                <p className="text-xs text-slate-400 mb-4">Which team committed the turnover? Use this for a turnover with no individual player at fault (shot clock violation, backcourt/inbound violation, etc).</p>
+                                <div className="flex gap-3 text-xs font-bold">
+                                    <button
+                                        type="button"
+                                        disabled={!canOperateTeam(true)}
+                                        onClick={() => { handleTeamTurnover(true); setShowTeamTurnoverPicker(false); }}
+                                        className="flex-1 py-3 rounded-xl border-2 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                        style={getTeamColorStyles(liveHomeTeam?.color, liveHomeTeam?.textColor)}
+                                    >
+                                        {homeTeamLabel}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={!canOperateTeam(false)}
+                                        onClick={() => { handleTeamTurnover(false); setShowTeamTurnoverPicker(false); }}
+                                        className="flex-1 py-3 rounded-xl border-2 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                        style={getTeamColorStyles(liveAwayTeam?.color, liveAwayTeam?.textColor)}
+                                    >
+                                        {awayTeamLabel}
+                                    </button>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowTeamTurnoverPicker(false)}
+                                    className="mt-3 w-full py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer text-xs font-bold"
+                                >
+                                    Cancel
+                                </button>
                             </div>
                         </div>
                     )}
