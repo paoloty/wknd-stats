@@ -347,6 +347,7 @@
             const [mobileNavOpen, setMobileNavOpen] = useState(false);
             const [showAccountMenu, setShowAccountMenu] = useState(false);
             const [editingLiveLogId, setEditingLiveLogId] = useState(null);
+            const [pbpSnapshotLogId, setPbpSnapshotLogId] = useState(null);
             const [editingLiveLogActionId, setEditingLiveLogActionId] = useState('');
             const [selectedPlayerId, setSelectedPlayerId] = useState('');
 
@@ -2528,6 +2529,44 @@
                 return nextState;
             };
 
+            // Read-only "state as of this event" for the play-by-play: replays only the events up
+            // to and including the target. If the target precedes every periodCheckpoint, the
+            // replay can't start from liveGameSnapshot (it has already advanced to the latest
+            // checkpoint), so it starts from a zeroed snapshot instead — stats and score are
+            // still exact since every stat is logged, but lineups at that moment aren't.
+            const buildLiveStateAtLogEntry = (logs, targetId) => {
+                const safeLogs = Array.isArray(logs) ? logs : [];
+                const target = safeLogs.find((event) => event?.id === targetId);
+                if (!target) return null;
+
+                const getEventTimeKey = (event) => {
+                    const key = Number.parseInt(String(event?.id || '').split('_')[0], 10);
+                    return Number.isFinite(key) ? key : 0;
+                };
+                const targetKey = getEventTimeKey(target);
+                const eventsUpToTarget = safeLogs.filter((event) => getEventTimeKey(event) <= targetKey);
+
+                const isCheckpoint = (event) => event?.kind === 'meta' && event?.metaType === 'periodCheckpoint' && event?.checkpointSnapshot;
+                const zeroSnapshot = {
+                    teamAId,
+                    teamBId,
+                    teamAScore: 0,
+                    teamBScore: 0,
+                    teamATeamTurnovers: 0,
+                    teamBTeamTurnovers: 0,
+                    currentQuarter: 1,
+                    teamALineup: [],
+                    teamABench: [],
+                    teamBLineup: [],
+                    teamBBench: [],
+                    liveStats: {},
+                    playedPlayers: []
+                };
+                const canUseLiveSnapshot = eventsUpToTarget.some(isCheckpoint) || !safeLogs.some(isCheckpoint);
+                const baseSnapshot = (canUseLiveSnapshot && liveGameSnapshot) ? liveGameSnapshot : zeroSnapshot;
+                return buildLiveStateFromEvents(baseSnapshot, eventsUpToTarget);
+            };
+
             // Admin corrections to an already-ended period can't safely replay "from the start":
             // liveGameSnapshot itself advances to the latest periodCheckpoint at every period-end
             // (see autoFinalizeEndedPeriodAndStartNextPeriod), and the true pre-game starting lineup
@@ -3294,6 +3333,20 @@
                         return teams.find((team) => (team?.players || []).some((player) => player.id === targetPlayerId)) || null;
                     })();
             const liveLogEditTargetPlayers = (liveLogEditTargetTeam?.players || []).filter((p) => !dnpPlayers.includes(p.id));
+            // Visible play-by-play is newest-first, so "older" is index + 1.
+            const visiblePbpLogs = (gameLog || []).filter((log) => !log?.hiddenFromLog);
+            const pbpSnapshotIndex = pbpSnapshotLogId
+                ? visiblePbpLogs.findIndex((log) => log?.id === pbpSnapshotLogId)
+                : -1;
+            const pbpSnapshotEntry = pbpSnapshotIndex >= 0 ? visiblePbpLogs[pbpSnapshotIndex] : null;
+            const pbpSnapshotState = pbpSnapshotEntry ? buildLiveStateAtLogEntry(gameLog, pbpSnapshotEntry.id) : null;
+            const pbpSnapshotScoreTag = pbpSnapshotEntry
+                ? parseScoreTagFromLogText(String(pbpSnapshotEntry.text || '').replace(/^\[(HOME|AWAY)\]\s*/, ''))
+                : null;
+            const pbpSnapshotScoreMismatch = Boolean(pbpSnapshotState && pbpSnapshotScoreTag && (
+                Number(pbpSnapshotScoreTag.teamAScore) !== Number(pbpSnapshotState.teamAScore)
+                || Number(pbpSnapshotScoreTag.teamBScore) !== Number(pbpSnapshotState.teamBScore)
+            ));
             const formatLiveLogEditPlayerLabel = (player) => {
                 const rawName = String(player?.name || '').trim();
                 const formattedName = rawName.includes(',')
@@ -13752,10 +13805,20 @@
                                                                     <span className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ backgroundColor: dotColor }} />
                                                                     <span className="flex-1 min-w-0 break-words">{cleanText}</span>
                                                                 </div>
-                                                                {/* Bottom row: edit/delete icons left, wall-clock timestamp right */}
+                                                                {/* Bottom row: snapshot/edit/delete icons left, wall-clock timestamp right */}
                                                                 <div className="mt-1.5 flex items-center justify-between">
-                                                                    {isLoggedIn && canOperateLive && (canEditLiveLog || canDeleteLiveLog) ? (
-                                                                        <div className="inline-flex items-center gap-1.5">
+                                                                    <div className="inline-flex items-center gap-1.5">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setPbpSnapshotLogId(log.id)}
+                                                                            disabled={!log?.id}
+                                                                            className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-700/70 bg-slate-900/70 text-slate-400 hover:bg-cyan-500/15 hover:text-cyan-300 cursor-pointer transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
+                                                                            title="View score and stats as of this event"
+                                                                        >
+                                                                            <Icons.History />
+                                                                        </button>
+                                                                    {isLoggedIn && canOperateLive && (canEditLiveLog || canDeleteLiveLog) && (
+                                                                        <>
                                                                             {isAdminEndedPeriodUnlock && (
                                                                                 <span className="inline-flex items-center rounded-full border border-amber-500/50 bg-amber-500/15 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wide text-amber-300">
                                                                                     Admin
@@ -13790,8 +13853,9 @@
                                                                                     <Icons.Trash />
                                                                                 </button>
                                                                             )}
-                                                                        </div>
-                                                                    ) : <span />}
+                                                                        </>
+                                                                    )}
+                                                                    </div>
                                                                     <span className="text-[8px] text-slate-500/80">{(log.time || '').split(' ')[0] || '--:--:--'}</span>
                                                                 </div>
                                                             </div>
@@ -18248,6 +18312,145 @@
                                 >
                                     Done
                                 </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* PLAY-BY-PLAY SNAPSHOT: READ-ONLY SCORE/STATS AS OF A SELECTED EVENT */}
+                    {pbpSnapshotEntry && (
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setPbpSnapshotLogId(null)}>
+                            <div className="bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full max-w-3xl p-5 shadow-2xl relative my-0 md:my-auto space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                <div>
+                                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Stats At This Point</h3>
+                                    <p className="mt-1 text-[11px] text-slate-400">Replayed from the play-by-play up to the selected event. Read-only — the live game is not changed.</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 text-[11px] text-slate-300">
+                                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                                        Selected Event{pbpSnapshotEntry.quarter ? ` · ${getPeriodLabel(pbpSnapshotEntry.quarter)} ${pbpSnapshotEntry.clockRemaining || '--:--'}` : ''}
+                                    </div>
+                                    <div className="break-words font-mono">{String(pbpSnapshotEntry.text || '').replace(/^\[(HOME|AWAY)\]\s*/, '')}</div>
+                                </div>
+                                {!pbpSnapshotState ? (
+                                    <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+                                        Replay is unavailable for this session, so stats at this point can't be rebuilt.
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: liveHomeTeam?.color || '#10b981' }} />
+                                                <span className="text-xs font-black uppercase text-slate-200 truncate">{homeTeamLabel}</span>
+                                            </div>
+                                            <div className="text-center font-mono">
+                                                <div className="text-2xl font-black text-white">{pbpSnapshotState.teamAScore} <span className="text-slate-600">-</span> {pbpSnapshotState.teamBScore}</div>
+                                                <div className="text-[9px] uppercase tracking-wider text-slate-500">Now: {teamAScore} - {teamBScore}</div>
+                                            </div>
+                                            <div className="flex items-center justify-end gap-2 min-w-0">
+                                                <span className="text-xs font-black uppercase text-slate-200 truncate">{awayTeamLabel}</span>
+                                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: liveAwayTeam?.color || '#ef4444' }} />
+                                            </div>
+                                        </div>
+                                        {pbpSnapshotScoreMismatch && (
+                                            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+                                                The score tag on this entry says {pbpSnapshotScoreTag.teamAScore} - {pbpSnapshotScoreTag.teamBScore}, but replaying the log gives {pbpSnapshotState.teamAScore} - {pbpSnapshotState.teamBScore}. An earlier entry was likely edited, deleted, or synced out of order.
+                                            </div>
+                                        )}
+                                        {[
+                                            { team: liveHomeTeamForDisplay, teamTurnovers: pbpSnapshotState.teamATeamTurnovers, key: 'home' },
+                                            { team: liveAwayTeamForDisplay, teamTurnovers: pbpSnapshotState.teamBTeamTurnovers, key: 'away' }
+                                        ].map(({ team, teamTurnovers, key }) => {
+                                            const snapshotPlayers = (team?.players || []).filter((player) => {
+                                                const pstats = pbpSnapshotState.liveStats?.[player.id];
+                                                return pbpSnapshotState.playedPlayers.includes(player.id)
+                                                    || (pstats && Object.values(pstats).some((value) => Number(value) > 0));
+                                            });
+                                            return (
+                                                <div key={`pbp-snapshot-${key}`} className="space-y-1.5">
+                                                    <div className="flex items-center justify-between">
+                                                        <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-300">{team?.name || (key === 'home' ? 'Home' : 'Away')}</h4>
+                                                        {Number(teamTurnovers || 0) > 0 && (
+                                                            <span className="text-[10px] font-mono text-slate-500">Team TO: <strong className="text-amber-500">{teamTurnovers}</strong></span>
+                                                        )}
+                                                    </div>
+                                                    <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/40">
+                                                        <table className="w-full text-left text-[11px] min-w-[520px]">
+                                                            <thead>
+                                                                <tr className="bg-slate-950/80 text-slate-400 font-mono text-[9px] border-b border-slate-800">
+                                                                    <th className="py-2 px-3">Player</th>
+                                                                    <th className="py-2 px-2 text-center text-orange-400">PTS</th>
+                                                                    <th className="py-2 px-2 text-center">FG</th>
+                                                                    <th className="py-2 px-2 text-center">3PT</th>
+                                                                    <th className="py-2 px-2 text-center">4PT</th>
+                                                                    <th className="py-2 px-2 text-center">FT</th>
+                                                                    <th className="py-2 px-2 text-center">REB</th>
+                                                                    <th className="py-2 px-2 text-center">AST</th>
+                                                                    <th className="py-2 px-2 text-center">STL</th>
+                                                                    <th className="py-2 px-2 text-center">BLK</th>
+                                                                    <th className="py-2 px-2 text-center">TO</th>
+                                                                    <th className="py-2 px-2 text-center text-red-400">PF</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-slate-800/50 font-mono text-slate-300">
+                                                                {snapshotPlayers.length === 0 ? (
+                                                                    <tr><td colSpan={12} className="py-2 px-3 text-slate-500 font-sans">No stats recorded yet at this point.</td></tr>
+                                                                ) : snapshotPlayers.map((player) => {
+                                                                    const pstats = pbpSnapshotState.liveStats?.[player.id] || {};
+                                                                    const totalMade = (pstats.fg2m || 0) + (pstats.fg3m || 0) + (pstats.fg4m || 0);
+                                                                    const totalAtt = totalMade + (pstats.fg2m_miss || 0) + (pstats.fg3m_miss || 0) + (pstats.fg4m_miss || 0);
+                                                                    const isEventPlayer = String(pbpSnapshotEntry.playerId || '') === String(player.id);
+                                                                    return (
+                                                                        <tr key={`pbp-snapshot-${key}-${player.id}`} className={isEventPlayer ? 'bg-cyan-500/10 text-white font-semibold' : ''}>
+                                                                            <td className="py-1.5 px-3 truncate font-sans">
+                                                                                <span className="font-mono text-slate-500 text-[10px] mr-1">#{player.number}</span>
+                                                                                {renderLiveDisplayName(player.name) || player.name}
+                                                                            </td>
+                                                                            <td className="py-1.5 px-2 text-center text-orange-400 font-bold">{pstats.pts || 0}</td>
+                                                                            <td className="py-1.5 px-2 text-center">{totalMade}/{totalAtt}</td>
+                                                                            <td className="py-1.5 px-2 text-center">{pstats.fg3m || 0}/{(pstats.fg3m || 0) + (pstats.fg3m_miss || 0)}</td>
+                                                                            <td className="py-1.5 px-2 text-center">{pstats.fg4m || 0}/{(pstats.fg4m || 0) + (pstats.fg4m_miss || 0)}</td>
+                                                                            <td className="py-1.5 px-2 text-center">{pstats.ftm || 0}/{(pstats.ftm || 0) + (pstats.ft_miss || 0)}</td>
+                                                                            <td className="py-1.5 px-2 text-center text-emerald-400">{pstats.reb || 0}</td>
+                                                                            <td className="py-1.5 px-2 text-center text-blue-400">{pstats.ast || 0}</td>
+                                                                            <td className="py-1.5 px-2 text-center">{pstats.stl || 0}</td>
+                                                                            <td className="py-1.5 px-2 text-center">{pstats.blk || 0}</td>
+                                                                            <td className="py-1.5 px-2 text-center text-amber-500">{pstats.to || 0}</td>
+                                                                            <td className="py-1.5 px-2 text-center text-red-400 font-bold">{pstats.pf || 0}</td>
+                                                                        </tr>
+                                                                    );
+                                                                })}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </>
+                                )}
+                                <div className="grid grid-cols-3 gap-2 pt-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPbpSnapshotLogId(visiblePbpLogs[pbpSnapshotIndex + 1]?.id || null)}
+                                        disabled={pbpSnapshotIndex + 1 >= visiblePbpLogs.length || !visiblePbpLogs[pbpSnapshotIndex + 1]?.id}
+                                        className="py-2 bg-slate-950 text-slate-300 border border-slate-800 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                    >
+                                        ◀ Older
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPbpSnapshotLogId(null)}
+                                        className="py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                                    >
+                                        Close
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPbpSnapshotLogId(visiblePbpLogs[pbpSnapshotIndex - 1]?.id || null)}
+                                        disabled={pbpSnapshotIndex <= 0 || !visiblePbpLogs[pbpSnapshotIndex - 1]?.id}
+                                        className="py-2 bg-slate-950 text-slate-300 border border-slate-800 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                                    >
+                                        Newer ▶
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
