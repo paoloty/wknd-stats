@@ -159,6 +159,76 @@
             Image: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         };
 
+        // Press-and-hold confirm for destructive actions: releasing early cancels. When
+        // `resetKey` changes (e.g. the preview it confirms was recomputed), any in-progress
+        // hold is cancelled and the button stays locked briefly so a stale preview can't be
+        // confirmed by a hold that started before the numbers changed.
+        function HoldToConfirmButton({ label, holdingLabel, durationMs = 1500, resetKey = '', disabled = false, onConfirm, className = '' }) {
+            const [isHolding, setIsHolding] = useState(false);
+            const [isLocked, setIsLocked] = useState(false);
+            const holdTimerRef = useRef(null);
+            const isFirstResetKeyRef = useRef(true);
+
+            const cancelHold = () => {
+                if (holdTimerRef.current) {
+                    clearTimeout(holdTimerRef.current);
+                    holdTimerRef.current = null;
+                }
+                setIsHolding(false);
+            };
+
+            useEffect(() => {
+                if (isFirstResetKeyRef.current) {
+                    isFirstResetKeyRef.current = false;
+                    return undefined;
+                }
+                cancelHold();
+                setIsLocked(true);
+                const unlockTimer = setTimeout(() => setIsLocked(false), 1500);
+                return () => clearTimeout(unlockTimer);
+            }, [resetKey]);
+
+            useEffect(() => () => {
+                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+            }, []);
+
+            const isDisabled = disabled || isLocked;
+
+            const startHold = (e) => {
+                if (isDisabled) return;
+                if (e.button !== undefined && e.button !== 0) return;
+                e.preventDefault();
+                cancelHold();
+                setIsHolding(true);
+                holdTimerRef.current = setTimeout(() => {
+                    holdTimerRef.current = null;
+                    setIsHolding(false);
+                    onConfirm?.();
+                }, durationMs);
+            };
+
+            return (
+                <button
+                    type="button"
+                    disabled={isDisabled}
+                    onPointerDown={startHold}
+                    onPointerUp={cancelHold}
+                    onPointerLeave={cancelHold}
+                    onPointerCancel={cancelHold}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className={`relative overflow-hidden select-none touch-none ${className}`}
+                    style={{ WebkitTouchCallout: 'none' }}
+                >
+                    <span
+                        aria-hidden="true"
+                        className="absolute inset-y-0 left-0 bg-white/25"
+                        style={{ width: isHolding ? '100%' : '0%', transition: isHolding ? `width ${durationMs}ms linear` : 'none' }}
+                    />
+                    <span className="relative">{isLocked ? 'Preview updated…' : (isHolding ? (holdingLabel || label) : label)}</span>
+                </button>
+            );
+        }
+
         // Data is loaded from SQLite-backed API endpoints.
 
         function App() {
@@ -348,6 +418,12 @@
             const [showAccountMenu, setShowAccountMenu] = useState(false);
             const [editingLiveLogId, setEditingLiveLogId] = useState(null);
             const [pbpSnapshotLogId, setPbpSnapshotLogId] = useState(null);
+            const [pbpSnapshotMode, setPbpSnapshotMode] = useState('view');
+            const [pbpContextMenu, setPbpContextMenu] = useState(null);
+            const [showRestoreVoidedList, setShowRestoreVoidedList] = useState(false);
+            const [pendingRemoteRestore, setPendingRemoteRestore] = useState(null);
+            const pbpLongPressRef = useRef({ timer: null, x: 0, y: 0 });
+            const appliedRestoreIdsRef = useRef(new Set());
             const [editingLiveLogActionId, setEditingLiveLogActionId] = useState('');
             const [selectedPlayerId, setSelectedPlayerId] = useState('');
 
@@ -1280,6 +1356,21 @@
                 if (locallyDeletedLiveLogIdsRef.current.has(String(event.id))) {
                     return;
                 }
+                if (getRestoreVoidedIds(gameLogRef.current || []).has(String(event.id))) {
+                    return;
+                }
+
+                if (event.kind === 'meta' && event.metaType === 'restorePoint') {
+                    remoteEventIdsRef.current.add(event.id);
+                    const restoreVoidedIds = getRestoreVoidedIds([event]);
+                    setGameLog((prev) => {
+                        if (prev.some((log) => log.id === event.id)) return prev;
+                        return stripRestoredEvents([event, ...prev], restoreVoidedIds).slice(0, MAX_LIVE_LOG_ENTRIES);
+                    });
+                    // Replay once the stripped log is committed (see the pendingRemoteRestore effect).
+                    setPendingRemoteRestore(event);
+                    return;
+                }
 
                 setSyncDebug((prev) => ({
                     ...prev,
@@ -1348,6 +1439,7 @@
 
                 setGameLog((prev) => {
                     if (prev.some((log) => log.id === event.id)) return prev;
+                    if (getRestoreVoidedIds(prev).has(String(event.id))) return prev;
                     const nextLog = [event, ...prev].slice(0, MAX_LIVE_LOG_ENTRIES);
 
                     const replayed = buildLiveStateFromEvents(liveGameSnapshotRef.current, nextLog);
@@ -2284,6 +2376,48 @@
                 return { lineup, bench };
             };
 
+            // Restore-to-event: a hidden 'restorePoint' marker deletes every event listed in its
+            // voidedIds. The server only ever unions event logs, so deleted events keep coming
+            // back from other devices and stale uploads — every path that ingests a log strips
+            // them again using the markers it holds. Presence/focus meta are control-plane state,
+            // not game state, so a restore never deletes them.
+            const RESTORE_PRESERVED_META_TYPES = new Set(['rolePresence', 'adminFocusSet', 'restorePoint', 'gameStartSnapshot']);
+            // Replay starts from the latest of these. 'gameStartSnapshot' pins the true starting
+            // state into the log itself, since liveGameSnapshot advances at every period end.
+            const isReplayBaseEvent = (event) => event?.kind === 'meta'
+                && (event?.metaType === 'periodCheckpoint' || event?.metaType === 'gameStartSnapshot')
+                && Boolean(event?.checkpointSnapshot);
+            const getRestoreVoidedIds = (...logLists) => {
+                const voidedIds = new Set();
+                logLists.forEach((logs) => (logs || []).forEach((event) => {
+                    if (event?.kind !== 'meta' || event?.metaType !== 'restorePoint' || !Array.isArray(event.voidedIds)) return;
+                    event.voidedIds.forEach((id) => {
+                        if (id) voidedIds.add(String(id));
+                    });
+                }));
+                return voidedIds;
+            };
+            const stripRestoredEvents = (logs, voidedIds) => {
+                const safeLogs = Array.isArray(logs) ? logs : [];
+                if (!voidedIds || voidedIds.size === 0) return safeLogs;
+                return safeLogs.filter((event) => !voidedIds.has(String(event?.id || '')));
+            };
+            const createZeroLiveSnapshot = (lineups = {}) => ({
+                teamAId,
+                teamBId,
+                teamAScore: 0,
+                teamBScore: 0,
+                teamATeamTurnovers: 0,
+                teamBTeamTurnovers: 0,
+                currentQuarter: 1,
+                teamALineup: [...(lineups.teamALineup || [])],
+                teamABench: [...(lineups.teamABench || [])],
+                teamBLineup: [...(lineups.teamBLineup || [])],
+                teamBBench: [...(lineups.teamBBench || [])],
+                liveStats: {},
+                playedPlayers: []
+            });
+
             const buildLiveStateFromEvents = (snapshot, events) => {
                 if (!snapshot) return null;
                 const cloneReplaySnapshot = (sourceSnapshot) => {
@@ -2343,7 +2477,7 @@
                 let replaySnapshot = cloneReplaySnapshot(snapshot);
                 let replayStartIndex = 0;
                 orderedEvents.forEach((event, index) => {
-                    if (event?.kind === 'meta' && event?.metaType === 'periodCheckpoint' && event?.checkpointSnapshot) {
+                    if (isReplayBaseEvent(event)) {
                         const checkpointSnapshot = cloneReplaySnapshot(event.checkpointSnapshot);
                         if (checkpointSnapshot) {
                             replaySnapshot = checkpointSnapshot;
@@ -2416,7 +2550,7 @@
                         return;
                     }
 
-                    if (event.kind === 'meta' && event.metaType === 'periodCheckpoint') {
+                    if (event.kind === 'meta' && (event.metaType === 'periodCheckpoint' || event.metaType === 'gameStartSnapshot')) {
                         return;
                     }
 
@@ -2546,25 +2680,169 @@
                 const targetKey = getEventTimeKey(target);
                 const eventsUpToTarget = safeLogs.filter((event) => getEventTimeKey(event) <= targetKey);
 
-                const isCheckpoint = (event) => event?.kind === 'meta' && event?.metaType === 'periodCheckpoint' && event?.checkpointSnapshot;
-                const zeroSnapshot = {
-                    teamAId,
-                    teamBId,
-                    teamAScore: 0,
-                    teamBScore: 0,
-                    teamATeamTurnovers: 0,
-                    teamBTeamTurnovers: 0,
-                    currentQuarter: 1,
-                    teamALineup: [],
-                    teamABench: [],
-                    teamBLineup: [],
-                    teamBBench: [],
-                    liveStats: {},
-                    playedPlayers: []
-                };
-                const canUseLiveSnapshot = eventsUpToTarget.some(isCheckpoint) || !safeLogs.some(isCheckpoint);
-                const baseSnapshot = (canUseLiveSnapshot && liveGameSnapshot) ? liveGameSnapshot : zeroSnapshot;
+                const canUseLiveSnapshot = eventsUpToTarget.some(isReplayBaseEvent) || !safeLogs.some(isReplayBaseEvent);
+                const baseSnapshot = (canUseLiveSnapshot && liveGameSnapshot) ? liveGameSnapshot : createZeroLiveSnapshot();
                 return buildLiveStateFromEvents(baseSnapshot, eventsUpToTarget);
+            };
+
+            // Everything needed to restore the live game to just after `targetId`. The preview and
+            // the actual restore both build from this, so what gets confirmed is exactly what was
+            // previewed. A restore may reopen at most one ended period.
+            const buildRestorePlan = (logs, targetId) => {
+                const safeLogs = Array.isArray(logs) ? logs : [];
+                const target = safeLogs.find((event) => event?.id === targetId);
+                if (!target) return null;
+
+                const targetKey = getEventTimestampFromId(target.id);
+                const voidedEvents = safeLogs.filter((event) => event?.id
+                    && getEventTimestampFromId(event.id) > targetKey
+                    && !(event.kind === 'meta' && RESTORE_PRESERVED_META_TYPES.has(event.metaType)));
+                const reopenedPeriodCount = voidedEvents.filter((event) => event?.kind === 'meta' && event?.metaType === 'quarterEnd').length;
+
+                let blockedReason = '';
+                if (target.hiddenFromLog || (target.kind === 'meta' && RESTORE_PRESERVED_META_TYPES.has(target.metaType))) {
+                    blockedReason = "This entry can't be used as a restore point.";
+                } else if (voidedEvents.length === 0) {
+                    blockedReason = 'Nothing has been logged after this event.';
+                } else if (reopenedPeriodCount > 1) {
+                    blockedReason = 'Restore can only go back as far as the start of the previous period.';
+                }
+                if (blockedReason) {
+                    return { target, voidedEvents, reopenedPeriodCount, blockedReason };
+                }
+
+                const voidedIds = new Set(voidedEvents.map((event) => String(event.id)));
+                const remainingLog = safeLogs.filter((event) => !voidedIds.has(String(event?.id || '')));
+
+                // If no checkpoint survives, pin a replay base into the log itself: other devices
+                // replay from their own liveGameSnapshot, which has already advanced past it.
+                // Older sessions never recorded their starting lineups, so if the restore deletes
+                // the Q1 checkpoint the base can only approximate lineups with the current ones.
+                let gameStartEvent = null;
+                let approximatesStartingLineups = false;
+                if (!remainingLog.some(isReplayBaseEvent)) {
+                    approximatesStartingLineups = voidedEvents.some(isReplayBaseEvent) || !liveGameSnapshot;
+                    const earliestKey = remainingLog.reduce((minKey, event) => {
+                        const key = getEventTimestampFromId(event?.id);
+                        return key > 0 && key < minKey ? key : minKey;
+                    }, targetKey);
+                    gameStartEvent = {
+                        id: `${Math.max(1, earliestKey - 1)}_gamestart_${Math.random().toString(36).slice(2, 8)}`,
+                        time: target.time || '',
+                        text: 'Game start snapshot',
+                        kind: 'meta',
+                        metaType: 'gameStartSnapshot',
+                        quarter: 1,
+                        hiddenFromLog: true,
+                        lockProtected: true,
+                        lockReason: 'gameStartSnapshot',
+                        checkpointSnapshot: approximatesStartingLineups
+                            ? createZeroLiveSnapshot({ teamALineup, teamABench, teamBLineup, teamBBench })
+                            : liveGameSnapshot
+                    };
+                }
+                const logWithBase = gameStartEvent ? [...remainingLog, gameStartEvent] : remainingLog;
+                const replayed = buildLiveStateFromEvents(liveGameSnapshot || createZeroLiveSnapshot(), logWithBase);
+
+                // Period/clock state at the target, mirroring what the app holds after each of
+                // these period events (e.g. after a quarter ends it already sits in the next one,
+                // awaiting its start).
+                const latestPeriodMeta = getLatestLogEvent(
+                    remainingLog,
+                    (event) => event?.kind === 'meta' && ['matchStart', 'quarterStart', 'quarterEnd'].includes(event.metaType)
+                );
+                let restoredQuarter = 1;
+                let restoredAwaitingPeriodStart = true;
+                let restoredClockSeconds = 0;
+                if (latestPeriodMeta?.metaType === 'quarterEnd') {
+                    restoredQuarter = getQuarterFromEvent(latestPeriodMeta) + 1;
+                    restoredClockSeconds = getPeriodDurationSeconds(restoredQuarter);
+                } else if (latestPeriodMeta?.metaType === 'quarterStart') {
+                    restoredQuarter = getQuarterFromEvent(latestPeriodMeta);
+                    restoredAwaitingPeriodStart = false;
+                    const duration = getPeriodDurationSeconds(restoredQuarter);
+                    const latestClockEvent = getLatestLogEvent(
+                        remainingLog,
+                        (event) => getEventTimestampFromId(event?.id) <= targetKey
+                            && getQuarterFromEvent(event) === restoredQuarter
+                            && parseClockInputToSeconds(event?.clockRemaining) !== null
+                    );
+                    const parsedClock = latestClockEvent ? parseClockInputToSeconds(latestClockEvent.clockRemaining) : null;
+                    restoredClockSeconds = parsedClock === null ? duration : Math.max(0, Math.min(duration, parsedClock));
+                }
+
+                return {
+                    target,
+                    voidedEvents,
+                    voidedIds: Array.from(voidedIds),
+                    reopenedPeriodCount,
+                    blockedReason: '',
+                    gameStartEvent,
+                    approximatesStartingLineups,
+                    logWithBase,
+                    replayed,
+                    restoredQuarter,
+                    restoredClockSeconds,
+                    restoredAwaitingPeriodStart,
+                    restoredIsPlayPaused: isTimeoutCurrentlyActive(remainingLog)
+                };
+            };
+
+            // Applies a restore (local or received from another device) to live state. `nextLog`
+            // must already include the restore marker and have its voided events stripped.
+            const applyRestoredLiveState = (nextLog, restoreMarker) => {
+                const replayed = buildLiveStateFromEvents(liveGameSnapshotRef.current || createZeroLiveSnapshot(), nextLog);
+                if (!replayed) return false;
+
+                const voidedIds = getRestoreVoidedIds(nextLog);
+                setGameLog(nextLog);
+                setLoggedHistory((prev) => stripRestoredEvents(prev, voidedIds));
+                setLiveStats(replayed.liveStats);
+                setTeamAScore(replayed.teamAScore);
+                setTeamBScore(replayed.teamBScore);
+                setTeamATeamTurnovers(replayed.teamATeamTurnovers || 0);
+                setTeamBTeamTurnovers(replayed.teamBTeamTurnovers || 0);
+                setTeamALineup(replayed.teamALineup);
+                setTeamABench(replayed.teamABench);
+                setTeamBLineup(replayed.teamBLineup);
+                setTeamBBench(replayed.teamBBench);
+                setPlayedPlayers(replayed.playedPlayers);
+
+                const latestBaseEvent = getLatestLogEvent(nextLog, isReplayBaseEvent);
+                if (latestBaseEvent?.checkpointSnapshot) {
+                    setLiveGameSnapshot(latestBaseEvent.checkpointSnapshot);
+                }
+                const endedQuarters = new Set(
+                    nextLog
+                        .filter((event) => event?.kind === 'meta' && event?.metaType === 'quarterEnd')
+                        .map((event) => getQuarterFromEvent(event))
+                );
+                setPeriodSnapshots((prev) => (prev || []).filter((snapshot) => endedQuarters.has(Number(snapshot?.quarter || 0))));
+
+                // The restored lineup must win over any rotation that was deleted, so it becomes
+                // the newest lineup revision on every device.
+                const restoreRevision = getLineupRevisionFromEventId(restoreMarker?.id);
+                if (restoreRevision > 0) {
+                    setLineupRevision((prev) => {
+                        const next = Math.max(prev, restoreRevision);
+                        lineupRevisionRef.current = next;
+                        return next;
+                    });
+                }
+
+                const restoredQuarter = Number(restoreMarker?.restoredQuarter) || replayed.currentQuarter || 1;
+                const restoredClockSeconds = Math.max(0, Number(restoreMarker?.restoredClockSeconds) || 0);
+                setCurrentQuarter(restoredQuarter);
+                setPeriodClockSeconds(restoredClockSeconds);
+                setManualClockInput(formatSecondsAsClock(restoredClockSeconds));
+                isPeriodClockRunningRef.current = false;
+                setIsPeriodClockRunning(false);
+                setIsPlayPaused(Boolean(restoreMarker?.restoredIsPlayPaused));
+                setAwaitingPeriodStart(Boolean(restoreMarker?.restoredAwaitingPeriodStart));
+                setAwaitingOvertimeDecision(false);
+                setPendingPeriodActionMode(null);
+                setEditingLiveLogId(null);
+                return true;
             };
 
             // Admin corrections to an already-ended period can't safely replay "from the start":
@@ -3024,21 +3302,33 @@
                         }
                     });
                 }
+                // Restore markers from either side delete their events from both sides.
+                const restoreVoidedIds = isDifferentLiveSession
+                    ? getRestoreVoidedIds(normalizedGameLog)
+                    : getRestoreVoidedIds(normalizedGameLog, gameLogRef.current || []);
                 const filteredRemoteGameLog = normalizedGameLog.filter((event) => {
                     const eventId = String(event?.id || '').trim();
-                    return !eventId || !locallyDeletedIds.has(eventId);
+                    return !eventId || (!locallyDeletedIds.has(eventId) && !restoreVoidedIds.has(eventId));
                 });
                 const filteredRemoteLoggedHistory = normalizedLoggedHistory.filter((event) => {
                     const eventId = String(event?.id || '').trim();
-                    return !eventId || !locallyDeletedIds.has(eventId);
+                    return !eventId || (!locallyDeletedIds.has(eventId) && !restoreVoidedIds.has(eventId));
                 });
 
                 const effectiveGameLog = keepLocalRotation
-                    ? mergeUniqueEventsById(gameLogRef.current || [], filteredRemoteGameLog, MAX_LIVE_LOG_ENTRIES)
+                    ? stripRestoredEvents(mergeUniqueEventsById(gameLogRef.current || [], filteredRemoteGameLog, MAX_LIVE_LOG_ENTRIES), restoreVoidedIds)
                     : filteredRemoteGameLog;
                 const effectiveLoggedHistory = keepLocalRotation
-                    ? mergeUniqueEventsById(loggedHistoryRef.current || [], filteredRemoteLoggedHistory, MAX_LIVE_HISTORY_ENTRIES)
+                    ? stripRestoredEvents(mergeUniqueEventsById(loggedHistoryRef.current || [], filteredRemoteLoggedHistory, MAX_LIVE_HISTORY_ENTRIES), restoreVoidedIds)
                     : filteredRemoteLoggedHistory;
+                // After a restore, the session's own liveGameSnapshot/periodSnapshots may come from a
+                // device that hasn't seen it yet, so derive both from the surviving log instead.
+                const restoredLogBaseEvent = restoreVoidedIds.size > 0 ? getLatestLogEvent(effectiveGameLog, isReplayBaseEvent) : null;
+                const restoredEndedQuarters = restoreVoidedIds.size > 0
+                    ? new Set(effectiveGameLog
+                        .filter((event) => event?.kind === 'meta' && event?.metaType === 'quarterEnd')
+                        .map((event) => getQuarterFromEvent(event)))
+                    : null;
                 lastRemoteGameLogIdsRef.current = new Set(filteredRemoteGameLog.map((event) => event?.id).filter(Boolean));
                 const replayed = buildLiveStateFromEvents(replaySnapshot || liveGameSnapshotRef.current || null, effectiveGameLog) || null;
                 const hasAdminFocusEvent = (effectiveGameLog || []).some((event) => event?.kind === 'meta' && event?.metaType === 'adminFocusSet');
@@ -3188,7 +3478,10 @@
                 setTeamBLineup(teamBRotation.lineup);
                 setTeamBBench(teamBRotation.bench);
                 setLiveStats(replayed?.liveStats || session.liveStats || {});
-                setPeriodSnapshots(Array.isArray(session.periodSnapshots) ? session.periodSnapshots : []);
+                const sessionPeriodSnapshots = Array.isArray(session.periodSnapshots) ? session.periodSnapshots : [];
+                setPeriodSnapshots(restoredEndedQuarters
+                    ? sessionPeriodSnapshots.filter((snapshot) => restoredEndedQuarters.has(Number(snapshot?.quarter || 0)))
+                    : sessionPeriodSnapshots);
                 setPeriodClockSeconds(effectiveRemoteClockSeconds);
                 // Only let log-derived pause state override session state when the session also
                 // agrees the clock is paused. If the server explicitly says running (e.g. admin
@@ -3206,7 +3499,7 @@
                         : (shouldEnforcePauseFromLog ? true : Boolean(session.isPlayPaused))
                 );
                 setLivePlayerSeconds(session.livePlayerSeconds || {});
-                setLiveGameSnapshot(replaySnapshot || null);
+                setLiveGameSnapshot(restoredLogBaseEvent?.checkpointSnapshot || replaySnapshot || null);
                 setGameLog(effectiveGameLog);
                 if (!hasAdminFocusEvent) {
                     setSharedAdminFocus('both');
@@ -3347,6 +3640,29 @@
                 Number(pbpSnapshotScoreTag.teamAScore) !== Number(pbpSnapshotState.teamAScore)
                 || Number(pbpSnapshotScoreTag.teamBScore) !== Number(pbpSnapshotState.teamBScore)
             ));
+            const canRestoreLiveGame = authRole === 'admin' && canOperateLive && isGameLive && isLoggedIn;
+            const pbpContextMenuEntry = pbpContextMenu
+                ? (visiblePbpLogs.find((log) => log?.id === pbpContextMenu.logId) || null)
+                : null;
+            const pbpContextMenuRestorePlan = (pbpContextMenuEntry && canRestoreLiveGame)
+                ? buildRestorePlan(gameLog, pbpContextMenuEntry.id)
+                : null;
+            const isRestorePreviewOpen = Boolean(pbpSnapshotEntry) && pbpSnapshotMode === 'restore' && canRestoreLiveGame;
+            const restorePreviewPlan = isRestorePreviewOpen ? buildRestorePlan(gameLog, pbpSnapshotEntry.id) : null;
+            const restorePreviewSignature = restorePreviewPlan
+                ? `${(restorePreviewPlan.voidedIds || []).length}|${gameLog?.[0]?.id || ''}`
+                : '';
+            const RESTORE_DIFF_STATS = [['pts', 'PTS'], ['reb', 'REB'], ['ast', 'AST'], ['stl', 'STL'], ['blk', 'BLK'], ['to', 'TO'], ['pf', 'PF']];
+            const restorePreviewPlayerChanges = (restorePreviewPlan?.replayed)
+                ? [liveHomeTeamForDisplay, liveAwayTeamForDisplay].flatMap((team) => (team?.players || []).map((player) => {
+                    const before = liveStats?.[player.id] || {};
+                    const after = restorePreviewPlan.replayed.liveStats?.[player.id] || {};
+                    const changes = RESTORE_DIFF_STATS
+                        .map(([field, label]) => ({ label, before: Number(before[field] || 0), after: Number(after[field] || 0) }))
+                        .filter((change) => change.before !== change.after);
+                    return changes.length ? { player, teamName: team?.name || '', changes } : null;
+                }).filter(Boolean))
+                : [];
             const formatLiveLogEditPlayerLabel = (player) => {
                 const rawName = String(player?.name || '').trim();
                 const formattedName = rawName.includes(',')
@@ -5460,6 +5776,19 @@
             }, [isGameLive, gameLog]);
 
             useEffect(() => {
+                if (!pendingRemoteRestore) return;
+                const markerId = String(pendingRemoteRestore.id || '');
+                if (!(gameLog || []).some((log) => log?.id === pendingRemoteRestore.id)) return;
+                setPendingRemoteRestore(null);
+                if (!markerId || appliedRestoreIdsRef.current.has(markerId)) return;
+                appliedRestoreIdsRef.current.add(markerId);
+                applyRestoredLiveState(gameLog, pendingRemoteRestore);
+                setPbpSnapshotLogId(null);
+                setPbpContextMenu(null);
+                showToast('An admin restored the game to an earlier event.', 'info');
+            }, [pendingRemoteRestore, gameLog]);
+
+            useEffect(() => {
                 if (!isGameLive) {
                     prevLiveStatsRef.current = cloneStatsMap(liveStats);
                     return;
@@ -7465,6 +7794,7 @@
                 clearTransientLiveActionState();
                 setLoggedHistory([]);
                 locallyDeletedLiveLogIdsRef.current = new Set();
+                const matchStartTs = Date.now();
                 const initialGameLog = [
                     {
                         id: `${focusEventTs}_${Math.random().toString(36).slice(2, 8)}`,
@@ -7480,13 +7810,27 @@
                         clientId: syncClientIdRef.current
                     },
                     {
-                        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        id: `${matchStartTs}_${Math.random().toString(36).slice(2, 8)}`,
                         time: getWallClockTime(),
                         text: 'Start Match',
                         kind: 'meta',
                         metaType: 'matchStart',
                         quarter: 1,
                         clockRemaining: formatSecondsAsClock(0)
+                    },
+                    // Pins the true starting lineups into the log so a later restore into Q1 can
+                    // replay from them (liveGameSnapshot itself advances at every period end).
+                    {
+                        id: `${matchStartTs - 1}_gamestart_${Math.random().toString(36).slice(2, 8)}`,
+                        time: getWallClockTime(),
+                        text: 'Game start snapshot',
+                        kind: 'meta',
+                        metaType: 'gameStartSnapshot',
+                        quarter: 1,
+                        hiddenFromLog: true,
+                        lockProtected: true,
+                        lockReason: 'gameStartSnapshot',
+                        checkpointSnapshot: initialLiveSnapshot
                     }
                 ];
                 setGameLog(initialGameLog);
@@ -8296,6 +8640,130 @@
                 setPlayedPlayers(replayed.playedPlayers);
                 restoreClockFromLatestLog(replayGameLog, replayed.currentQuarter || currentQuarter);
                 showToast(isAdminUnlock ? 'Ended-period log deleted (admin override).' : 'Log entry removed.', 'success');
+            };
+
+            const openPbpContextMenu = (logId, x, y) => {
+                if (!logId) return;
+                setPbpContextMenu({ logId, x, y, openedAt: Date.now() });
+            };
+
+            const closePbpContextMenu = () => setPbpContextMenu(null);
+
+            const clearPbpLongPress = () => {
+                if (pbpLongPressRef.current.timer) {
+                    clearTimeout(pbpLongPressRef.current.timer);
+                    pbpLongPressRef.current.timer = null;
+                }
+            };
+
+            // Long-press opens the menu on touch devices where no contextmenu event fires (iOS).
+            // Moving more than ~10px cancels it so scrolling the log still works.
+            const getPbpLongPressHandlers = (logId) => ({
+                onContextMenu: (e) => {
+                    e.preventDefault();
+                    clearPbpLongPress();
+                    openPbpContextMenu(logId, e.clientX, e.clientY);
+                },
+                onTouchStart: (e) => {
+                    const touch = e.touches?.[0];
+                    if (!touch) return;
+                    clearPbpLongPress();
+                    pbpLongPressRef.current.x = touch.clientX;
+                    pbpLongPressRef.current.y = touch.clientY;
+                    pbpLongPressRef.current.timer = setTimeout(() => {
+                        pbpLongPressRef.current.timer = null;
+                        openPbpContextMenu(logId, touch.clientX, touch.clientY);
+                    }, 500);
+                },
+                onTouchMove: (e) => {
+                    const touch = e.touches?.[0];
+                    if (!touch) return;
+                    const movedX = Math.abs(touch.clientX - pbpLongPressRef.current.x);
+                    const movedY = Math.abs(touch.clientY - pbpLongPressRef.current.y);
+                    if (movedX > 10 || movedY > 10) clearPbpLongPress();
+                },
+                onTouchEnd: clearPbpLongPress,
+                onTouchCancel: clearPbpLongPress
+            });
+
+            const handleOpenPbpSnapshot = (logId) => {
+                closePbpContextMenu();
+                setPbpSnapshotMode('view');
+                setPbpSnapshotLogId(logId);
+            };
+
+            const handleOpenRestorePreview = (logId) => {
+                closePbpContextMenu();
+                if (!canRestoreLiveGame) return;
+                // Freeze the game while the admin reviews the preview.
+                if (isPeriodClockRunning && !isAwaitingPeriodStart && !timeoutIsActive) {
+                    handlePauseGame();
+                }
+                setShowRestoreVoidedList(false);
+                setPbpSnapshotMode('restore');
+                setPbpSnapshotLogId(logId);
+            };
+
+            const handleClosePbpSnapshot = () => {
+                setPbpSnapshotLogId(null);
+                setPbpSnapshotMode('view');
+            };
+
+            const handleRestoreToLogEntry = (targetId) => {
+                if (!canRestoreLiveGame) return;
+                // Rebuild the plan at confirm time from the latest log; the hold button is reset
+                // whenever the preview changes, so this matches what the admin just reviewed.
+                const plan = buildRestorePlan(gameLog, targetId);
+                if (!plan || plan.blockedReason) {
+                    showToast(plan?.blockedReason || 'That event is no longer in the log.', 'info');
+                    return;
+                }
+                if (!plan.replayed) {
+                    showToast("Restore isn't available for this legacy session.", 'error');
+                    return;
+                }
+
+                markLocalSessionUpdated();
+                const restoreTs = Date.now();
+                clockControlRevisionRef.current = Math.max(Number(clockControlRevisionRef.current || 0), restoreTs);
+                const targetText = String(plan.target.text || '').replace(/^\[(HOME|AWAY)\]\s*/, '');
+                const restoreMarker = {
+                    id: `${restoreTs}_restore_${Math.random().toString(36).slice(2, 8)}`,
+                    time: getWallClockTime(),
+                    text: `Restored to: ${targetText}`,
+                    kind: 'meta',
+                    metaType: 'restorePoint',
+                    quarter: Number(getEffectiveQuarterFromLogEntry(plan.target, gameLog)) || plan.restoredQuarter,
+                    hiddenFromLog: true,
+                    lockProtected: true,
+                    lockReason: 'restorePoint',
+                    targetId: plan.target.id,
+                    voidedIds: plan.voidedIds,
+                    restoredQuarter: plan.restoredQuarter,
+                    restoredClockSeconds: plan.restoredClockSeconds,
+                    restoredAwaitingPeriodStart: plan.restoredAwaitingPeriodStart,
+                    restoredIsPlayPaused: plan.restoredIsPlayPaused
+                };
+                const nextLog = [restoreMarker, ...plan.logWithBase].slice(0, MAX_LIVE_LOG_ENTRIES);
+
+                // Send the replay base before the marker so other devices never replay the
+                // marker without it; mark both processed so the gameLog effect doesn't resend.
+                [plan.gameStartEvent, restoreMarker].filter(Boolean).forEach((event) => {
+                    processedGameLogIdsRef.current.add(event.id);
+                    enqueueLiveEvent(event);
+                });
+                appliedRestoreIdsRef.current.add(restoreMarker.id);
+                applyRestoredLiveState(nextLog, restoreMarker);
+                handleClosePbpSnapshot();
+
+                const restoredClockLabel = plan.restoredAwaitingPeriodStart
+                    ? `${getPeriodLabel(plan.restoredQuarter)} (not started)`
+                    : `${getPeriodLabel(plan.restoredQuarter)} ${formatSecondsAsClock(plan.restoredClockSeconds)}`;
+                const deletedCount = plan.voidedEvents.filter((event) => !event?.hiddenFromLog).length;
+                showToast(`Restored to ${restoredClockLabel}. ${deletedCount} event${deletedCount === 1 ? '' : 's'} deleted.`, 'success');
+                if (plan.approximatesStartingLineups) {
+                    setTimeout(() => showToast('Starting lineups were never recorded for this game — check who is on court.', 'info'), 2500);
+                }
             };
 
             const handleOpenLiveLogEdit = (logId) => {
@@ -13618,7 +14086,9 @@
                                                         return (
                                                             <div
                                                                 key={log.id || idx}
-                                                                className={`py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''}`}
+                                                                {...(log?.id ? getPbpLongPressHandlers(log.id) : {})}
+                                                                style={{ WebkitTouchCallout: 'none' }}
+                                                                className={`py-1.5 px-1.5 text-slate-300 rounded border select-none transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''} ${pbpContextMenu?.logId && pbpContextMenu.logId === log.id ? 'ring-1 ring-cyan-400/60' : ''}`}
                                                             >
                                                                 <div className="flex items-center justify-between gap-2">
                                                                     <div className="flex flex-col items-start gap-0 min-w-0">
@@ -13754,6 +14224,9 @@
                                                             {undoTargetBlockedReason ? ` (${undoTargetBlockedReason})` : ''}
                                                         </div>
                                                     )}
+                                                    {canRestoreLiveGame && (
+                                                        <div className="mt-1 text-[9px] text-slate-600">Right-click or hold an entry for more options</div>
+                                                    )}
                                                 </div>
                                                 <div className="p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]">
                                                     {gameLog.filter((log) => !log?.hiddenFromLog).map((log, idx) => {
@@ -13783,7 +14256,9 @@
                                                         return (
                                                             <div
                                                                 key={log.id || idx}
-                                                                className={`py-1.5 px-1.5 text-slate-300 rounded border transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''}`}
+                                                                {...(log?.id ? getPbpLongPressHandlers(log.id) : {})}
+                                                                style={{ WebkitTouchCallout: 'none' }}
+                                                                className={`py-1.5 px-1.5 text-slate-300 rounded border select-none transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''} ${pbpContextMenu?.logId && pbpContextMenu.logId === log.id ? 'ring-1 ring-cyan-400/60' : ''}`}
                                                             >
                                                                 {/* Top row: period/clock label left, score pill right */}
                                                                 <div className="flex items-center justify-between gap-2">
@@ -13810,7 +14285,7 @@
                                                                     <div className="inline-flex items-center gap-1.5">
                                                                         <button
                                                                             type="button"
-                                                                            onClick={() => setPbpSnapshotLogId(log.id)}
+                                                                            onClick={() => handleOpenPbpSnapshot(log.id)}
                                                                             disabled={!log?.id}
                                                                             className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-slate-700/70 bg-slate-900/70 text-slate-400 hover:bg-cyan-500/15 hover:text-cyan-300 cursor-pointer transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
                                                                             title="View score and stats as of this event"
@@ -18317,8 +18792,8 @@
                     )}
 
                     {/* PLAY-BY-PLAY SNAPSHOT: READ-ONLY SCORE/STATS AS OF A SELECTED EVENT */}
-                    {pbpSnapshotEntry && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setPbpSnapshotLogId(null)}>
+                    {pbpSnapshotEntry && !isRestorePreviewOpen && (
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={handleClosePbpSnapshot}>
                             <div className="bg-slate-900 border border-slate-800 rounded-t-2xl md:rounded-2xl w-full max-w-3xl p-5 shadow-2xl relative my-0 md:my-auto space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                                 <div>
                                     <h3 className="text-sm font-black text-white uppercase tracking-wider">Stats At This Point</h3>
@@ -18451,6 +18926,172 @@
                                         Newer ▶
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* PLAY-BY-PLAY RESTORE PREVIEW: DELETES EVERYTHING AFTER THE SELECTED EVENT */}
+                    {isRestorePreviewOpen && (() => {
+                        const plan = restorePreviewPlan;
+                        const visibleVoidedEvents = (plan?.voidedEvents || []).filter((event) => !event?.hiddenFromLog);
+                        const canConfirm = Boolean(plan && !plan.blockedReason && plan.replayed);
+                        return (
+                            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={handleClosePbpSnapshot}>
+                                <div className="bg-slate-900 border border-rose-500/50 rounded-t-2xl md:rounded-2xl w-full max-w-lg p-5 shadow-2xl relative my-0 md:my-auto space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                                    <div>
+                                        <h3 className="text-sm font-black text-rose-300 uppercase tracking-wider">Restore Game To This Event</h3>
+                                        <p className="mt-1 text-[11px] text-slate-400">Everything logged after this event is permanently deleted on every device. Stats, score, lineups, and the clock go back to this moment.</p>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 text-[11px] text-slate-300">
+                                        <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">
+                                            Restore Point{pbpSnapshotEntry.quarter ? ` · ${getPeriodLabel(pbpSnapshotEntry.quarter)} ${pbpSnapshotEntry.clockRemaining || '--:--'}` : ''}
+                                        </div>
+                                        <div className="break-words font-mono">{String(pbpSnapshotEntry.text || '').replace(/^\[(HOME|AWAY)\]\s*/, '')}</div>
+                                    </div>
+                                    {!plan || plan.blockedReason ? (
+                                        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+                                            {plan?.blockedReason || 'That event is no longer in the log.'}
+                                        </div>
+                                    ) : !plan.replayed ? (
+                                        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+                                            Restore isn't available for this legacy session.
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                                                <div className="min-w-0">
+                                                    <div className="text-[9px] uppercase tracking-wider text-slate-500">Now</div>
+                                                    <div className="text-xl font-black font-mono text-slate-400">{teamAScore} - {teamBScore}</div>
+                                                </div>
+                                                <div className="text-slate-500 text-lg">→</div>
+                                                <div className="min-w-0 text-right">
+                                                    <div className="text-[9px] uppercase tracking-wider text-slate-500">After Restore</div>
+                                                    <div className="text-xl font-black font-mono text-white">{plan.replayed.teamAScore} - {plan.replayed.teamBScore}</div>
+                                                </div>
+                                            </div>
+                                            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 text-[11px] text-slate-300 space-y-1">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span>
+                                                        <strong className="text-rose-300">{visibleVoidedEvents.length}</strong> event{visibleVoidedEvents.length === 1 ? '' : 's'} will be deleted
+                                                    </span>
+                                                    {visibleVoidedEvents.length > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowRestoreVoidedList((prev) => !prev)}
+                                                            className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 cursor-pointer"
+                                                        >
+                                                            {showRestoreVoidedList ? 'Hide list' : 'Show list'}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {showRestoreVoidedList && (
+                                                    <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/70 p-2 font-mono text-[10px] text-slate-400 space-y-1">
+                                                        {visibleVoidedEvents.map((event) => (
+                                                            <div key={`restore-voided-${event.id}`} className="break-words">
+                                                                <span className="text-slate-600">{event.quarter ? `${getPeriodLabel(event.quarter)} ${event.clockRemaining || '--:--'} · ` : ''}</span>
+                                                                {String(event.text || '').replace(/^\[(HOME|AWAY)\]\s*/, '')}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                <div>
+                                                    Clock: <strong className="text-white">
+                                                        {plan.restoredAwaitingPeriodStart
+                                                            ? `${getPeriodLabel(plan.restoredQuarter)} not started (waiting for Start ${getPeriodLabel(plan.restoredQuarter)})`
+                                                            : `${getPeriodLabel(plan.restoredQuarter)} ${formatSecondsAsClock(plan.restoredClockSeconds)}, stopped`}
+                                                    </strong>
+                                                </div>
+                                                {plan.reopenedPeriodCount > 0 && (
+                                                    <div className="text-amber-300">This reopens a period that already ended.</div>
+                                                )}
+                                            </div>
+                                            {plan.approximatesStartingLineups && (
+                                                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+                                                    This game didn't record its starting lineups, so lineups after the restore are approximated from who is on court now. Check the on-court players afterwards.
+                                                </div>
+                                            )}
+                                            {restorePreviewPlayerChanges.length > 0 && (
+                                                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 text-[11px] text-slate-300">
+                                                    <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5">Player Stats That Change</div>
+                                                    <div className="max-h-40 overflow-y-auto space-y-1">
+                                                        {restorePreviewPlayerChanges.map(({ player, changes }) => (
+                                                            <div key={`restore-change-${player.id}`} className="flex flex-wrap items-baseline gap-x-2">
+                                                                <span className="font-bold text-slate-200">#{player.number} {renderLiveDisplayName(player.name) || player.name}</span>
+                                                                <span className="font-mono text-[10px] text-slate-400">
+                                                                    {changes.map((change) => `${change.label} ${change.before}→${change.after}`).join(' · ')}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                    <div className="grid grid-cols-2 gap-2 pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={handleClosePbpSnapshot}
+                                            className="py-2.5 bg-slate-950 text-slate-300 border border-slate-800 text-xs font-bold rounded-xl cursor-pointer"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <HoldToConfirmButton
+                                            label="Hold to restore"
+                                            holdingLabel="Keep holding…"
+                                            resetKey={restorePreviewSignature}
+                                            disabled={!canConfirm}
+                                            onConfirm={() => handleRestoreToLogEntry(pbpSnapshotEntry.id)}
+                                            className="py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    {/* PLAY-BY-PLAY CONTEXT MENU (RIGHT-CLICK / LONG-PRESS) */}
+                    {pbpContextMenu && pbpContextMenuEntry && (
+                        <div
+                            className="fixed inset-0 z-50"
+                            onClick={() => {
+                                // A long-press's own touchend can land here as a click; ignore it.
+                                if (Date.now() - Number(pbpContextMenu.openedAt || 0) < 400) return;
+                                closePbpContextMenu();
+                            }}
+                            onContextMenu={(e) => {
+                                e.preventDefault();
+                                closePbpContextMenu();
+                            }}
+                        >
+                            <div
+                                className="absolute w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl p-1 text-xs"
+                                style={{
+                                    left: Math.max(8, Math.min(Number(pbpContextMenu.x || 0), (typeof window !== 'undefined' ? window.innerWidth : 360) - 232)),
+                                    top: Math.max(8, Math.min(Number(pbpContextMenu.y || 0), (typeof window !== 'undefined' ? window.innerHeight : 640) - 140))
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => handleOpenPbpSnapshot(pbpContextMenuEntry.id)}
+                                    className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-slate-200 hover:bg-slate-800 cursor-pointer"
+                                >
+                                    <Icons.History />
+                                    View stats at this point
+                                </button>
+                                {pbpContextMenuRestorePlan && !pbpContextMenuRestorePlan.blockedReason && (
+                                    <>
+                                        <div className="my-1 border-t border-slate-800" />
+                                        <button
+                                            type="button"
+                                            onClick={() => handleOpenRestorePreview(pbpContextMenuEntry.id)}
+                                            className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left font-bold text-rose-300 hover:bg-rose-500/15 cursor-pointer"
+                                        >
+                                            <Icons.Undo />
+                                            Restore game to here…
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         </div>
                     )}
