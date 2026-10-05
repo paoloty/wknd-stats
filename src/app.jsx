@@ -424,6 +424,14 @@
             const [pendingRemoteRestore, setPendingRemoteRestore] = useState(null);
             const pbpLongPressRef = useRef({ timer: null, x: 0, y: 0 });
             const appliedRestoreIdsRef = useRef(new Set());
+            // Hold (long-press / right-click) menus on stat action buttons, and the two-step
+            // combos they can start: comboPlan is the armed first step, comboFollowUp the armed
+            // second step, pendingComboFollowUp the hand-off between them.
+            const [actionHoldMenu, setActionHoldMenu] = useState(null);
+            const [comboPlan, setComboPlan] = useState(null);
+            const [comboFollowUp, setComboFollowUp] = useState(null);
+            const [pendingComboFollowUp, setPendingComboFollowUp] = useState(null);
+            const actionHoldRef = useRef({ timer: null, x: 0, y: 0, suppressClickUntil: 0 });
             const [editingLiveLogActionId, setEditingLiveLogActionId] = useState('');
             const [selectedPlayerId, setSelectedPlayerId] = useState('');
 
@@ -499,7 +507,6 @@
             const [reasonInput, setReasonInput] = useState(null);
 
             const [confirmDialog, setConfirmDialog] = useState(null);
-            const [showTeamTurnoverPicker, setShowTeamTurnoverPicker] = useState(false);
             const [isAdminSupervisorPresent, setIsAdminSupervisorPresent] = useState(false);
             const [sharedAdminFocus, setSharedAdminFocus] = useState(null);
             const [isRoleCapacityExceeded, setIsRoleCapacityExceeded] = useState(false);
@@ -1162,8 +1169,9 @@
 
             const openActionForTeamWithLabel = (action, isTeamA, labelOverride) => {
                 if (!action) return;
-                setActiveActionLabelOverride(String(labelOverride || ''));
                 openActionForTeam(action, isTeamA);
+                // After, since openActionForTeam clears the override when it arms the action.
+                setActiveActionLabelOverride(String(labelOverride || ''));
             };
 
             useEffect(() => {
@@ -1216,6 +1224,9 @@
                 setActiveAction(null);
                 setActiveActionLabelOverride('');
                 setCorrectionMode(false);
+                setComboPlan(null);
+                setComboFollowUp(null);
+                setPendingComboFollowUp(null);
                 nonPrimaryResumeConfirmRef.current = false;
             };
 
@@ -3570,9 +3581,139 @@
 
             const scoringActions = getActionsByOrder(['pts_2', 'fg2m_miss', 'pts_3', 'fg3m_miss', 'pts_4', 'fg4m_miss', 'pts_1', 'ft_miss']);
             const flowActions = getActionsByOrder(['ast', 'stl', 'blk']);
-            const whistleActions = getActionsByOrder(['to', 'pf', 'pf_offensive']);
+            // Offensive/technical fouls and team turnovers live in the +1 FOUL / +1 TO hold menus.
+            const whistleActions = getActionsByOrder(['to', 'pf']);
             const reboundAction = liveActionById.get('reb') || null;
             const technicalFoulAction = liveActionById.get('pf_technical') || null;
+            const offensiveFoulAction = liveActionById.get('pf_offensive') || null;
+
+            // Hold-menu combos: the first stat logs exactly like a normal tap, then the follow-up
+            // is armed for the same team or the opponent. Each stat stays its own log entry, so
+            // undo/edit/delete/restore treat them independently.
+            const ACTION_COMBOS = {
+                made_ast: { followUpActionId: 'ast', relation: 'same', menuLabel: 'Made + assist', followUpLabel: '+1 AST (assist)', excludeFirstPlayer: true },
+                stl_to: { followUpActionId: 'to', relation: 'opponent', menuLabel: 'Steal + turnover', followUpLabel: '+1 TO (lost the ball)', allowTeamTurnover: true },
+                pf_shooting: { followUpActionId: 'pts_1', relation: 'opponent', menuLabel: 'Shooting foul + FT', followUpLabel: '+1 FT (shooting foul)' },
+                blk_miss: { followUpActionId: 'fg2m_miss', relation: 'opponent', menuLabel: 'Block + missed shot', followUpLabel: '2PT MISS (blocked shot)' }
+            };
+
+            const startActionCombo = (comboKey, firstAction, isTeamA) => {
+                const combo = ACTION_COMBOS[comboKey];
+                if (!combo || !firstAction) return;
+                setComboFollowUp(null);
+                setPendingComboFollowUp(null);
+                openActionForTeamWithLabel(firstAction, isTeamA, combo.menuLabel.toUpperCase());
+                // Dropped again by the combo cleanup effect if the action didn't actually arm.
+                setComboPlan({ key: comboKey, firstActionId: firstAction.id });
+            };
+
+            const getActionHoldMenuItems = (kind, actionId, isTeamA) => {
+                // Opponent combos need both teams; a solo-focus operator can't log the other side.
+                const canOperateBothTeams = canOperateTeam(true) && canOperateTeam(false);
+                const action = liveActionById.get(actionId) || null;
+                if (kind === 'to') {
+                    return [true, false].filter((team) => canOperateTeam(team)).map((team) => ({
+                        key: `team_to_${team ? 'home' : 'away'}`,
+                        label: `Team turnover — ${team ? homeTeamLabel : awayTeamLabel}`,
+                        hint: 'No player at fault (shot clock, backcourt, inbound)',
+                        onSelect: () => handleTeamTurnover(team)
+                    }));
+                }
+                if (kind === 'pf') {
+                    return [
+                        offensiveFoulAction && { key: 'pf_offensive', label: 'Offensive foul', hint: 'Foul + turnover on the player', onSelect: () => openActionForTeam(offensiveFoulAction, isTeamA) },
+                        technicalFoulAction && { key: 'pf_technical', label: 'Technical foul', hint: 'Asks for a reason', onSelect: () => openActionForTeam(technicalFoulAction, isTeamA) },
+                        action && canOperateBothTeams && { key: 'pf_shooting', label: ACTION_COMBOS.pf_shooting.menuLabel, hint: 'Then pick the shooter', onSelect: () => startActionCombo('pf_shooting', action, isTeamA) }
+                    ].filter(Boolean);
+                }
+                if (!action) return [];
+                if (kind === 'made') {
+                    return [{ key: 'made_ast', label: `${String(getActionDisplayLabel(action) || action.label).toUpperCase()} + assist`, hint: 'Then pick the passer', onSelect: () => startActionCombo('made_ast', action, isTeamA) }];
+                }
+                if (kind === 'stl' && canOperateBothTeams) {
+                    return [{ key: 'stl_to', label: ACTION_COMBOS.stl_to.menuLabel, hint: 'Then pick who lost the ball', onSelect: () => startActionCombo('stl_to', action, isTeamA) }];
+                }
+                if (kind === 'blk' && canOperateBothTeams) {
+                    return [{ key: 'blk_miss', label: ACTION_COMBOS.blk_miss.menuLabel, hint: 'Then pick the shooter', onSelect: () => startActionCombo('blk_miss', action, isTeamA) }];
+                }
+                return [];
+            };
+
+            const clearActionHoldTimer = () => {
+                if (actionHoldRef.current.timer) {
+                    clearTimeout(actionHoldRef.current.timer);
+                    actionHoldRef.current.timer = null;
+                }
+            };
+
+            const openActionHoldMenu = (kind, actionId, isTeamA, x, y) => {
+                if (getActionHoldMenuItems(kind, actionId, isTeamA).length === 0) return false;
+                setActionHoldMenu({ kind, actionId, isTeamA, x, y, openedAt: Date.now() });
+                return true;
+            };
+
+            // A release after a long-press would otherwise also fire the button's normal tap.
+            const consumeSuppressedActionClick = () => {
+                if (Date.now() < Number(actionHoldRef.current.suppressClickUntil || 0)) {
+                    actionHoldRef.current.suppressClickUntil = 0;
+                    return true;
+                }
+                return false;
+            };
+
+            const getActionHoldHandlers = (kind, actionId, isTeamA) => ({
+                onContextMenu: (e) => {
+                    e.preventDefault();
+                    clearActionHoldTimer();
+                    if (openActionHoldMenu(kind, actionId, isTeamA, e.clientX, e.clientY)) {
+                        actionHoldRef.current.suppressClickUntil = Date.now() + 800;
+                    }
+                },
+                onTouchStart: (e) => {
+                    const touch = e.touches?.[0];
+                    if (!touch) return;
+                    clearActionHoldTimer();
+                    actionHoldRef.current.x = touch.clientX;
+                    actionHoldRef.current.y = touch.clientY;
+                    actionHoldRef.current.timer = setTimeout(() => {
+                        actionHoldRef.current.timer = null;
+                        if (openActionHoldMenu(kind, actionId, isTeamA, touch.clientX, touch.clientY)) {
+                            actionHoldRef.current.suppressClickUntil = Date.now() + 800;
+                        }
+                    }, 500);
+                },
+                onTouchMove: (e) => {
+                    const touch = e.touches?.[0];
+                    if (!touch) return;
+                    if (Math.abs(touch.clientX - actionHoldRef.current.x) > 10 || Math.abs(touch.clientY - actionHoldRef.current.y) > 10) {
+                        clearActionHoldTimer();
+                    }
+                },
+                onTouchEnd: clearActionHoldTimer,
+                onTouchCancel: clearActionHoldTimer
+            });
+
+            const renderActionHoldMark = () => (
+                <span aria-hidden="true" className="pointer-events-none absolute top-0.5 right-1.5 text-[11px] leading-none opacity-60">⋯</span>
+            );
+
+            // A combo step only stays armed while its action is the armed one.
+            useEffect(() => {
+                if (comboPlan && (!activeAction || activeAction.id !== comboPlan.firstActionId)) setComboPlan(null);
+                if (comboFollowUp && (!activeAction || activeAction.id !== comboFollowUp.actionId)) setComboFollowUp(null);
+            }, [activeAction, comboPlan, comboFollowUp]);
+
+            // Arm the follow-up after the first step's render commits, so checks like "free
+            // throws need a stopped clock" see the foul's auto-pause.
+            useEffect(() => {
+                if (!pendingComboFollowUp || activeAction || showLoggingModal) return;
+                const next = pendingComboFollowUp;
+                setPendingComboFollowUp(null);
+                const followUpAction = liveActionById.get(next.actionId);
+                if (!followUpAction || !canOperateTeam(next.isTeamA)) return;
+                setComboFollowUp(next);
+                openActionForTeamWithLabel(followUpAction, next.isTeamA, `${next.label} · step 2 of 2`);
+            }, [pendingComboFollowUp, activeAction, showLoggingModal]);
             const scoringActionIds = new Set(scoringActions.map((action) => String(action?.id || '')));
             const autoResumeActionIds = new Set(['pts_2', 'pts_3', 'pts_4', 'fg2m_miss', 'fg3m_miss', 'fg4m_miss', 'reb', 'ast', 'to', 'stl', 'blk']);
             const isAutoResumeActionArmed = autoResumeActionIds.has(String(activeAction?.id || ''));
@@ -4429,14 +4570,30 @@
                                 </div>
                             )}
                         </div>
-                        <button
-                            type="button"
-                            onClick={handleCancelActionModal}
-                            className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide bg-red-600 text-white border border-red-400/60 shadow-md hover:bg-red-500 active:bg-red-700 cursor-pointer"
-                        >
-                            <Icons.X />
-                            Cancel
-                        </button>
+                        <div className="shrink-0 flex items-center gap-1.5">
+                            {comboFollowUp?.allowTeamTurnover && canOperateTeam(comboFollowUp.isTeamA) && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const teamIsA = comboFollowUp.isTeamA;
+                                        handleCancelActionModal();
+                                        handleTeamTurnover(teamIsA);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide bg-slate-900/80 text-red-200 border border-red-400/50 hover:bg-slate-800 cursor-pointer"
+                                    title="No single player lost the ball"
+                                >
+                                    Team TO
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={handleCancelActionModal}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide bg-red-600 text-white border border-red-400/60 shadow-md hover:bg-red-500 active:bg-red-700 cursor-pointer"
+                            >
+                                <Icons.X />
+                                {comboFollowUp ? 'Skip' : 'Cancel'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             ) : null;
@@ -7922,6 +8079,16 @@
                     showToast('Select a stat action first.', 'info');
                     return;
                 }
+                if (comboFollowUp && activeAction.id === comboFollowUp.actionId) {
+                    if (Boolean(isTeamA) !== Boolean(comboFollowUp.isTeamA)) {
+                        showToast(`Pick a ${comboFollowUp.isTeamA ? homeTeamLabel : awayTeamLabel} player for this step.`, 'info');
+                        return;
+                    }
+                    if (comboFollowUp.excludePlayerId && playerId === comboFollowUp.excludePlayerId) {
+                        showToast('Pick a different player for the assist.', 'info');
+                        return;
+                    }
+                }
                 const isTechnicalFoulAction = String(activeAction?.id || '') === 'pf_technical';
                 const isFoulLikeSelectedAction = isFoulLikeAction(activeAction);
                 const isPrimaryAction = scoringActionIds.has(String(activeAction?.id || ''));
@@ -8226,6 +8393,21 @@
                 setActiveAction(null);
                 setCorrectionMode(false);
                 setShowLoggingModal(false);
+
+                const completedCombo = (comboPlan && comboPlan.firstActionId === activeAction.id && !correctionMode)
+                    ? ACTION_COMBOS[comboPlan.key]
+                    : null;
+                setComboPlan(null);
+                setComboFollowUp(null);
+                if (completedCombo) {
+                    setPendingComboFollowUp({
+                        actionId: completedCombo.followUpActionId,
+                        isTeamA: completedCombo.relation === 'same' ? Boolean(isTeamA) : !isTeamA,
+                        label: completedCombo.followUpLabel,
+                        excludePlayerId: completedCombo.excludeFirstPlayer ? playerId : '',
+                        allowTeamTurnover: Boolean(completedCombo.allowTeamTurnover)
+                    });
+                }
 
                 if (shouldAutoPauseForFoul) {
                     nonPrimaryResumeConfirmRef.current = false;
@@ -13660,18 +13842,6 @@
                                                                     OFFICIALS TIMEOUT
                                                                 </span>
                                                             </button>
-                                                            <button
-                                                                type="button"
-                                                                disabled={!technicalFoulAction || isActionDisabled(technicalFoulAction)}
-                                                                onClick={() => technicalFoulAction && openActionForTeam(technicalFoulAction, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                title={getActionDisabledTitle(technicalFoulAction)}
-                                                                className="w-full inline-flex items-center justify-center font-black py-2.5 md:py-3 px-2 rounded-lg text-[9px] leading-tight tracking-wide uppercase border border-amber-700/50 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50 transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed hover:shadow-[0_0_12px_rgba(245,158,11,0.2)]"
-                                                            >
-                                                                <span className="inline-flex items-center justify-center gap-1">
-                                                                    <Icons.ShieldAlert />
-                                                                    TECHNICAL FOUL
-                                                                </span>
-                                                            </button>
                                                             {isLoggedIn && (
                                                                 <div className="relative w-full min-h-[2.75rem] md:min-h-[3rem]">
                                                                     {!showSyncClockEditor ? (
@@ -13768,7 +13938,7 @@
                                                     <div className="flex items-center gap-2 border-b border-slate-800 pb-1.5 px-2">
                                                         <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-extrabold flex items-center gap-1">
                                                             <Icons.Zap />
-                                                            Tap action first, then select player on court
+                                                            Tap action first, then select player on court · hold ⋯ buttons for more
                                                         </span>
                                                     </div>
 
@@ -13826,10 +13996,16 @@
                                                                             <button
                                                                                 type="button"
                                                                                 disabled={isActionDisabled(madeAction)}
-                                                                                onClick={() => openActionForTeam(madeAction, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                                title={getActionDisabledTitle(madeAction)}
-                                                                                className={`w-full min-h-[4.5rem] md:min-h-[5rem] py-4 md:py-5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-emerald-950/20 backdrop-blur-md ${madeId === 'pts_1' ? 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]' : 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]'}`}
+                                                                                {...(madeId !== 'pts_1' ? getActionHoldHandlers('made', madeId, effectiveOperatorFocus === 'away' ? false : true) : {})}
+                                                                                onClick={() => {
+                                                                                    if (consumeSuppressedActionClick()) return;
+                                                                                    openActionForTeam(madeAction, effectiveOperatorFocus === 'away' ? false : true);
+                                                                                }}
+                                                                                title={getActionDisabledTitle(madeAction) || (madeId !== 'pts_1' ? 'Hold for made + assist' : undefined)}
+                                                                                style={{ WebkitTouchCallout: 'none' }}
+                                                                                className={`relative select-none w-full min-h-[4.5rem] md:min-h-[5rem] py-4 md:py-5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-emerald-950/20 backdrop-blur-md ${madeId === 'pts_1' ? 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]' : 'text-emerald-300 border-emerald-500/50 hover:bg-emerald-950/30 hover:shadow-[0_0_15px_rgba(16,185,129,0.25)]'}`}
                                                                             >
+                                                                                {madeId !== 'pts_1' && renderActionHoldMark()}
                                                                                 {madeIcon}
                                                                                 <span>{madeLabel}</span>
                                                                             </button>
@@ -13888,13 +14064,21 @@
                                                                     <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
                                                                 </button>
                                                             ))}
-                                                            {flowActions.filter((act) => act.id === 'stl' || act.id === 'blk').map((act) => (
+                                                            {flowActions.filter((act) => act.id === 'stl' || act.id === 'blk').map((act) => {
+                                                                const actionTeamIsA = effectiveOperatorFocus === 'away' ? false : true;
+                                                                const hasHoldMenu = getActionHoldMenuItems(act.id, act.id, actionTeamIsA).length > 0;
+                                                                return (
                                                                 <button
                                                                     key={`flow-${act.id}`}
                                                                     disabled={isActionDisabled(act)}
-                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                    title={getActionDisabledTitle(act)}
-                                                                    className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
+                                                                    {...(hasHoldMenu ? getActionHoldHandlers(act.id, act.id, actionTeamIsA) : {})}
+                                                                    onClick={() => {
+                                                                        if (consumeSuppressedActionClick()) return;
+                                                                        openActionForTeam(act, actionTeamIsA);
+                                                                    }}
+                                                                    title={getActionDisabledTitle(act) || (hasHoldMenu ? `Hold for ${act.id === 'stl' ? 'steal + turnover' : 'block + missed shot'}` : undefined)}
+                                                                    style={{ WebkitTouchCallout: 'none' }}
+                                                                    className="relative select-none w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed bg-slate-900/40 backdrop-blur-md border-slate-800/60 hover:bg-slate-800/60 hover:shadow-[0_0_12px_rgba(148,163,184,0.2)] text-slate-100"
                                                                 >
                                                                     {act.id === 'stl' ? (
                                                                         <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -13908,9 +14092,11 @@
                                                                             <path d="M9 12h6" />
                                                                         </svg>
                                                                     )}
+                                                                    {hasHoldMenu && renderActionHoldMark()}
                                                                     <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
                                                                 </button>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
 
@@ -13918,14 +14104,22 @@
                                                         <div className="flex items-center justify-between gap-2">
                                                             <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block">WHISTLES & FOULS</span>
                                                         </div>
-                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                                                            {whistleActions.map((act) => (
+                                                        <div className="grid grid-cols-2 gap-1.5">
+                                                            {whistleActions.map((act) => {
+                                                                const actionTeamIsA = effectiveOperatorFocus === 'away' ? false : true;
+                                                                const hasHoldMenu = getActionHoldMenuItems(act.id, act.id, actionTeamIsA).length > 0;
+                                                                return (
                                                                 <button
                                                                     key={act.id}
                                                                     disabled={isActionDisabled(act)}
-                                                                    onClick={() => openActionForTeam(act, effectiveOperatorFocus === 'away' ? false : true)}
-                                                                    title={getActionDisabledTitle(act)}
-                                                                    className={`w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${
+                                                                    {...(hasHoldMenu ? getActionHoldHandlers(act.id, act.id, actionTeamIsA) : {})}
+                                                                    onClick={() => {
+                                                                        if (consumeSuppressedActionClick()) return;
+                                                                        openActionForTeam(act, actionTeamIsA);
+                                                                    }}
+                                                                    title={getActionDisabledTitle(act) || (hasHoldMenu ? (act.id === 'to' ? 'Hold for team turnover' : 'Hold for offensive, technical, or shooting foul') : undefined)}
+                                                                    style={{ WebkitTouchCallout: 'none' }}
+                                                                    className={`relative select-none w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md ${
                                                                         act.id === 'pf'
                                                                         ? 'bg-amber-950/20 hover:bg-amber-950/30 hover:shadow-[0_0_12px_rgba(245,158,11,0.2)] text-amber-300 border-amber-500/50'
                                                                         : 'bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50'
@@ -13938,12 +14132,6 @@
                                                                             <path d="M21 12a9 9 0 0 1-9 9" />
                                                                             <path d="M12 21H5v-7" />
                                                                         </svg>
-                                                                    ) : act.id === 'pf_offensive' ? (
-                                                                        <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                                                            <path d="M12 2 2 20h20L12 2Z" />
-                                                                            <path d="M12 8v5" />
-                                                                            <path d="M12 16h.01" />
-                                                                        </svg>
                                                                     ) : (
                                                                         <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                                                             <circle cx="12" cy="12" r="9" />
@@ -13951,31 +14139,11 @@
                                                                             <path d="M12 16h.01" />
                                                                         </svg>
                                                                     )}
+                                                                    {hasHoldMenu && renderActionHoldMark()}
                                                                     <span>{String(getActionDisplayLabel(act) || '').toUpperCase()}</span>
                                                                 </button>
-                                                            ))}
-                                                            <button
-                                                                type="button"
-                                                                disabled={isActionDisabled({ id: 'to_team' })}
-                                                                onClick={() => {
-                                                                    if (!canUseLiveControls) {
-                                                                        showToast('Live controls are locked right now.', 'info');
-                                                                        return;
-                                                                    }
-                                                                    setShowTeamTurnoverPicker(true);
-                                                                }}
-                                                                title="Team turnover - no individual player at fault (shot clock violation, backcourt/inbound violation, etc.)"
-                                                                className="w-full h-11 py-2.5 px-2 rounded-xl inline-flex items-center justify-center gap-2 text-center text-[10px] md:text-xs font-black tracking-wide uppercase border transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-30 disabled:saturate-0 disabled:cursor-not-allowed backdrop-blur-md bg-red-950/20 hover:bg-red-950/30 hover:shadow-[0_0_12px_rgba(239,68,68,0.2)] text-red-300 border-red-500/50"
-                                                            >
-                                                                <svg className="w-4 h-4 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                                                    <path d="M3 12a9 9 0 0 1 9-9" />
-                                                                    <path d="M12 3h7v7" />
-                                                                    <path d="M21 12a9 9 0 0 1-9 9" />
-                                                                    <path d="M12 21H5v-7" />
-                                                                    <circle cx="12" cy="12" r="2.5" />
-                                                                </svg>
-                                                                <span>TEAM TO</span>
-                                                            </button>
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -19207,41 +19375,50 @@
                         </div>
                     )}
 
-                    {showTeamTurnoverPicker && (
-                        <div className="fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4">
-                            <div className="bg-slate-900 border border-slate-800 p-5 rounded-t-2xl md:rounded-2xl w-full max-w-sm relative max-h-[85vh] overflow-y-auto">
-                                <h3 className="text-md font-extrabold text-white mb-2">Team Turnover</h3>
-                                <p className="text-xs text-slate-400 mb-4">Which team committed the turnover? Use this for a turnover with no individual player at fault (shot clock violation, backcourt/inbound violation, etc).</p>
-                                <div className="flex gap-3 text-xs font-bold">
-                                    <button
-                                        type="button"
-                                        disabled={!canOperateTeam(true)}
-                                        onClick={() => { handleTeamTurnover(true); setShowTeamTurnoverPicker(false); }}
-                                        className="flex-1 py-3 rounded-xl border-2 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                                        style={getTeamColorStyles(liveHomeTeam?.color, liveHomeTeam?.textColor)}
-                                    >
-                                        {homeTeamLabel}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={!canOperateTeam(false)}
-                                        onClick={() => { handleTeamTurnover(false); setShowTeamTurnoverPicker(false); }}
-                                        className="flex-1 py-3 rounded-xl border-2 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                                        style={getTeamColorStyles(liveAwayTeam?.color, liveAwayTeam?.textColor)}
-                                    >
-                                        {awayTeamLabel}
-                                    </button>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowTeamTurnoverPicker(false)}
-                                    className="mt-3 w-full py-2 bg-slate-950 text-slate-400 rounded-xl border border-slate-850 cursor-pointer text-xs font-bold"
+                    {/* STAT ACTION HOLD MENU (LONG-PRESS / RIGHT-CLICK ON AN ACTION BUTTON) */}
+                    {actionHoldMenu && (() => {
+                        const items = getActionHoldMenuItems(actionHoldMenu.kind, actionHoldMenu.actionId, actionHoldMenu.isTeamA);
+                        if (items.length === 0) return null;
+                        const closeMenu = () => setActionHoldMenu(null);
+                        return (
+                            <div
+                                className="fixed inset-0 z-50"
+                                onClick={() => {
+                                    // A long-press's own touchend can land here as a click; ignore it.
+                                    if (Date.now() - Number(actionHoldMenu.openedAt || 0) < 400) return;
+                                    closeMenu();
+                                }}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    closeMenu();
+                                }}
+                            >
+                                <div
+                                    className="absolute w-64 rounded-xl border border-slate-700 bg-slate-900 shadow-2xl p-1 text-xs"
+                                    style={{
+                                        left: Math.max(8, Math.min(Number(actionHoldMenu.x || 0), (typeof window !== 'undefined' ? window.innerWidth : 360) - 264)),
+                                        top: Math.max(8, Math.min(Number(actionHoldMenu.y || 0), (typeof window !== 'undefined' ? window.innerHeight : 640) - (items.length * 52 + 16)))
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
                                 >
-                                    Cancel
-                                </button>
+                                    {items.map((item) => (
+                                        <button
+                                            key={item.key}
+                                            type="button"
+                                            onClick={() => {
+                                                closeMenu();
+                                                item.onSelect();
+                                            }}
+                                            className="w-full rounded-lg px-2.5 py-2 text-left hover:bg-slate-800 cursor-pointer"
+                                        >
+                                            <div className="font-black uppercase tracking-wide text-slate-100">{item.label}</div>
+                                            {item.hint && <div className="text-[10px] text-slate-500">{item.hint}</div>}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
 
                     {reasonInput && (
                         <div className="fixed inset-0 z-50 bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4">
