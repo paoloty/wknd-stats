@@ -1,4 +1,6 @@
         const { useState, useEffect, useRef } = React;
+        // Running play-by-play scores, keyed by gameLog array identity (logs are replaced, never mutated).
+        const pbpRunningScoreCache = new WeakMap();
 
         async function apiRequest(path, options = {}) {
             const { compress, headers: optionHeaders, body: optionBody, ...restOptions } = options;
@@ -2412,6 +2414,56 @@
                 const safeLogs = Array.isArray(logs) ? logs : [];
                 if (!voidedIds || voidedIds.size === 0) return safeLogs;
                 return safeLogs.filter((event) => !voidedIds.has(String(event?.id || '')));
+            };
+            // Score after each log entry, recomputed from the log itself. The score tag baked into an
+            // entry's text is the logging device's scoreboard at that moment, which can be stale.
+            const getRunningScoresById = (logs) => {
+                if (!Array.isArray(logs)) return new Map();
+                const cached = pbpRunningScoreCache.get(logs);
+                if (cached) return cached;
+
+                // Logs are newest-first; reverse before the stable sort so same-ms entries keep log order.
+                const orderedEvents = [...stripRestoredEvents(logs, getRestoreVoidedIds(logs))]
+                    .reverse()
+                    .sort((a, b) => getEventTimestampFromId(a?.id) - getEventTimestampFromId(b?.id));
+                const scoresById = new Map();
+                let playerPoints = {};
+                let scoreA = 0;
+                let scoreB = 0;
+                orderedEvents.forEach((event) => {
+                    if (event?.kind === 'meta' && event.metaType === 'hardReset') {
+                        playerPoints = {};
+                        scoreA = 0;
+                        scoreB = 0;
+                    } else if (isReplayBaseEvent(event)) {
+                        const snapshot = event.checkpointSnapshot;
+                        playerPoints = Object.fromEntries(Object.entries(snapshot.liveStats || {})
+                            .map(([playerId, stats]) => [playerId, Number(stats?.pts) || 0]));
+                        scoreA = Number(snapshot.teamAScore) || 0;
+                        scoreB = Number(snapshot.teamBScore) || 0;
+                    } else if (event?.kind === 'stat' && event.statField === 'pts' && event.playerId) {
+                        const previous = playerPoints[event.playerId] || 0;
+                        const next = Math.max(0, previous + (Number(event.changeAmount) || 0));
+                        playerPoints[event.playerId] = next;
+                        if (event.isTeamA === true) scoreA += next - previous;
+                        else if (event.isTeamA === false) scoreB += next - previous;
+                    }
+                    if (event?.id) scoresById.set(String(event.id), { teamAScore: scoreA, teamBScore: scoreB });
+                });
+                pbpRunningScoreCache.set(logs, scoresById);
+                return scoresById;
+            };
+            // Replace an entry's baked score tag (data and text) with the running score from its log.
+            const withRunningScore = (log, logs, cleanText) => {
+                const tagData = parseScoreTagFromLogText(cleanText);
+                const runningScore = tagData && log?.id ? getRunningScoresById(logs).get(String(log.id)) : null;
+                if (!runningScore) return { scoreTagData: tagData, displayText: cleanText };
+                return {
+                    scoreTagData: { ...tagData, ...runningScore },
+                    displayText: String(cleanText)
+                        .replace(/\[([A-Za-z0-9]{2,6})\s+\d+\s*-\s*([A-Za-z0-9]{2,6})\s+\d+\]/, `[$1 ${runningScore.teamAScore} - $2 ${runningScore.teamBScore}]`)
+                        .replace(/\[\d+\s*-\s*\d+\]/, `[${runningScore.teamAScore} - ${runningScore.teamBScore}]`)
+                };
             };
             const createZeroLiveSnapshot = (lineups = {}) => ({
                 teamAId,
@@ -4952,7 +5004,9 @@
                 ].includes(latestClockControlEvent.metaType);
 
                 if (isPauseTimelineEvent) {
-                    if (!isPlayPaused) {
+                    // A pause logged after the buzzer (e.g. timeout at 00:00) must not re-pause:
+                    // the expired-quarter effect clears isPlayPaused, and the two would toggle forever.
+                    if (!isPlayPaused && !hasQuarterClockExpiredFromLog) {
                         setIsPlayPaused(true);
                     }
                     if (isPeriodClockRunning) {
@@ -14245,7 +14299,7 @@
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
                                                         const hasAwayTag = typeof log.text === 'string' && log.text.startsWith('[AWAY] ');
                                                         const cleanText = typeof log.text === 'string' ? log.text.replace(/^\[(HOME|AWAY)\]\s*/, '') : log.text;
-                                                        const scoreTagData = parseScoreTagFromLogText(cleanText);
+                                                        const { scoreTagData, displayText } = withRunningScore(log, gameLog, cleanText);
                                                         const dotColor = (log.isTeamA === true || hasHomeTag)
                                                             ? (liveHomeTeam?.color || '#10b981')
                                                             : (log.isTeamA === false || hasAwayTag)
@@ -14280,7 +14334,7 @@
                                                                 </div>
                                                                 <div className="mt-1 flex items-start gap-2">
                                                                     <span className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ backgroundColor: dotColor }} />
-                                                                    <span className="flex-1 min-w-0 break-words">{cleanText}</span>
+                                                                    <span className="flex-1 min-w-0 break-words">{displayText}</span>
                                                                 </div>
                                                                 <div className="mt-1 pr-0.5 text-right text-[8px] text-slate-500/80">
                                                                     {(log.time || '').split(' ')[0] || '--:--:--'}
@@ -14415,7 +14469,7 @@
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
                                                         const hasAwayTag = typeof log.text === 'string' && log.text.startsWith('[AWAY] ');
                                                         const cleanText = typeof log.text === 'string' ? log.text.replace(/^\[(HOME|AWAY)\]\s*/, '') : log.text;
-                                                        const scoreTagData = parseScoreTagFromLogText(cleanText);
+                                                        const { scoreTagData, displayText } = withRunningScore(log, gameLog, cleanText);
                                                         const dotColor = (log.isTeamA === true || hasHomeTag)
                                                             ? (liveHomeTeam?.color || '#10b981')
                                                             : (log.isTeamA === false || hasAwayTag)
@@ -14446,7 +14500,7 @@
                                                                 {/* Body: colored dot + log text */}
                                                                 <div className="mt-1 flex items-start gap-2">
                                                                     <span className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ backgroundColor: dotColor }} />
-                                                                    <span className="flex-1 min-w-0 break-words">{cleanText}</span>
+                                                                    <span className="flex-1 min-w-0 break-words">{displayText}</span>
                                                                 </div>
                                                                 {/* Bottom row: snapshot/edit/delete icons left, wall-clock timestamp right */}
                                                                 <div className="mt-1.5 flex items-center justify-between">
@@ -17665,6 +17719,7 @@
                                                                     const isHomeEvent = log.isTeamA === true;
                                                                     const isAwayEvent = log.isTeamA === false;
                                                                     const isNeutralEvent = !isHomeEvent && !isAwayEvent;
+                                                                    const { displayText } = withRunningScore(log, game.gameLog, log.text);
                                                                     return (
                                                                         <div
                                                                             key={`${log.time || 'event'}-${idx}`}
@@ -17673,7 +17728,7 @@
                                                                             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
                                                                                 <div className={`min-w-0 ${isHomeEvent ? 'text-right' : 'text-right text-slate-600/70'}`}>
                                                                                     {isHomeEvent ? (
-                                                                                        <span className="font-medium break-words" style={{ color: teamAObj?.color || '#10b981' }}>{log.text}</span>
+                                                                                        <span className="font-medium break-words" style={{ color: teamAObj?.color || '#10b981' }}>{displayText}</span>
                                                                                     ) : (
                                                                                         <span>&nbsp;</span>
                                                                                     )}
@@ -17687,7 +17742,7 @@
 
                                                                                 <div className={`min-w-0 ${isAwayEvent ? 'text-left' : 'text-left text-slate-600/70'}`}>
                                                                                     {isAwayEvent ? (
-                                                                                        <span className="font-medium break-words" style={{ color: teamBObj?.color || '#ef4444' }}>{log.text}</span>
+                                                                                        <span className="font-medium break-words" style={{ color: teamBObj?.color || '#ef4444' }}>{displayText}</span>
                                                                                     ) : (
                                                                                         <span>&nbsp;</span>
                                                                                     )}
@@ -17696,7 +17751,7 @@
 
                                                                             {isNeutralEvent && (
                                                                                 <div className="mt-2 text-center text-slate-300 font-medium break-words">
-                                                                                    {log.text}
+                                                                                    {displayText}
                                                                                 </div>
                                                                             )}
                                                                         </div>
