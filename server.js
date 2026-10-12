@@ -2736,6 +2736,28 @@ function readActiveSession() {
   return parseJsonSafe(row.session_json, null);
 }
 
+// Server time of the last accepted client session write. Scorers save clock-only changes every
+// few seconds, so a device loading the session mid-gap would start with a stale running clock.
+let lastActiveSessionWriteAt = 0;
+const MAX_CLIENT_CLOCK_CATCH_UP_SECONDS = 10;
+
+// The session as sent to clients: a running clock is advanced by the (server-measured) time
+// since it was saved, capped so a scorer that went offline doesn't drain viewers' clocks.
+// Never use this for merging or stale checks; those must see the stored session.
+function readActiveSessionForClients() {
+  const session = readActiveSession();
+  if (!session || lastActiveSessionWriteAt <= 0) return session;
+  const clockSeconds = Number(session.periodClockSeconds);
+  const isRunning = session.isPeriodClockRunning === true && session.isPlayPaused !== true;
+  if (!isRunning || !Number.isFinite(clockSeconds) || clockSeconds <= 0) return session;
+  const elapsedSeconds = Math.min(
+    MAX_CLIENT_CLOCK_CATCH_UP_SECONDS,
+    Math.floor((Date.now() - lastActiveSessionWriteAt) / 1000)
+  );
+  if (elapsedSeconds <= 0) return session;
+  return { ...session, periodClockSeconds: Math.max(0, clockSeconds - elapsedSeconds) };
+}
+
 function readLiveEventsSince(sinceSeq = 0) {
   const threshold = toInt(sinceSeq);
   return selectLiveEventsSinceStmt.all(threshold).map((row) => ({
@@ -2882,7 +2904,7 @@ function buildSyncPayload() {
   return {
     state: readState(),
     statActions: readStatActions(),
-    session: readActiveSession()
+    session: readActiveSessionForClients()
   };
 }
 
@@ -2890,6 +2912,19 @@ function broadcastSync(overrides = {}) {
   if (!wss) return;
   invalidateStateCache();
   const payload = JSON.stringify({ type: 'sync', sourceClientId: overrides.sourceClientId || null, ...buildSyncPayload() });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(payload);
+    }
+  });
+}
+
+// Live-session writes only change the session, so don't ship the whole league state
+// (~1.6MB) to every client on each one. Clients treat a sync without `state` as session-only.
+function broadcastSessionSync(overrides = {}) {
+  if (!wss) return;
+  invalidateStateCache();
+  const payload = JSON.stringify({ type: 'sync', sourceClientId: overrides.sourceClientId || null, session: readActiveSessionForClients() });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) {
       client.send(payload);
@@ -3009,7 +3044,7 @@ function appendLiveEvent(event, sourceClientId = null) {
         created_at: toInt(nextSession.sessionCreatedAt) || Date.now(),
         updated_at: Date.now()
       });
-      broadcastSync({ sourceClientId });
+      broadcastSessionSync({ sourceClientId });
     }
   }
 
@@ -3105,7 +3140,8 @@ function writeActiveSession(session, sourceClientId = null) {
   upsertActiveSessionStmt.run({
     session_json: JSON.stringify(mergedSession)
   });
-  broadcastSync({ sourceClientId });
+  lastActiveSessionWriteAt = Date.now();
+  broadcastSessionSync({ sourceClientId });
   return true;
 }
 
@@ -5021,7 +5057,7 @@ app.get('/api/active-session', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  res.json({ session: readActiveSession() });
+  res.json({ session: readActiveSessionForClients() });
 });
 
 app.get('/api/live-events', (req, res) => {

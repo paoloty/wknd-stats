@@ -1,6 +1,7 @@
         const { useState, useEffect, useRef } = React;
         // Running play-by-play scores, keyed by gameLog array identity (logs are replaced, never mutated).
         const pbpRunningScoreCache = new WeakMap();
+        const quarterTeamStatsCache = new WeakMap();
 
         async function apiRequest(path, options = {}) {
             const { compress, headers: optionHeaders, body: optionBody, ...restOptions } = options;
@@ -420,6 +421,7 @@
             const [showAccountMenu, setShowAccountMenu] = useState(false);
             const [editingLiveLogId, setEditingLiveLogId] = useState(null);
             const [pbpSnapshotLogId, setPbpSnapshotLogId] = useState(null);
+            const [pbpShowAllRows, setPbpShowAllRows] = useState(false);
             const [pbpSnapshotMode, setPbpSnapshotMode] = useState('view');
             const [pbpContextMenu, setPbpContextMenu] = useState(null);
             const [showRestoreVoidedList, setShowRestoreVoidedList] = useState(false);
@@ -443,7 +445,7 @@
             const [addFromBenchTeam, setAddFromBenchTeam] = useState(null);
             const [addFromBenchSelection, setAddFromBenchSelection] = useState([]);
             const [lineupRevision, setLineupRevision] = useState(0);
-            const [syncDebug, setSyncDebug] = useState({
+            const [syncDebug, setSyncDebugState] = useState({
                 lastIncomingEventId: '',
                 lastIncomingSeq: 0,
                 lastRemoteLineupRevision: 0,
@@ -454,6 +456,8 @@
                 lastPersist: 'never',
                 persistError: ''
             });
+            // Debug-only state: each update re-renders the whole App, so skip it when the panel is off.
+            const setSyncDebug = SHOW_LIVE_SYNC_DEBUG ? setSyncDebugState : () => {};
             const teamsRef = useRef(teams);
             const isGameLiveRef = useRef(isGameLive);
             const suppressPeriodAutoStopRef = useRef(false);
@@ -650,7 +654,23 @@
 
                 return { maxScore, excellenceCount };
             };
+            // Slot assignment is a backtracking search run for both on-court lists on every render;
+            // cache it per team + lineup, invalidated whenever the roster pool changes.
+            const orderedLineupCacheRef = useRef({ pool: null, byKey: new Map() });
             const getOrderedLiveLineupEntries = (teamId, lineupIds = []) => {
+                const teamPool = (teamsRef.current && teamsRef.current.length > 0) ? teamsRef.current : teams;
+                const cache = orderedLineupCacheRef.current;
+                if (cache.pool !== teamPool || cache.byKey.size > 200) {
+                    cache.pool = teamPool;
+                    cache.byKey = new Map();
+                }
+                const cacheKey = `${teamId}|${(lineupIds || []).join(',')}`;
+                if (!cache.byKey.has(cacheKey)) {
+                    cache.byKey.set(cacheKey, computeOrderedLiveLineupEntries(teamId, lineupIds));
+                }
+                return cache.byKey.get(cacheKey);
+            };
+            const computeOrderedLiveLineupEntries = (teamId, lineupIds = []) => {
                 const teamPool = (teamsRef.current && teamsRef.current.length > 0) ? teamsRef.current : teams;
                 const teamObj = teamPool.find((team) => team.id === teamId);
                 const playersById = new Map((teamObj?.players || []).map((player) => [player.id, player]));
@@ -1201,7 +1221,11 @@
                     const node = (isMobile ? mobileScorebarRef.current : desktopScorebarRef.current);
                     if (!node) return;
                     const rect = node.getBoundingClientRect();
-                    setBannerRect({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+                    const next = { top: Math.round(rect.bottom + 6), left: Math.round(rect.left), width: Math.round(rect.width) };
+                    // Scroll fires every frame; only re-render the whole App when the banner actually moves.
+                    setBannerRect((prev) => (
+                        prev.top === next.top && prev.left === next.left && prev.width === next.width ? prev : next
+                    ));
                 };
                 measure();
                 let frame = null;
@@ -2119,7 +2143,13 @@
                 pf: Number(stats?.pf || 0)
             });
 
+            // Pure in `logs`, so cache per log array (logs are replaced on change, never mutated).
             const computeQuarterTeamStatsFromLog = (logs = []) => {
+                if (!Array.isArray(logs)) return computeQuarterTeamStatsFromLogUncached(logs);
+                if (!quarterTeamStatsCache.has(logs)) quarterTeamStatsCache.set(logs, computeQuarterTeamStatsFromLogUncached(logs));
+                return quarterTeamStatsCache.get(logs);
+            };
+            const computeQuarterTeamStatsFromLogUncached = (logs = []) => {
                 const entries = Array.isArray(logs) ? logs : [];
 
                 // Pre-pass: build an inferred quarter for every event using period boundaries.
@@ -3821,6 +3851,22 @@
             const liveLogEditTargetPlayers = (liveLogEditTargetTeam?.players || []).filter((p) => !dnpPlayers.includes(p.id));
             // Visible play-by-play is newest-first, so "older" is index + 1.
             const visiblePbpLogs = (gameLog || []).filter((log) => !log?.hiddenFromLog);
+            // The live lists render only the newest rows by default; every row re-renders on each
+            // App render, so a full game's log made each tap slower as the game went on.
+            const PBP_RECENT_ROW_LIMIT = 60;
+            const renderedPbpLogs = pbpShowAllRows ? visiblePbpLogs : visiblePbpLogs.slice(0, PBP_RECENT_ROW_LIMIT);
+            const renderPbpShowAllButton = () => {
+                if (visiblePbpLogs.length <= PBP_RECENT_ROW_LIMIT) return null;
+                return (
+                    <button
+                        type="button"
+                        onClick={() => setPbpShowAllRows((prev) => !prev)}
+                        className="mt-1.5 w-full rounded border border-slate-800 bg-slate-950/60 py-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 hover:bg-slate-900 cursor-pointer"
+                    >
+                        {pbpShowAllRows ? 'Show latest only' : `Show all ${visiblePbpLogs.length} entries`}
+                    </button>
+                );
+            };
             const pbpSnapshotIndex = pbpSnapshotLogId
                 ? visiblePbpLogs.findIndex((log) => log?.id === pbpSnapshotLogId)
                 : -1;
@@ -4955,6 +5001,9 @@
                 const timelineClockSeconds = parseClockInputToSeconds(latestClockControlEvent.clockRemaining);
                 const latestClockEventId = String(latestClockControlEvent.id || '');
                 const isNewClockControlEvent = latestClockEventId && latestClockEventId !== String(lastClockControlReconcileEventIdRef.current || '');
+                // First pass after loading a session: the session's clock is at least as fresh as
+                // this event's (every clock-control event is saved immediately), so don't rewind to it.
+                const isFirstClockControlReconcile = !lastClockControlReconcileEventIdRef.current;
                 const isStartBoundaryEvent = ['matchStart', 'quarterStart'].includes(latestClockControlEvent.metaType);
                 if (isNewClockControlEvent) {
                     lastClockControlReconcileEventIdRef.current = latestClockEventId;
@@ -4962,6 +5011,7 @@
 
                 if (
                     isNewClockControlEvent
+                    && !isFirstClockControlReconcile
                     && !isStartBoundaryEvent
                     && timelineClockSeconds !== null
                     && timelineClockSeconds !== Number(periodClockSeconds || 0)
@@ -6162,7 +6212,26 @@
                 }
             };
 
+            // Clock-only changes (period clock / player seconds ticking) are saved at most every
+            // LIVE_SESSION_TICK_SYNC_MS; any other change is saved immediately and cancels the wait.
+            const LIVE_SESSION_TICK_SYNC_MS = 5000;
+            const liveSessionTickSyncRef = useRef({ prevDeps: null, timer: null, lastSavedAt: 0 });
+            useEffect(() => () => {
+                if (liveSessionTickSyncRef.current.timer) clearTimeout(liveSessionTickSyncRef.current.timer);
+            }, []);
+
             useEffect(() => {
+                const tickSync = liveSessionTickSyncRef.current;
+                const nonTickDeps = [isGameLive, isEndingGame, authRole, teamAId, teamBId, teamAScore, teamBScore, teamATeamTurnovers, teamBTeamTurnovers, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, isPeriodClockRunning, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart];
+                const isTickOnlyChange = Boolean(tickSync.prevDeps)
+                    && tickSync.prevDeps.length === nonTickDeps.length
+                    && nonTickDeps.every((value, idx) => Object.is(value, tickSync.prevDeps[idx]));
+                tickSync.prevDeps = nonTickDeps;
+                if (!isTickOnlyChange && tickSync.timer) {
+                    clearTimeout(tickSync.timer);
+                    tickSync.timer = null;
+                }
+
                 if (suppressLiveSessionSyncRef.current) {
                     const hasPendingLocalEvents = (pendingLiveEventsRef.current || []).length > 0;
                     const remoteLogIds = lastRemoteGameLogIdsRef.current || new Set();
@@ -6203,20 +6272,40 @@
                     sessionRevisionRef.current = nextSessionRevision;
                     lastLocalSessionUpdatedAtRef.current = sessionUpdatedAt;
                     const session = { teamAId, teamBId, teamAScore, teamBScore, teamATeamTurnovers, teamBTeamTurnovers, liveSessionInstanceId, sessionCreatedAt: persistedSessionCreatedAt, sessionRevision: nextSessionRevision, clockControlRevision, currentQuarter, periodClockSeconds, isPeriodClockRunning, isPlayPaused, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision: persistedLineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, dnpUpdatedAt: Number(lastLocalDnpUpdatedAtRef.current || 0), awaitingPeriodStart, sessionUpdatedAt };
-                    const persistedLocally = persistActiveLiveSessionToLocal(session);
-                    hadLiveSessionRef.current = true;
-                    setSyncDebug((prev) => ({
-                        ...prev,
-                        pendingQueue: (pendingLiveEventsRef.current || []).length,
-                        lastPersist: `PUT QUEUED ${new Date().toLocaleTimeString()}`,
-                        persistError: persistedLocally ? '' : 'Local session cache skipped (storage full).'
-                    }));
-                    queueActiveSessionSync('put', session);
-                    flushPendingActiveSessionSync();
+                    // Only operators/admins write the shared session; viewers just keep a local copy.
+                    const canWriteLiveSession = canOperateLive;
+                    const saveSession = (sessionToSave) => {
+                        tickSync.lastSavedAt = Date.now();
+                        const persistedLocally = persistActiveLiveSessionToLocal(sessionToSave);
+                        hadLiveSessionRef.current = true;
+                        if (!canWriteLiveSession) return;
+                        setSyncDebug((prev) => ({
+                            ...prev,
+                            pendingQueue: (pendingLiveEventsRef.current || []).length,
+                            lastPersist: `PUT QUEUED ${new Date().toLocaleTimeString()}`,
+                            persistError: persistedLocally ? '' : 'Local session cache skipped (storage full).'
+                        }));
+                        queueActiveSessionSync('put', sessionToSave);
+                        flushPendingActiveSessionSync();
+                    };
+
+                    const msSinceLastSave = Date.now() - Number(tickSync.lastSavedAt || 0);
+                    if (isTickOnlyChange && msSinceLastSave < LIVE_SESSION_TICK_SYNC_MS) {
+                        // Re-arm with the newest snapshot so the trailing save carries the current clock.
+                        if (tickSync.timer) clearTimeout(tickSync.timer);
+                        tickSync.timer = setTimeout(() => {
+                            tickSync.timer = null;
+                            if (String(liveSessionInstanceIdRef.current || '') !== String(session.liveSessionInstanceId || '')) return;
+                            saveSession(session);
+                        }, LIVE_SESSION_TICK_SYNC_MS - msSinceLastSave);
+                        return;
+                    }
+                    saveSession(session);
                 } else {
                     localStorage.removeItem('active_live_session');
                     if (hadLiveSessionRef.current) {
                         hadLiveSessionRef.current = false;
+                        if (!canOperateLive) return;
                         setSyncDebug((prev) => ({
                             ...prev,
                             lastPersist: `DELETE QUEUED ${new Date().toLocaleTimeString()}`,
@@ -6226,7 +6315,7 @@
                         flushPendingActiveSessionSync();
                     }
                 }
-            }, [isGameLive, isEndingGame, teamAId, teamBId, teamAScore, teamBScore, teamATeamTurnovers, teamBTeamTurnovers, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
+            }, [isGameLive, isEndingGame, authRole, teamAId, teamBId, teamAScore, teamBScore, teamATeamTurnovers, teamBTeamTurnovers, liveSessionInstanceId, liveSessionCreatedAt, currentQuarter, periodClockSeconds, isPeriodClockRunning, livePlayerSeconds, teamALineup, teamABench, teamBLineup, teamBBench, lineupRevision, liveStats, liveGameSnapshot, periodSnapshots, gameLog, loggedHistory, playedPlayers, dnpPlayers, awaitingPeriodStart]);
 
             const showToast = (message, type = 'success') => {
                 setToast({ message, type });
@@ -11709,11 +11798,16 @@
                     .sort((left, right) => slotOrder.indexOf(left.slot) - slotOrder.indexOf(right.slot));
             };
 
-            const allWKNDFirstTeam = buildMythicalTeam(leaguePlayerPool);
-            const allWKNDSecondTeam = buildMythicalTeam(
-                leaguePlayerPool,
-                new Set(allWKNDFirstTeam.map((entry) => entry.player.id))
-            );
+            // The mythical-team search is a backtracking pass over the whole league and is only
+            // shown on the Awards tab, so skip it while any other tab (e.g. live) re-renders.
+            const isAwardsTabActive = activeTab === 'awards';
+            const allWKNDFirstTeam = isAwardsTabActive ? buildMythicalTeam(leaguePlayerPool) : [];
+            const allWKNDSecondTeam = isAwardsTabActive
+                ? buildMythicalTeam(
+                    leaguePlayerPool,
+                    new Set(allWKNDFirstTeam.map((entry) => entry.player.id))
+                )
+                : [];
 
             const getLeaderMetric = (player, metricKey, mode) => {
                 const stats = player?.totalStats || {};
@@ -14293,7 +14387,7 @@
                                                     <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">PLAY-BY-PLAY</h4>
                                                 </div>
                                                 <div className="p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]">
-                                                    {gameLog.filter((log) => !log?.hiddenFromLog).map((log, idx) => {
+                                                    {renderedPbpLogs.map((log, idx) => {
                                                         const isSubEvent = log?.kind === 'sub' || (typeof log.text === 'string' && log.text.includes('SUB:'));
                                                         const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
                                                         const hasHomeTag = typeof log.text === 'string' && log.text.startsWith('[HOME] ');
@@ -14310,7 +14404,7 @@
                                                                 key={log.id || idx}
                                                                 {...(log?.id ? getPbpLongPressHandlers(log.id) : {})}
                                                                 style={{ WebkitTouchCallout: 'none' }}
-                                                                className={`py-1.5 px-1.5 text-slate-300 rounded border select-none transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''} ${pbpContextMenu?.logId && pbpContextMenu.logId === log.id ? 'ring-1 ring-cyan-400/60' : ''}`}
+                                                                className={`py-1.5 px-1.5 rounded border select-none transition-all duration-300 ${isSubEvent ? 'text-amber-100' : 'text-slate-300'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : `${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35' : 'border-transparent'}`} ${pbpContextMenu?.logId && pbpContextMenu.logId === log.id ? 'ring-1 ring-cyan-400/60' : ''}`}
                                                             >
                                                                 <div className="flex items-center justify-between gap-2">
                                                                     <div className="flex flex-col items-start gap-0 min-w-0">
@@ -14342,6 +14436,7 @@
                                                             </div>
                                                         );
                                                     })}
+                                                    {renderPbpShowAllButton()}
                                                 </div>
                                             </div>}
 
@@ -14451,7 +14546,7 @@
                                                     )}
                                                 </div>
                                                 <div className="p-3 flex-1 min-h-0 overflow-y-auto font-mono text-[10px]">
-                                                    {gameLog.filter((log) => !log?.hiddenFromLog).map((log, idx) => {
+                                                    {renderedPbpLogs.map((log, idx) => {
                                                         const isSubEvent = log?.kind === 'sub' || (typeof log.text === 'string' && log.text.includes('SUB:'));
                                                         const isSubFlash = isSubEvent && !!log?.id && subFlashLogId === log.id;
                                                         const isConvertBlocked = isProtectedLogEntry(log, finalizedPeriods);
@@ -14480,7 +14575,7 @@
                                                                 key={log.id || idx}
                                                                 {...(log?.id ? getPbpLongPressHandlers(log.id) : {})}
                                                                 style={{ WebkitTouchCallout: 'none' }}
-                                                                className={`py-1.5 px-1.5 text-slate-300 rounded border select-none transition-all duration-300 ${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35 text-amber-100' : 'border-transparent'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : ''} ${pbpContextMenu?.logId && pbpContextMenu.logId === log.id ? 'ring-1 ring-cyan-400/60' : ''}`}
+                                                                className={`py-1.5 px-1.5 rounded border select-none transition-all duration-300 ${isSubEvent ? 'text-amber-100' : 'text-slate-300'} ${isSubFlash ? 'sub-glow-flash border-amber-300/80 bg-amber-500/15 shadow-[0_0_22px_rgba(251,191,36,0.35)]' : `${idx % 2 === 0 ? 'bg-slate-950/45' : 'bg-slate-900/25'} ${isSubEvent ? 'border-amber-500/35' : 'border-transparent'}`} ${pbpContextMenu?.logId && pbpContextMenu.logId === log.id ? 'ring-1 ring-cyan-400/60' : ''}`}
                                                             >
                                                                 {/* Top row: period/clock label left, score pill right */}
                                                                 <div className="flex items-center justify-between gap-2">
@@ -14558,6 +14653,7 @@
                                                             </div>
                                                         );
                                                     })}
+                                                    {renderPbpShowAllButton()}
                                                 </div>
                                             </div>
                                             
