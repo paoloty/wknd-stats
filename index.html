@@ -89,11 +89,26 @@
             cursor: pointer;
         }
         /* Soft glow on the likely-possession team's on-court container while an action is armed */
+        /* The glow is painted once on its own layer and only its opacity animates. Animating
+           box-shadow/border-color on the panel itself repainted the whole panel every frame,
+           which stalled the main thread for 1-3s on phones right after arming an action. */
         @keyframes possessionGlow {
-            0%, 100% { border-color: rgba(16, 185, 129, 0.35); box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2); }
-            50% { border-color: rgba(16, 185, 129, 0.85); box-shadow: 0 0 20px 3px rgba(16, 185, 129, 0.35); }
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
         }
         .possession-glow {
+            position: relative;
+            border-color: rgba(16, 185, 129, 0.35) !important;
+        }
+        .possession-glow::after {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            border-radius: inherit;
+            border: 1px solid rgba(16, 185, 129, 0.85);
+            box-shadow: 0 0 20px 3px rgba(16, 185, 129, 0.35);
+            pointer-events: none;
+            will-change: opacity;
             animation: possessionGlow 1.8s infinite ease-in-out;
         }
         /* Quick attention shake for the armed-action recording banner popping in */
