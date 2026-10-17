@@ -435,7 +435,7 @@
             const [comboPlan, setComboPlan] = useState(null);
             const [comboFollowUp, setComboFollowUp] = useState(null);
             const [pendingComboFollowUp, setPendingComboFollowUp] = useState(null);
-            const actionHoldRef = useRef({ timer: null, x: 0, y: 0, suppressClickUntil: 0 });
+            const actionHoldRef = useRef({ timer: null, x: 0, y: 0, suppressClickUntil: 0, touchActive: false, releasePending: false });
             const [editingLiveLogActionId, setEditingLiveLogActionId] = useState('');
             const [selectedPlayerId, setSelectedPlayerId] = useState('');
 
@@ -3672,11 +3672,16 @@
             // Hold-menu combos: the first stat logs exactly like a normal tap, then the follow-up
             // is armed for the same team or the opponent. Each stat stays its own log entry, so
             // undo/edit/delete/restore treat them independently.
+            // The shooting-foul follow-up is a free-throw step that stays armed: each shooter tap
+            // logs one FT (made or missed, per the banner toggle) until Done/Skip or MAX_COMBO_FREE_THROWS.
+            const MAX_COMBO_FREE_THROWS = 3;
             const ACTION_COMBOS = {
                 made_ast: { followUpActionId: 'ast', relation: 'same', menuLabel: 'Made + assist', followUpLabel: '+1 AST (assist)', excludeFirstPlayer: true },
-                stl_to: { followUpActionId: 'to', relation: 'opponent', menuLabel: 'Steal + turnover', followUpLabel: '+1 TO (lost the ball)', allowTeamTurnover: true },
-                pf_shooting: { followUpActionId: 'pts_1', relation: 'opponent', menuLabel: 'Shooting foul + FT', followUpLabel: '+1 FT (shooting foul)' },
-                blk_miss: { followUpActionId: 'fg2m_miss', relation: 'opponent', menuLabel: 'Block + missed shot', followUpLabel: '2PT MISS (blocked shot)' }
+                stl_to: { followUpActionId: 'to', relation: 'opponent', menuLabel: 'Steal + turnover', followUpLabel: '+1 TO (lost the ball)' },
+                pf_shooting: { followUpActionId: 'pts_1', relation: 'opponent', menuLabel: 'Shooting foul + FTs', followUpLabel: 'Shooting foul', freeThrowStep: true },
+                blk_miss2: { followUpActionId: 'fg2m_miss', relation: 'opponent', menuLabel: 'Block + 2PT miss', followUpLabel: '2PT MISS (blocked shot)' },
+                blk_miss3: { followUpActionId: 'fg3m_miss', relation: 'opponent', menuLabel: 'Block + 3PT miss', followUpLabel: '3PT MISS (blocked shot)' },
+                blk_miss4: { followUpActionId: 'fg4m_miss', relation: 'opponent', menuLabel: 'Block + 4PT miss', followUpLabel: '4PT MISS (blocked shot)' }
             };
 
             const startActionCombo = (comboKey, firstAction, isTeamA) => {
@@ -3684,9 +3689,25 @@
                 if (!combo || !firstAction) return;
                 setComboFollowUp(null);
                 setPendingComboFollowUp(null);
-                openActionForTeamWithLabel(firstAction, isTeamA, combo.menuLabel.toUpperCase());
+                if (activeAction && activeAction.id === firstAction.id) {
+                    // Already armed: re-opening would toggle it off, so just attach the combo.
+                    setActiveActionLabelOverride(combo.menuLabel.toUpperCase());
+                } else {
+                    openActionForTeamWithLabel(firstAction, isTeamA, combo.menuLabel.toUpperCase());
+                }
                 // Dropped again by the combo cleanup effect if the action didn't actually arm.
                 setComboPlan({ key: comboKey, firstActionId: firstAction.id });
+            };
+
+            // Flip the armed free-throw step between FT MADE and FT MISS.
+            const toggleComboFreeThrowResult = () => {
+                const freeThrows = comboFollowUp?.freeThrows;
+                if (!freeThrows || !activeAction) return;
+                const nextActionId = activeAction.id === freeThrows.madeId ? freeThrows.missId : freeThrows.madeId;
+                const nextAction = liveActionById.get(nextActionId);
+                if (!nextAction) return;
+                setActiveAction(nextAction);
+                setComboFollowUp((prev) => (prev ? { ...prev, actionId: nextActionId } : prev));
             };
 
             const getActionHoldMenuItems = (kind, actionId, isTeamA) => {
@@ -3705,7 +3726,7 @@
                     return [
                         offensiveFoulAction && { key: 'pf_offensive', label: 'Offensive foul', hint: 'Foul + turnover on the player', onSelect: () => openActionForTeam(offensiveFoulAction, isTeamA) },
                         technicalFoulAction && { key: 'pf_technical', label: 'Technical foul', hint: 'Asks for a reason', onSelect: () => openActionForTeam(technicalFoulAction, isTeamA) },
-                        action && canOperateBothTeams && { key: 'pf_shooting', label: ACTION_COMBOS.pf_shooting.menuLabel, hint: 'Then pick the shooter', onSelect: () => startActionCombo('pf_shooting', action, isTeamA) }
+                        action && canOperateBothTeams && { key: 'pf_shooting', label: ACTION_COMBOS.pf_shooting.menuLabel, hint: 'Then tap the shooter once per free throw', onSelect: () => startActionCombo('pf_shooting', action, isTeamA) }
                     ].filter(Boolean);
                 }
                 if (!action) return [];
@@ -3716,7 +3737,9 @@
                     return [{ key: 'stl_to', label: ACTION_COMBOS.stl_to.menuLabel, hint: 'Then pick who lost the ball', onSelect: () => startActionCombo('stl_to', action, isTeamA) }];
                 }
                 if (kind === 'blk' && canOperateBothTeams) {
-                    return [{ key: 'blk_miss', label: ACTION_COMBOS.blk_miss.menuLabel, hint: 'Then pick the shooter', onSelect: () => startActionCombo('blk_miss', action, isTeamA) }];
+                    return ['blk_miss2', 'blk_miss3', 'blk_miss4']
+                        .filter((comboKey) => liveActionById.has(ACTION_COMBOS[comboKey].followUpActionId))
+                        .map((comboKey) => ({ key: comboKey, label: ACTION_COMBOS[comboKey].menuLabel, hint: 'Then pick the shooter', onSelect: () => startActionCombo(comboKey, action, isTeamA) }));
                 }
                 return [];
             };
@@ -3729,10 +3752,33 @@
             };
 
             const openActionHoldMenu = (kind, actionId, isTeamA, x, y) => {
+                // Disabled buttons still receive touchstart, so gate here too.
+                const action = liveActionById.get(actionId);
+                if (action && isActionDisabled(action)) return false;
                 if (getActionHoldMenuItems(kind, actionId, isTeamA).length === 0) return false;
-                setActionHoldMenu({ kind, actionId, isTeamA, x, y, openedAt: Date.now() });
+                setActionHoldMenu({ kind, actionId, isTeamA, x, y });
                 return true;
             };
+
+            // A touch-opened menu waits for the finger to lift; the click that release produces
+            // (on the button or the overlay now under it) is swallowed shortly after.
+            const markActionHoldMenuOpenedByTouch = () => {
+                actionHoldRef.current.releasePending = true;
+                actionHoldRef.current.suppressClickUntil = Number.POSITIVE_INFINITY;
+            };
+
+            const handleActionHoldTouchEnd = () => {
+                clearActionHoldTimer();
+                actionHoldRef.current.touchActive = false;
+                if (actionHoldRef.current.releasePending) {
+                    actionHoldRef.current.releasePending = false;
+                    actionHoldRef.current.suppressClickUntil = Date.now() + 400;
+                }
+            };
+
+            const isActionHoldReleaseClick = () => (
+                Boolean(actionHoldRef.current.releasePending) || Date.now() < Number(actionHoldRef.current.suppressClickUntil || 0)
+            );
 
             // A release after a long-press would otherwise also fire the button's normal tap.
             const consumeSuppressedActionClick = () => {
@@ -3747,20 +3793,22 @@
                 onContextMenu: (e) => {
                     e.preventDefault();
                     clearActionHoldTimer();
-                    if (openActionHoldMenu(kind, actionId, isTeamA, e.clientX, e.clientY)) {
-                        actionHoldRef.current.suppressClickUntil = Date.now() + 800;
+                    // Android fires contextmenu on long-press; a mouse right-click produces no click to swallow.
+                    if (openActionHoldMenu(kind, actionId, isTeamA, e.clientX, e.clientY) && actionHoldRef.current.touchActive) {
+                        markActionHoldMenuOpenedByTouch();
                     }
                 },
                 onTouchStart: (e) => {
                     const touch = e.touches?.[0];
                     if (!touch) return;
                     clearActionHoldTimer();
+                    actionHoldRef.current.touchActive = true;
                     actionHoldRef.current.x = touch.clientX;
                     actionHoldRef.current.y = touch.clientY;
                     actionHoldRef.current.timer = setTimeout(() => {
                         actionHoldRef.current.timer = null;
                         if (openActionHoldMenu(kind, actionId, isTeamA, touch.clientX, touch.clientY)) {
-                            actionHoldRef.current.suppressClickUntil = Date.now() + 800;
+                            markActionHoldMenuOpenedByTouch();
                         }
                     }, 500);
                 },
@@ -3771,8 +3819,8 @@
                         clearActionHoldTimer();
                     }
                 },
-                onTouchEnd: clearActionHoldTimer,
-                onTouchCancel: clearActionHoldTimer
+                onTouchEnd: handleActionHoldTouchEnd,
+                onTouchCancel: handleActionHoldTouchEnd
             });
 
             const renderActionHoldMark = () => (
@@ -3794,7 +3842,8 @@
                 const followUpAction = liveActionById.get(next.actionId);
                 if (!followUpAction || !canOperateTeam(next.isTeamA)) return;
                 setComboFollowUp(next);
-                openActionForTeamWithLabel(followUpAction, next.isTeamA, `${next.label} · step 2 of 2`);
+                const stepLabel = next.freeThrows ? `FT ${next.freeThrows.logged + 1}` : 'step 2 of 2';
+                openActionForTeamWithLabel(followUpAction, next.isTeamA, `${next.label} · ${stepLabel}`);
             }, [pendingComboFollowUp, activeAction, showLoggingModal]);
             const scoringActionIds = new Set(scoringActions.map((action) => String(action?.id || '')));
             const autoResumeActionIds = new Set(['pts_2', 'pts_3', 'pts_4', 'fg2m_miss', 'fg3m_miss', 'fg4m_miss', 'reb', 'ast', 'to', 'stl', 'blk']);
@@ -4669,18 +4718,18 @@
                             )}
                         </div>
                         <div className="shrink-0 flex items-center gap-1.5">
-                            {comboFollowUp?.allowTeamTurnover && canOperateTeam(comboFollowUp.isTeamA) && (
+                            {comboFollowUp?.freeThrows && liveActionById.has(comboFollowUp.freeThrows.missId) && (
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        const teamIsA = comboFollowUp.isTeamA;
-                                        handleCancelActionModal();
-                                        handleTeamTurnover(teamIsA);
-                                    }}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide bg-slate-900/80 text-red-200 border border-red-400/50 hover:bg-slate-800 cursor-pointer"
-                                    title="No single player lost the ball"
+                                    onClick={toggleComboFreeThrowResult}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide border cursor-pointer ${
+                                        activeAction.id === comboFollowUp.freeThrows.missId
+                                            ? 'bg-red-950/80 text-red-200 border-red-400/60 hover:bg-red-900/80'
+                                            : 'bg-emerald-950/80 text-emerald-200 border-emerald-400/60 hover:bg-emerald-900/80'
+                                    }`}
+                                    title="Switch between made and missed free throw"
                                 >
-                                    Team TO
+                                    {activeAction.id === comboFollowUp.freeThrows.missId ? 'Miss' : 'Made'}
                                 </button>
                             )}
                             <button
@@ -4689,7 +4738,7 @@
                                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[11px] font-black uppercase tracking-wide bg-red-600 text-white border border-red-400/60 shadow-md hover:bg-red-500 active:bg-red-700 cursor-pointer"
                             >
                                 <Icons.X />
-                                {comboFollowUp ? 'Skip' : 'Cancel'}
+                                {comboFollowUp ? (comboFollowUp.freeThrows?.logged > 0 ? 'Done' : 'Skip') : 'Cancel'}
                             </button>
                         </div>
                     </div>
@@ -8540,6 +8589,9 @@
                 const completedCombo = (comboPlan && comboPlan.firstActionId === activeAction.id && !correctionMode)
                     ? ACTION_COMBOS[comboPlan.key]
                     : null;
+                const loggedFreeThrowStep = (comboFollowUp?.freeThrows && comboFollowUp.actionId === activeAction.id && !correctionMode)
+                    ? comboFollowUp
+                    : null;
                 setComboPlan(null);
                 setComboFollowUp(null);
                 if (completedCombo) {
@@ -8548,7 +8600,14 @@
                         isTeamA: completedCombo.relation === 'same' ? Boolean(isTeamA) : !isTeamA,
                         label: completedCombo.followUpLabel,
                         excludePlayerId: completedCombo.excludeFirstPlayer ? playerId : '',
-                        allowTeamTurnover: Boolean(completedCombo.allowTeamTurnover)
+                        freeThrows: completedCombo.freeThrowStep ? { madeId: 'pts_1', missId: 'ft_miss', logged: 0 } : null
+                    });
+                } else if (loggedFreeThrowStep && loggedFreeThrowStep.freeThrows.logged + 1 < MAX_COMBO_FREE_THROWS) {
+                    // Re-arm for the next free throw, back on MADE.
+                    setPendingComboFollowUp({
+                        ...loggedFreeThrowStep,
+                        actionId: loggedFreeThrowStep.freeThrows.madeId,
+                        freeThrows: { ...loggedFreeThrowStep.freeThrows, logged: loggedFreeThrowStep.freeThrows.logged + 1 }
                     });
                 }
 
@@ -19535,8 +19594,8 @@
                             <div
                                 className="fixed inset-0 z-50"
                                 onClick={() => {
-                                    // A long-press's own touchend can land here as a click; ignore it.
-                                    if (Date.now() - Number(actionHoldMenu.openedAt || 0) < 400) return;
+                                    // A long-press's own release can land here as a click; ignore it.
+                                    if (isActionHoldReleaseClick()) return;
                                     closeMenu();
                                 }}
                                 onContextMenu={(e) => {
@@ -19557,6 +19616,8 @@
                                             key={item.key}
                                             type="button"
                                             onClick={() => {
+                                                // The menu opens under the finger, so the release can land on an item.
+                                                if (isActionHoldReleaseClick()) return;
                                                 closeMenu();
                                                 item.onSelect();
                                             }}
