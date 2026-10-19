@@ -45,26 +45,6 @@ const AUTH_PASSWORDS = {
   admin: process.env.WKND_ADMIN_PASSWORD || 'admin123!!!'
 };
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-const GEMINI_FALLBACK_MODELS = [
-  GEMINI_MODEL,
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash-latest'
-];
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const OPENAI_FALLBACK_MODELS = [
-  OPENAI_MODEL,
-  'gpt-4.1-mini',
-  'gpt-4o-mini'
-];
-const GA_MEASUREMENT_ID = String(process.env.GA_MEASUREMENT_ID || '').trim();
-const GA_ENABLE_IN_DEV = ['1', 'true', 'yes'].includes(
-  String(process.env.WKND_ENABLE_GA_DEV || process.env.GA_ENABLE_IN_DEV || '').trim().toLowerCase()
-);
-const AI_PRIMARY_PROVIDER = String(process.env.AI_PRIMARY_PROVIDER || 'gemini').trim().toLowerCase();
 const SOCIAL_COVER_LOGO_PATHS = [
   path.join(__dirname, 'wknd-s3-logo.png'),
   path.join(__dirname, 'src', 'wknd-s3-logo.png')
@@ -79,184 +59,6 @@ function resolveSocialCoverLogoPath() {
       return false;
     }
   }) || '';
-}
-
-function getAiProviderOrder() {
-  if (AI_PRIMARY_PROVIDER === 'openai') {
-    return ['openai', 'gemini'];
-  }
-  return ['gemini', 'openai'];
-}
-
-function shouldTryNextGeminiModel(status) {
-  return status === 404 || status === 429 || status >= 500;
-}
-
-function shouldTryNextOpenAiModel(status) {
-  return status === 404 || status === 429 || status >= 500;
-}
-
-function extractOpenAiText(data) {
-  const direct = String(data?.choices?.[0]?.message?.content || '').trim();
-  if (direct) return direct;
-  const parts = data?.choices?.[0]?.message?.content;
-  if (!Array.isArray(parts)) return '';
-  return parts
-    .map((part) => String(part?.text || ''))
-    .join(' ')
-    .trim();
-}
-
-async function generateTextWithOpenAiFallback(prompt, options = {}) {
-  if (!OPENAI_API_KEY) {
-    return {
-      text: '',
-      attemptedModels: [],
-      lastErrorStatus: 0,
-      lastErrorText: 'OpenAI API key is not configured.'
-    };
-  }
-
-  const temperature = Number.isFinite(Number(options.temperature))
-    ? Number(options.temperature)
-    : 0.7;
-  const maxTokens = Number.isFinite(Number(options.maxTokens))
-    ? Number(options.maxTokens)
-    : 256;
-
-  const attemptedModels = [];
-  let lastErrorStatus = 0;
-  let lastErrorText = '';
-  const uniqueModels = Array.from(new Set(OPENAI_FALLBACK_MODELS.filter(Boolean)));
-
-  for (const modelName of uniqueModels) {
-    attemptedModels.push(modelName);
-    try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: [{ role: 'user', content: String(prompt || '') }],
-          temperature,
-          max_tokens: maxTokens
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const text = extractOpenAiText(data);
-        if (text) {
-          return {
-            text,
-            attemptedModels,
-            lastErrorStatus: 0,
-            lastErrorText: ''
-          };
-        }
-        lastErrorText = 'OpenAI returned an empty response.';
-        continue;
-      }
-
-      lastErrorStatus = response.status;
-      lastErrorText = await response.text();
-      if (shouldTryNextOpenAiModel(response.status)) {
-        continue;
-      }
-      break;
-    } catch (error) {
-      lastErrorStatus = 0;
-      lastErrorText = String(error?.message || error || 'OpenAI request failed');
-      break;
-    }
-  }
-
-  return {
-    text: '',
-    attemptedModels,
-    lastErrorStatus,
-    lastErrorText
-  };
-}
-
-async function generateTextWithGeminiFallback(prompt, options = {}) {
-  if (!GEMINI_API_KEY) {
-    return {
-      text: '',
-      attemptedModels: [],
-      lastErrorStatus: 0,
-      lastErrorText: 'Gemini API key is not configured.'
-    };
-  }
-
-  const temperature = Number.isFinite(Number(options.temperature))
-    ? Number(options.temperature)
-    : 0.7;
-  const maxTokens = Number.isFinite(Number(options.maxTokens))
-    ? Number(options.maxTokens)
-    : 256;
-
-  const attemptedModels = [];
-  let lastErrorStatus = 0;
-  let lastErrorText = '';
-  const uniqueModels = Array.from(new Set(GEMINI_FALLBACK_MODELS.filter(Boolean)));
-
-  for (const modelName of uniqueModels) {
-    attemptedModels.push(modelName);
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: String(prompt || '') }] }],
-          generationConfig: {
-            temperature,
-            maxOutputTokens: maxTokens
-          }
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const text = (data?.candidates || [])
-          .flatMap((candidate) => candidate?.content?.parts || [])
-          .map((part) => String(part?.text || ''))
-          .join('\n')
-          .trim();
-        if (text) {
-          return {
-            text,
-            attemptedModels,
-            lastErrorStatus: 0,
-            lastErrorText: ''
-          };
-        }
-        lastErrorText = 'Gemini returned an empty response.';
-        continue;
-      }
-
-      lastErrorStatus = response.status;
-      lastErrorText = await response.text();
-      if (shouldTryNextGeminiModel(response.status)) {
-        continue;
-      }
-      break;
-    } catch (error) {
-      lastErrorStatus = 0;
-      lastErrorText = String(error?.message || error || 'Gemini request failed');
-      break;
-    }
-  }
-
-  return {
-    text: '',
-    attemptedModels,
-    lastErrorStatus,
-    lastErrorText
-  };
 }
 
 const defaultsDir = path.join(__dirname, 'defaults');
@@ -2404,49 +2206,6 @@ function buildCircleMaskSvg(size) {
   `);
 }
 
-async function generatePlayerArtDirection(playerName, teamName, stylePrompt, gameContext, playerStatsSummary) {
-  const fallback = String(stylePrompt || '2D basketball poster, front-facing portrait, cel-shaded, bold outlines, clean background').trim();
-  if (!GEMINI_API_KEY && !OPENAI_API_KEY) return fallback;
-
-  const ctx = (gameContext && typeof gameContext === 'object') ? gameContext : {};
-  const scoreLine = String(ctx.scoreLine || '').trim();
-  const bestPlayerStats = String(playerStatsSummary || ctx.bestPlayerStats || '').trim();
-
-  const prompt = [
-    'Create one short art-direction sentence for stylizing a basketball player photo into 2D artwork.',
-    'Keep it under 22 words and include only style language (no story, no extra text).',
-    `Player: ${playerName || 'Unknown'}`,
-    `Team: ${teamName || 'Unknown Team'}`,
-    `Game score context: ${scoreLine || 'N/A'}`,
-    `Best player stat line: ${bestPlayerStats || 'N/A'}`,
-    `Requested style: ${fallback}`
-  ].join('\n');
-
-  const providerOrder = getAiProviderOrder();
-  for (const provider of providerOrder) {
-    if (provider === 'openai') {
-      const openAiResult = await generateTextWithOpenAiFallback(prompt, {
-        temperature: 0.8,
-        maxTokens: 80
-      });
-      if (openAiResult.text) {
-        return openAiResult.text;
-      }
-      continue;
-    }
-
-    const geminiResult = await generateTextWithGeminiFallback(prompt, {
-      temperature: 0.8,
-      maxTokens: 80
-    });
-    if (geminiResult.text) {
-      return geminiResult.text;
-    }
-  }
-
-  return fallback;
-}
-
 let _stateCache = null;
 let _stateCacheTs = 0;
 const STATE_CACHE_TTL_MS = 1500;
@@ -3298,33 +3057,6 @@ function getCanonicalRequestHost(req) {
   return (rawForwardedHost || rawHost).split(',')[0].trim();
 }
 
-function getCanonicalRequestHostname(req) {
-  const canonicalHost = getCanonicalRequestHost(req);
-  return canonicalHost
-    .split(':')[0]
-    .replace(/\.$/, '')
-    .replace(/^www\./, '');
-}
-
-function isGaEnabledForRequest(req) {
-  const isAllowedGaDomain = getCanonicalRequestHostname(req) === 'wkndbasketball.com';
-  return Boolean(GA_MEASUREMENT_ID && isAllowedGaDomain);
-}
-
-function buildGaHeadSnippet(req) {
-  if (!isGaEnabledForRequest(req)) return '';
-  const safeId = GA_MEASUREMENT_ID.replace(/'/g, "\\'");
-  return [
-    `<script async src="https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(GA_MEASUREMENT_ID)}"></script>`,
-    '<script>',
-    '  window.dataLayer = window.dataLayer || [];',
-    '  function gtag(){dataLayer.push(arguments);}',
-    '  gtag(\'js\', new Date());',
-    `  gtag('config', '${safeId}', { send_page_view: false });`,
-    '</script>'
-  ].join('\n    ');
-}
-
 app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: REQUEST_BODY_LIMIT }));
 
@@ -3359,9 +3091,6 @@ app.use((req, res, next) => {
 });
 
 function renderInjectedIndex(req, res) {
-  const gaEnabledForRequest = isGaEnabledForRequest(req);
-  const requestHostname = getCanonicalRequestHostname(req);
-
   try {
     const pathParts = String(req.path || '/').split('/').filter(Boolean);
     const pathGameId = pathParts[0] === 'history' && pathParts[1] === 'game' && pathParts[2]
@@ -3398,7 +3127,6 @@ function renderInjectedIndex(req, res) {
     const indexPath = path.join(__dirname, 'index.html');
     const html = fs.readFileSync(indexPath, 'utf8');
     let metaTags = '';
-    let gaHeadSnippet = '';
 
     try {
       if (isStandingsView) {
@@ -3412,20 +3140,10 @@ function renderInjectedIndex(req, res) {
       metaTags = '';
     }
 
-    try {
-      gaHeadSnippet = buildGaHeadSnippet(req);
-    } catch {
-      gaHeadSnippet = '';
-    }
-
-    const headFragments = [metaTags, gaHeadSnippet].filter(Boolean).join('\n    ');
-    const injected = html.replace('</head>', `    ${headFragments}\n</head>`);
+    const injected = metaTags ? html.replace('</head>', `    ${metaTags}\n</head>`) : html;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.setHeader('X-GA-Enabled', gaEnabledForRequest ? '1' : '0');
-    res.setHeader('X-GA-Hostname', requestHostname || 'unknown');
-    res.setHeader('X-GA-Injected', gaHeadSnippet ? '1' : '0');
     res.send(injected);
   } catch {
     res.status(500).type('text/plain').send('Failed to render index.');
@@ -3554,12 +3272,8 @@ app.post('/api/portal-roster/sync', async (_req, res) => {
   }
 });
 
-app.get('/api/client-config', (req, res) => {
-  const gaEnabled = isGaEnabledForRequest(req);
-
+app.get('/api/client-config', (_req, res) => {
   res.json({
-    gaEnabled,
-    gaMeasurementId: gaEnabled ? GA_MEASUREMENT_ID : '',
     publicAwardsPageEnabled: readPublicAwardsPageEnabled()
   });
 });
@@ -3741,411 +3455,12 @@ app.get('/api/social-cover/player/:playerId.png', async (req, res) => {
   }
 });
 
-app.post('/api/generate-writeup', async (req, res) => {
-  if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
-    res.status(400).json({ error: 'Neither Gemini nor OpenAI API key is configured on the server.' });
-    return;
-  }
-
-  const { game, playerOfTheGame, originalPlayerOfTheGame, potgSelectionMode, bestPerformers, standoutPerformersByTeam, playByPlay, finalMoments, leadSwingSummary, lineupPatternSummary } = req.body || {};
-  if (!game || typeof game !== 'object') {
-    res.status(400).json({ error: 'Body must include game object.' });
-    return;
-  }
-
-  const pbpLines = Array.isArray(playByPlay)
-    ? playByPlay.slice(-220).map((entry) => {
-        const time = String(entry?.time || '').trim() || '--';
-        const team = String(entry?.team || 'Neutral').trim() || 'Neutral';
-        const text = String(entry?.text || '').trim();
-        return text ? `[${time}] (${team}) ${text}` : null;
-      }).filter(Boolean)
-    : [];
-
-  const finalMomentLines = Array.isArray(finalMoments)
-    ? finalMoments.slice(-60).map((entry) => {
-        const time = String(entry?.time || '').trim() || '--';
-        const team = String(entry?.team || 'Neutral').trim() || 'Neutral';
-        const text = String(entry?.text || '').trim();
-        return text ? `[${time}] (${team}) ${text}` : null;
-      }).filter(Boolean)
-    : pbpLines.slice(-30);
-
-  const formatPerformerLine = (p) => {
-    const name = `#${p?.number ?? '-'} ${p?.name || 'Unknown'}`;
-    const team = p?.teamName || 'Unknown Team';
-    const stats = p?.stats || {};
-    return `${name} (${team}) - PTS ${Number(stats.pts || 0)}, REB ${Number(stats.reb || 0)}, AST ${Number(stats.ast || 0)}, STL ${Number(stats.stl || 0)}, BLK ${Number(stats.blk || 0)}, TO ${Number(stats.to || 0)}`;
-  };
-
-  const performerLines = Array.isArray(bestPerformers)
-    ? bestPerformers.slice(0, 8).map(formatPerformerLine)
-    : [];
-
-  const teamAStandoutLines = Array.isArray(standoutPerformersByTeam?.teamA)
-    ? standoutPerformersByTeam.teamA.slice(0, 2).map(formatPerformerLine)
-    : [];
-
-  const teamBStandoutLines = Array.isArray(standoutPerformersByTeam?.teamB)
-    ? standoutPerformersByTeam.teamB.slice(0, 2).map(formatPerformerLine)
-    : [];
-
-  // If manual POTG override, ensure original best player appears at the top of outstanding performers
-  if (potgSelectionMode === 'manual' && originalPlayerOfTheGame) {
-    const originalTeamName = originalPlayerOfTheGame.teamName || '';
-    const formattedOriginal = formatPerformerLine(originalPlayerOfTheGame);
-    const isInTeamA = originalTeamName === (game.teamAName || '');
-    const targetList = isInTeamA ? teamAStandoutLines : teamBStandoutLines;
-    
-    // Check if original player already mentioned in their team's standout list
-    const alreadyMentioned = targetList.some(line => 
-      (originalPlayerOfTheGame.number && line.includes(`#${originalPlayerOfTheGame.number}`)) ||
-      (originalPlayerOfTheGame.name && line.includes(originalPlayerOfTheGame.name))
-    );
-    
-    // Add original player at the TOP of list if not already mentioned
-    if (!alreadyMentioned) {
-      if (isInTeamA) {
-        teamAStandoutLines.unshift(formattedOriginal);
-      } else {
-        teamBStandoutLines.unshift(formattedOriginal);
-      }
-    }
-  }
-
-  const potgLine = playerOfTheGame
-    ? `#${playerOfTheGame.number || '-'} ${playerOfTheGame.name || 'Unknown'} (${playerOfTheGame.teamName || 'Unknown Team'}) - PTS ${Number(playerOfTheGame?.stats?.pts || 0)}, REB ${Number(playerOfTheGame?.stats?.reb || 0)}, AST ${Number(playerOfTheGame?.stats?.ast || 0)}, STL ${Number(playerOfTheGame?.stats?.stl || 0)}, BLK ${Number(playerOfTheGame?.stats?.blk || 0)}`
-    : 'No clear player of the game identified from the provided stats.';
-
-  const leadSwingLine = leadSwingSummary && typeof leadSwingSummary === 'object'
-    ? `Largest lead: ${leadSwingSummary.largestLeadTeam || 'Unknown'} by ${Number(leadSwingSummary.largestLeadPoints || 0)} at ${leadSwingSummary.largestLeadAtTime || '--'}. Huge lead: ${Boolean(leadSwingSummary.isHugeLead)}. Erased: ${Boolean(leadSwingSummary.leadWasErased)}. Nearly erased: ${Boolean(leadSwingSummary.leadWasNearlyErased)}.`
-    : 'Largest lead context not provided.';
-
-  const comebackContextLine = leadSwingSummary && typeof leadSwingSummary === 'object'
-    ? (() => {
-        const leadPoints = Number(leadSwingSummary.largestLeadPoints || 0);
-        const teamName = leadSwingSummary.largestLeadTeam || 'Unknown';
-        const atTime = leadSwingSummary.largestLeadAtTime || '--';
-        const isHugeLead = Boolean(leadSwingSummary.isHugeLead);
-        const wasErased = Boolean(leadSwingSummary.leadWasErased);
-        const wasNearlyErased = Boolean(leadSwingSummary.leadWasNearlyErased);
-
-        if (isHugeLead && wasErased) {
-          return `Comeback alert: ${teamName} led by ${leadPoints} at ${atTime}, and that big lead was fully erased.`;
-        }
-        if (isHugeLead && wasNearlyErased) {
-          return `Comeback pressure: ${teamName} led by ${leadPoints} at ${atTime}, and that big lead was nearly erased late.`;
-        }
-        if (leadPoints >= 8 && wasErased) {
-          return `Swing alert: ${teamName} led by ${leadPoints} at ${atTime}, and the lead was erased.`;
-        }
-        return 'No major comeback collapse detected from lead data.';
-      })()
-    : 'Comeback context unavailable.';
-
-  const finalMargin = Math.abs(Number(game?.teamAScore || 0) - Number(game?.teamBScore || 0));
-  const isCloseFight = finalMargin <= 6;
-  const closeFightLine = isCloseFight
-    ? `Close fight detected (final margin: ${finalMargin}). Strongly emphasize the final minutes, clutch sequences, and late-game swings.`
-    : `Not a close finish (final margin: ${finalMargin}). Still include final moments but balance with full-game arc.`;
-
-  const crucialFinalMomentLines = (Array.isArray(finalMomentLines) ? finalMomentLines : [])
-    .filter((line) => {
-      const text = String(line || '').toLowerCase();
-      return /(lead change|tie|tied|go-ahead|takes the lead|game-tying|game tying|game-winning|game winning|clutch|3pt|three|block|steal|turnover|and-1|foul|free throw|miss|rebound|buzzer)/i.test(text);
-    })
-    .slice(-10);
-
-  const closeGameFinalLogFocusLine = isCloseFight
-    ? `Close-game final-log focus: ${crucialFinalMomentLines.length} crucial late events flagged from final logs.`
-    : 'Close-game final-log focus: not required (game not classified as close).';
-
-  const lineupPatternLine = lineupPatternSummary && typeof lineupPatternSummary === 'object'
-    ? [lineupPatternSummary.teamA, lineupPatternSummary.teamB]
-        .filter(Boolean)
-        .map((item) => `${item.teamName || 'Team'}: ${item.rotationPattern || 'rotation pattern unavailable'}, substitutions ${Number(item.subCount || 0)}, players used ${Number(item.playersUsed || 0)}, late subs ${Number(item.lateSubCount || 0)}.`)
-        .join(' ')
-    : 'Lineup pattern context not provided.';
-
-  const recentRecapRows = db.prepare(`
-    SELECT id, date, team_a_name, team_b_name, game_writeup
-    FROM games
-    WHERE COALESCE(TRIM(game_writeup), '') <> ''
-      AND id <> ?
-    ORDER BY COALESCE(sort_order, 0) DESC, date DESC
-    LIMIT 6
-  `).all(String(game.id || ''));
-
-  const priorRecapSnippets = (recentRecapRows || [])
-    .map((row) => {
-      const text = String(row?.game_writeup || '').replace(/\s+/g, ' ').trim();
-      if (!text) return null;
-      return `${row?.team_a_name || 'Team A'} vs ${row?.team_b_name || 'Team B'} (${row?.date || ''}): ${text.slice(0, 260)}`;
-    })
-    .filter(Boolean);
-
-  const prompt = [
-    'You are an expert, high-energy sports journalist writing an exciting game recap based on raw play-by-play logs.',
-    'Your goal is to make the reader feel the tension, momentum, and drama of the game.',
-    'Use ONLY the provided data. Do not invent quotes, injuries, runs, possessions, or events.',
-    'Write plain text only.',
-    'Follow these strict writing guidelines:',
-    '1) Hook the reader: Start with a dynamic headline and a compelling lead paragraph. Focus on the final outcome, the hero of the game, or a major turning point. Never start with "This game was played on..."',
-    '2) Focus on momentum and narrative: Do not just list plays chronologically. Group action by major runs, shifts in momentum, or quarter arcs.',
-    '3) Emphasize climax and high stakes: Dedicate the most vivid descriptions to crunch time (final 5 minutes, lead changes, clutch stops, game-sealing plays).',
-    '4) Use vibrant sports vocabulary: Avoid repetitive verbs. Use active, evocative language.',
-    '5) Highlight key performers: Weave player statistics naturally into the story instead of listing raw numbers.',
-    '6) Match the game tone: If blowout, emphasize dominance and depth; if defensive battle, highlight stops and physicality; if shootout, highlight offensive fireworks.',
-    '7) If a team built a huge lead (10+ points) that was erased or nearly erased, explicitly mention that momentum collapse and comeback swing.',
-    '8) If it is a close fight (single-possession to two-possession finish), heavily spotlight the final few minutes, including the climax and decisive late sequence.',
-    '9) For close games, prioritize crucial events from final logs (lead changes, ties, clutch shots, steals, blocks, turnovers, key free throws, game-sealing plays).',
-    '10) If comeback context indicates a blown big lead, explicitly narrate the comeback pressure and how momentum shifted.',
-    '11) Include each team\'s lineup/rotation pattern naturally (tight rotation, balanced rotation, or heavy rotation), especially if late substitutions affected momentum.',
-    '12) Mention at least 1-2 outstanding performers from each team when available in the standout lists, and weave them naturally into the narrative.',
-    '13) Make this recap stylistically distinct from previous saved recaps. Do not reuse the same opening line pattern, closing sentence pattern, or repeated catchphrases.',
-    '14) Use prior recap snippets only as anti-repetition guidance, not as factual source data for this game.',
-    'Keep it vivid but factual and easy to read.',
-    'Output format: headline + 3 short paragraphs.',
-    '',
-    `Game: ${game.teamAName || 'Team A'} ${Number(game.teamAScore || 0)} - ${Number(game.teamBScore || 0)} ${game.teamBName || 'Team B'} (${game.date || ''})`,
-    `Close-game context: ${closeFightLine}`,
-    `Close-game final-log context: ${closeGameFinalLogFocusLine}`,
-    `Lead swing context: ${leadSwingLine}`,
-    `Comeback context: ${comebackContextLine}`,
-    `Lineup pattern context: ${lineupPatternLine}`,
-    `Player of the Game: ${potgLine}`,
-    `Outstanding performers - ${game.teamAName || 'Team A'} (target mention 1-2):`,
-    ...(teamAStandoutLines.length ? teamAStandoutLines : ['No standout performers provided for Team A.']),
-    `Outstanding performers - ${game.teamBName || 'Team B'} (target mention 1-2):`,
-    ...(teamBStandoutLines.length ? teamBStandoutLines : ['No standout performers provided for Team B.']),
-    'Recent saved recap snippets (style-diversity guardrail):',
-    ...(priorRecapSnippets.length ? priorRecapSnippets : ['No previous saved recaps found.']),
-    'Best performers:',
-    ...(performerLines.length ? performerLines : ['No performer list provided.']),
-    'Final moments (most recent events):',
-    ...(finalMomentLines.length ? finalMomentLines : ['No final-moments events provided.']),
-    'Crucial final-log events (priority for close games):',
-    ...(crucialFinalMomentLines.length ? crucialFinalMomentLines : ['No crucial final-log events flagged.']),
-    'Play-by-play events:',
-    ...(pbpLines.length ? pbpLines : ['No play-by-play events provided.'])
-  ].join('\n');
-
-  try {
-    const providerOrder = getAiProviderOrder();
-    let writeup = '';
-    let geminiResult = {
-      text: '',
-      attemptedModels: [],
-      lastErrorStatus: 0,
-      lastErrorText: 'Gemini was not attempted.'
-    };
-    let openAiResult = {
-      text: '',
-      attemptedModels: [],
-      lastErrorStatus: 0,
-      lastErrorText: 'OpenAI was not attempted.'
-    };
-
-    for (const provider of providerOrder) {
-      if (provider === 'openai') {
-        openAiResult = await generateTextWithOpenAiFallback(prompt, {
-          temperature: 0.7,
-          maxTokens: 450
-        });
-        if (openAiResult.text) {
-          writeup = openAiResult.text;
-          break;
-        }
-        continue;
-      }
-
-      geminiResult = await generateTextWithGeminiFallback(prompt, {
-        temperature: 0.7,
-        maxTokens: 450
-      });
-      if (geminiResult.text) {
-        writeup = geminiResult.text;
-        break;
-      }
-    }
-
-    if (!writeup) {
-      const geminiPart = geminiResult.attemptedModels.length
-        ? `Gemini tried: ${geminiResult.attemptedModels.join(', ')}. Last error (${geminiResult.lastErrorStatus}): ${String(geminiResult.lastErrorText || '').slice(0, 180)}`
-        : `Gemini unavailable: ${String(geminiResult.lastErrorText || '').slice(0, 180)}`;
-      const openAiPart = openAiResult.attemptedModels.length
-        ? `OpenAI tried: ${openAiResult.attemptedModels.join(', ')}. Last error (${openAiResult.lastErrorStatus}): ${String(openAiResult.lastErrorText || '').slice(0, 180)}`
-        : `OpenAI unavailable: ${String(openAiResult.lastErrorText || '').slice(0, 180)}`;
-      res.status(502).json({ error: `${geminiPart} ${openAiPart}` });
-      return;
-    }
-
-    if (!writeup) {
-      res.status(502).json({ error: 'AI provider returned an empty response.' });
-      return;
-    }
-
-    res.json({ writeup });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to generate writeup with AI provider.' });
-  }
-});
-
-app.post('/api/generate-potg-writeup', async (req, res) => {
-  if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
-    res.status(400).json({ error: 'Neither Gemini nor OpenAI API key is configured on the server.' });
-    return;
-  }
-
-  const { game, playerOfTheGame } = req.body || {};
-  if (!game || typeof game !== 'object') {
-    res.status(400).json({ error: 'Body must include game object.' });
-    return;
-  }
-  if (!playerOfTheGame || typeof playerOfTheGame !== 'object' || !playerOfTheGame.id) {
-    res.status(400).json({ error: 'Body must include playerOfTheGame with id.' });
-    return;
-  }
-
-  const state = readState();
-  const playerId = String(playerOfTheGame.id);
-  const allGames = Array.isArray(state?.games) ? state.games : [];
-
-  const previousGames = allGames
-    .filter((row) => row && String(row.id || '') !== String(game.id || ''))
-    .filter((row) => {
-      const hasRow = Boolean(row?.playerStats?.[playerId]);
-      const isDnp = Array.isArray(row?.dnpPlayers) && row.dnpPlayers.includes(playerId);
-      return hasRow && !isDnp;
-    })
-    .sort((a, b) => String(b.id || '').localeCompare(String(a.id || '')))
-    .slice(0, 6);
-
-  const formatStatsLine = (stats = {}) => {
-    const fgMade = Number(stats.fg2m || 0) + Number(stats.fg3m || 0) + Number(stats.fg4m || 0);
-    const fgAtt = fgMade + Number(stats.fg2m_miss || 0) + Number(stats.fg3m_miss || 0) + Number(stats.fg4m_miss || 0);
-    const fgPct = fgAtt > 0 ? `${Math.round((fgMade / fgAtt) * 100)}% FG` : '0% FG';
-    return `PTS ${Number(stats.pts || 0)}, REB ${Number(stats.reb || 0)}, AST ${Number(stats.ast || 0)}, STL ${Number(stats.stl || 0)}, BLK ${Number(stats.blk || 0)}, TO ${Number(stats.to || 0)}, ${fgPct}`;
-  };
-
-  const previousPerformanceLines = previousGames.map((row) => {
-    const stats = row?.playerStats?.[playerId] || {};
-    const opponent = String(row?.teamAId) === String(playerOfTheGame.teamId || '')
-      ? (row?.teamBName || 'Opponent')
-      : (row?.teamAName || 'Opponent');
-    return `${row?.date || ''} vs ${opponent}: ${formatStatsLine(stats)}`;
-  });
-
-  const prompt = [
-    'You are a concise basketball writer producing a short player spotlight.',
-    'Use ONLY the provided data and do not invent any details.',
-    'Write exactly 2 to 3 sentences, plain text only.',
-    'Focus on the player\'s production and efficiency in this game.',
-    'If prior performances are provided, briefly reference trend/consistency.',
-    'Do NOT mention PER, formulas, or advanced metric names.',
-    '',
-    `Game: ${game.teamAName || 'Team A'} ${Number(game.teamAScore || 0)} - ${Number(game.teamBScore || 0)} ${game.teamBName || 'Team B'} (${game.date || ''})`,
-    `Player: #${playerOfTheGame.number || '-'} ${playerOfTheGame.name || 'Unknown'} (${playerOfTheGame.teamName || 'Unknown Team'})`,
-    `Current game stat line: ${formatStatsLine(playerOfTheGame.stats || {})}`,
-    'Recent previous game performances:',
-    ...(previousPerformanceLines.length ? previousPerformanceLines : ['No previous game performances found for this player.'])
-  ].join('\n');
-
-  try {
-    const providerOrder = getAiProviderOrder();
-    let rawWriteup = '';
-    let geminiResult = {
-      text: '',
-      attemptedModels: [],
-      lastErrorStatus: 0,
-      lastErrorText: 'Gemini was not attempted.'
-    };
-    let openAiResult = {
-      text: '',
-      attemptedModels: [],
-      lastErrorStatus: 0,
-      lastErrorText: 'OpenAI was not attempted.'
-    };
-
-    for (const provider of providerOrder) {
-      if (provider === 'openai') {
-        openAiResult = await generateTextWithOpenAiFallback(prompt, {
-          temperature: 0.55,
-          maxTokens: 150
-        });
-        if (openAiResult.text) {
-          rawWriteup = openAiResult.text;
-          break;
-        }
-        continue;
-      }
-
-      geminiResult = await generateTextWithGeminiFallback(prompt, {
-        temperature: 0.55,
-        maxTokens: 150
-      });
-      if (geminiResult.text) {
-        rawWriteup = geminiResult.text;
-        break;
-      }
-    }
-
-    rawWriteup = String(rawWriteup || '').replace(/\s+/g, ' ').trim();
-
-    if (!rawWriteup) {
-      const geminiPart = geminiResult.attemptedModels.length
-        ? `Gemini tried: ${geminiResult.attemptedModels.join(', ')}. Last error (${geminiResult.lastErrorStatus}): ${String(geminiResult.lastErrorText || '').slice(0, 180)}`
-        : `Gemini unavailable: ${String(geminiResult.lastErrorText || '').slice(0, 180)}`;
-      const openAiPart = openAiResult.attemptedModels.length
-        ? `OpenAI tried: ${openAiResult.attemptedModels.join(', ')}. Last error (${openAiResult.lastErrorStatus}): ${String(openAiResult.lastErrorText || '').slice(0, 180)}`
-        : `OpenAI unavailable: ${String(openAiResult.lastErrorText || '').slice(0, 180)}`;
-      res.status(502).json({ error: `${geminiPart} ${openAiPart}` });
-      return;
-    }
-
-    const sentences = rawWriteup
-      .split(/(?<=[.!?])\s+/)
-      .map((entry) => String(entry || '').trim())
-      .filter(Boolean);
-
-    const finalizedSentences = sentences.slice(0, 3);
-
-    if (finalizedSentences.length < 2) {
-      const stats = playerOfTheGame.stats || {};
-      const playerName = playerOfTheGame.name || 'The player';
-      const teamName = playerOfTheGame.teamName || 'the team';
-      const pts = Number(stats.pts || 0);
-      const reb = Number(stats.reb || 0);
-      const ast = Number(stats.ast || 0);
-      const stl = Number(stats.stl || 0);
-      const blk = Number(stats.blk || 0);
-
-      const fallbackCore = `${playerName} finished with ${pts} points, ${reb} rebounds, and ${ast} assists, while adding ${stl} steals and ${blk} blocks.`;
-      const fallbackTrend = previousPerformanceLines.length > 0
-        ? `${playerName} has stayed productive across recent games and continued that form here for ${teamName}.`
-        : `${playerName} set the tone for ${teamName} in this matchup with a strong all-around performance.`;
-
-      if (!finalizedSentences.length) {
-        finalizedSentences.push(fallbackCore);
-      }
-      if (finalizedSentences.length < 2) {
-        finalizedSentences.push(fallbackTrend);
-      }
-    }
-
-    const compactWriteup = finalizedSentences.slice(0, 3).join(' ').trim();
-    res.json({ writeup: compactWriteup });
-  } catch {
-    res.status(500).json({ error: 'Failed to generate POTG writeup.' });
-  }
-});
-
 app.post('/api/generate-player-2d-art', async (req, res) => {
   if (!sharp) {
     res.status(501).json({ error: '2D player art generation is disabled in this build because sharp is not installed.' });
     return;
   }
-  const { imageDataUrl, imageUrl, coverImageDataUrl, playerName, teamName, playerStatsSummary, gameContext, stylePrompt } = req.body || {};
+  const { imageDataUrl, imageUrl, coverImageDataUrl, stylePrompt } = req.body || {};
   let parsed = parseImageDataUrl(imageDataUrl);
 
   if (!parsed && imageUrl) {
@@ -4205,7 +3520,7 @@ app.post('/api/generate-player-2d-art', async (req, res) => {
   }
 
   try {
-    const artDirection = await generatePlayerArtDirection(playerName, teamName, stylePrompt, gameContext, playerStatsSummary);
+    const artDirection = String(stylePrompt || '2D basketball poster, front-facing portrait, cel-shaded, bold outlines, clean background').trim();
     const preset = getStylizePreset(artDirection);
     const W = 1200;
     const H = 630;
@@ -4979,29 +4294,6 @@ app.get('/api/games/:gameId/detail', (req, res) => {
     periodSnapshots: parseJsonSafe(row.period_snapshots_json, []),
     playerStats
   });
-});
-
-app.put('/api/games/:gameId/video', (req, res) => {
-  const gameId = String(req.params.gameId || '').trim();
-  if (!gameId) {
-    res.status(400).json({ error: 'gameId is required.' });
-    return;
-  }
-
-  const youtubeUrl = String(req.body?.youtubeUrl || '').trim();
-
-  // Direct targeted UPDATE — never touches players, teams, or game_player_stats.
-  // The old pattern (readState → writeState) wiped all game_player_stats because
-  // readState() returns playerStats:{} for every game, causing writeGamesTransaction
-  // to clear and re-insert with no stats rows.
-  const result = db.prepare('UPDATE games SET youtube_url = ? WHERE id = ?').run(youtubeUrl, gameId);
-
-  if (!result.changes) {
-    return res.status(404).json({ error: 'Game not found.' });
-  }
-
-  broadcastSync();
-  res.json({ ok: true, youtubeUrl });
 });
 
 app.put('/api/games/:gameId/social-cover', (req, res) => {

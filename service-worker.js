@@ -1,9 +1,12 @@
-const CACHE_NAME = 'wknd-stats-offline-v5';
+const CACHE_NAME = 'wknd-stats-offline-v6';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/app.bundle.js',
-  '/manifest.webmanifest'
+  '/manifest.webmanifest',
+  '/vendor/react.production.min.js',
+  '/vendor/react-dom.production.min.js',
+  '/vendor/fonts.css'
 ];
 
 self.addEventListener('install', (event) => {

@@ -46,78 +46,22 @@
             return payload;
         }
 
-        let gaInitialized = false;
-        let gaMeasurementId = '';
+        // navigator.onLine is false when the machine has no network at all, even though a
+        // server on localhost / the LAN is still reachable. Treat local hosts as always reachable
+        // so the app keeps saving to its own server without internet.
+        const IS_LOCAL_SERVER_HOST = (() => {
+            const host = String(window.location.hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+            return host === 'localhost'
+                || host === '::1'
+                || host.endsWith('.local')
+                || /^127\./.test(host)
+                || /^10\./.test(host)
+                || /^192\.168\./.test(host)
+                || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+        })();
 
-        function loadGaScript(measurementId) {
-            return new Promise((resolve, reject) => {
-                if (!measurementId) {
-                    reject(new Error('Missing GA measurement ID.'));
-                    return;
-                }
-
-                const existing = document.querySelector('script[data-ga-script="1"]');
-                if (existing) {
-                    resolve();
-                    return;
-                }
-
-                const script = document.createElement('script');
-                script.async = true;
-                script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
-                script.setAttribute('data-ga-script', '1');
-                script.onload = () => resolve();
-                script.onerror = () => reject(new Error('Failed to load GA script.'));
-                document.head.appendChild(script);
-            });
-        }
-
-        async function initGoogleAnalytics() {
-            if (gaInitialized) return true;
-
-            const prebootMeasurementId = String(window.__WKND_GA_MEASUREMENT_ID || '').trim();
-            if (prebootMeasurementId && typeof window.gtag === 'function') {
-                gaMeasurementId = prebootMeasurementId;
-                gaInitialized = true;
-                return true;
-            }
-
-            try {
-                const config = await apiRequest('/api/client-config');
-                const enabled = Boolean(config?.gaEnabled);
-                const measurementId = String(config?.gaMeasurementId || '').trim();
-                if (!enabled || !measurementId) return false;
-
-                await loadGaScript(measurementId);
-
-                window.dataLayer = window.dataLayer || [];
-                window.gtag = window.gtag || function gtag() {
-                    window.dataLayer.push(arguments);
-                };
-
-                window.gtag('js', new Date());
-                window.gtag('config', measurementId, { send_page_view: false });
-
-                gaMeasurementId = measurementId;
-                gaInitialized = true;
-                return true;
-            } catch (error) {
-                return false;
-            }
-        }
-
-        function trackAnalyticsEvent(eventName, params = {}) {
-            if (!gaInitialized || !window.gtag || !eventName) return;
-            window.gtag('event', eventName, params);
-        }
-
-        function trackAnalyticsPageView(pagePath, pageTitle) {
-            if (!gaInitialized || !window.gtag || !gaMeasurementId) return;
-            window.gtag('event', 'page_view', {
-                page_path: pagePath,
-                page_title: pageTitle || document.title,
-                send_to: gaMeasurementId
-            });
+        function canReachServer() {
+            return IS_LOCAL_SERVER_HOST || navigator.onLine !== false;
         }
 
         function getTeamColorStyles(color, textColor, fallbackColor = '#06b6d4') {
@@ -357,12 +301,9 @@
             const [pendingSharedHistoryDetailTab, setPendingSharedHistoryDetailTab] = useState('');
             const [pendingSharedRosterPlayer, setPendingSharedRosterPlayer] = useState(null);
             const [historyDetailTab, setHistoryDetailTab] = useState('potg');
-            const [historyVideoInput, setHistoryVideoInput] = useState('');
             const [historyWriteupInput, setHistoryWriteupInput] = useState('');
             const [showShareTools, setShowShareTools] = useState(false);
             const [showGameRecapTools, setShowGameRecapTools] = useState(false);
-            const [generatingWriteupGameId, setGeneratingWriteupGameId] = useState(null);
-            const [generatingPotgWriteupGameId, setGeneratingPotgWriteupGameId] = useState(null);
             const playerArtStylePrompt = 'A premium sports app background template, widescreen 16:9 aspect ratio. On the right side, a high-quality cell-shaded anime cartoon style illustration of a young Asian basketball player wearing a black and white pinstripe jersey with the number 3. The left and center areas are kept completely empty and clear for UI text placement. The entire background features a dark navy blue and slate grey gradient with subtle diagonal tech stripes. Low contrast, clean aesthetic, no random text, no floating numbers, designed specifically as a graphic design template for text overlay.';
             const [playerArtSourceDataUrl, setPlayerArtSourceDataUrl] = useState('');
             const [playerArtOutputDataUrl, setPlayerArtOutputDataUrl] = useState('');
@@ -503,8 +444,6 @@
             const adminFocusRevisionRef = useRef(0);
             const lastRolePresenceEmitAtRef = useRef(0);
             const adminMissingToastAtRef = useRef(0);
-            const attemptedAutoPotgWriteupRef = useRef(new Set());
-            const pendingYoutubeSaveRef = useRef({});
             const suppressNextNavHistoryPushRef = useRef(false);
             const lastNavUrlRef = useRef('');
 
@@ -802,10 +741,6 @@
             }, []);
 
             useEffect(() => {
-                initGoogleAnalytics();
-            }, []);
-
-            useEffect(() => {
                 const selectedGame = selectedHistoryGameId
                     ? (games.find((game) => game.id === selectedHistoryGameId) || null)
                     : null;
@@ -835,8 +770,6 @@
                                     : 'WKND League Stats';
 
                 document.title = pageTitle;
-                const pagePath = `${window.location.pathname || '/'}${window.location.search || ''}`;
-                trackAnalyticsPageView(pagePath, pageTitle);
             }, [activeTab, selectedHistoryGameId, selectedRosterPlayer, games, teams]);
 
             const parseRouteFromLocation = () => {
@@ -956,7 +889,8 @@
                     if (route.type === 'history-game' && route.gameId) {
                         setActiveTab('history');
                         setPendingSharedGameId(route.gameId);
-                        if (route.historyTab) {
+                        // Old shared links may still point at the removed Video tab.
+                        if (route.historyTab && route.historyTab !== 'video') {
                             setPendingSharedHistoryDetailTab(route.historyTab);
                         }
                     } else if (route.type === 'teams-player' && route.teamId && route.playerId) {
@@ -1567,7 +1501,7 @@
 
             const flushPendingActiveSessionSync = async () => {
                 if (flushActiveSessionSyncInFlightRef.current) return;
-                if (!navigator.onLine) return;
+                if (!canReachServer()) return;
                 if (!pendingActiveSessionSyncRef.current) return;
 
                 const MAX_PENDING_SESSION_PUT_AGE_MS = 2 * 60 * 1000;
@@ -1674,7 +1608,7 @@
 
             const flushPendingLiveEvents = async () => {
                 if (flushLiveEventsInFlightRef.current) return;
-                if (!navigator.onLine) return;
+                if (!canReachServer()) return;
                 if (!Array.isArray(pendingLiveEventsRef.current) || pendingLiveEventsRef.current.length === 0) return;
 
                 flushLiveEventsInFlightRef.current = true;
@@ -2309,46 +2243,6 @@
 
             const armLocalResumeStabilityWindow = () => {
                 localResumeLockUntilRef.current = Date.now() + 2500;
-            };
-
-            const extractYouTubeVideoId = (rawUrl = '') => {
-                const value = String(rawUrl || '').trim();
-                if (!value) return '';
-
-                try {
-                    const parsed = new URL(value);
-                    const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
-
-                    if (host === 'youtu.be') {
-                        const idFromPath = parsed.pathname.replace(/^\//, '').split('/')[0];
-                        return /^[A-Za-z0-9_-]{11}$/.test(idFromPath) ? idFromPath : '';
-                    }
-
-                    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
-                        const fromQuery = parsed.searchParams.get('v');
-                        if (fromQuery && /^[A-Za-z0-9_-]{11}$/.test(fromQuery)) return fromQuery;
-
-                        const pathParts = parsed.pathname.split('/').filter(Boolean);
-                        if ((pathParts[0] === 'shorts' || pathParts[0] === 'embed' || pathParts[0] === 'live') && pathParts[1]) {
-                            return /^[A-Za-z0-9_-]{11}$/.test(pathParts[1]) ? pathParts[1] : '';
-                        }
-                    }
-                } catch (error) {
-                    const fallbackMatch = value.match(/(?:v=|youtu\.be\/|embed\/|shorts\/|live\/)([A-Za-z0-9_-]{11})/);
-                    return fallbackMatch ? fallbackMatch[1] : '';
-                }
-
-                return '';
-            };
-
-            const normalizeYouTubeUrl = (rawUrl = '') => {
-                const videoId = extractYouTubeVideoId(rawUrl);
-                return videoId ? `https://www.youtube.com/watch?v=${videoId}` : '';
-            };
-
-            const getYouTubeEmbedUrl = (rawUrl = '') => {
-                const videoId = extractYouTubeVideoId(rawUrl);
-                return videoId ? `https://www.youtube.com/embed/${videoId}` : '';
             };
 
             function hasAvailableBenchPlayer(isTeamA) {
@@ -5237,14 +5131,6 @@
             }, [periodClockSeconds, isEditingClockInput]);
 
             useEffect(() => {
-                if (!selectedHistoryGameId) {
-                    setHistoryVideoInput('');
-                    return;
-                }
-                setHistoryVideoInput(selectedHistoryGame?.youtubeUrl || '');
-            }, [selectedHistoryGameId, selectedHistoryGame ? selectedHistoryGame.youtubeUrl : '']);
-
-            useEffect(() => {
                 setGameMetaSeason(selectedHistoryGame?.season || CURRENT_SEASON);
                 setGameMetaSeriesId(selectedHistoryGame?.seriesId || '');
             }, [selectedHistoryGameId]);
@@ -5267,29 +5153,6 @@
                     .catch(() => { if (!cancelled) setSelectedPlayerGameStats({}); });
                 return () => { cancelled = true; };
             }, [selectedRosterPlayer?.playerId]);
-
-            const AUTO_GENERATE_POTG_WRITEUP = false;
-
-            useEffect(() => {
-                if (!AUTO_GENERATE_POTG_WRITEUP) return;
-                if (activeTab !== 'history' || historyDetailTab !== 'potg') return;
-                if (!selectedHistoryGame) return;
-                if (String(selectedHistoryGame.potgWriteup || '').trim()) return;
-                if (generatingPotgWriteupGameId === selectedHistoryGame.id) return;
-                if (attemptedAutoPotgWriteupRef.current.has(selectedHistoryGame.id)) return;
-
-                const teamAObj = teams.find((team) => team.id === selectedHistoryGame.teamAId);
-                const teamBObj = teams.find((team) => team.id === selectedHistoryGame.teamBId);
-                const playerOfTheGame = getPlayerOfTheGame(selectedHistoryGame, teamAObj, teamBObj);
-                if (!playerOfTheGame) return;
-
-                attemptedAutoPotgWriteupRef.current.add(selectedHistoryGame.id);
-                handleGeneratePotgWriteup({
-                    game: selectedHistoryGame,
-                    playerOfTheGame,
-                    auto: true
-                });
-            }, [activeTab, historyDetailTab, selectedHistoryGame, teams, generatingPotgWriteupGameId]);
 
             useEffect(() => {
                 setPlayerArtSourceDataUrl('');
@@ -5881,31 +5744,7 @@
                                         if (prevGame?._detailLoaded) {
                                             remoteGame = { ...remoteGame, gameLog: prevGame.gameLog, periodSnapshots: prevGame.periodSnapshots, playerStats: prevGame.playerStats, _detailLoaded: true };
                                         }
-                                        const pending = pendingYoutubeSaveRef.current[gameId];
-                                        if (!pending) return remoteGame;
-
-                                        if (!pending.expiresAt || pending.expiresAt <= now) {
-                                            delete pendingYoutubeSaveRef.current[gameId];
-                                            return remoteGame;
-                                        }
-
-                                        const pendingUrl = normalizeYouTubeUrl(pending.url || '');
-                                        const remoteUrl = normalizeYouTubeUrl(remoteGame?.youtubeUrl || '');
-                                        if (remoteUrl === pendingUrl) {
-                                            delete pendingYoutubeSaveRef.current[gameId];
-                                            return remoteGame;
-                                        }
-
-                                        if (pendingUrl) {
-                                            return {
-                                                ...remoteGame,
-                                                youtubeUrl: pendingUrl
-                                            };
-                                        }
-
-                                        const nextGame = { ...remoteGame };
-                                        delete nextGame.youtubeUrl;
-                                        return nextGame;
+                                        return remoteGame;
                                     });
 
                                     // If portal-resolved teams are active (live game with portal UUIDs),
@@ -6496,7 +6335,7 @@
                 const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
                 writeCachedAppState(normalizedTeams, updatedGames, statActions, { dirty: true });
                 try {
-                    if (navigator.onLine !== false) {
+                    if (canReachServer()) {
                         const slimGames = (Array.isArray(updatedGames) ? updatedGames : []).map((game) => {
                             if (!game || typeof game !== 'object') return game;
                             const nextGame = { ...game };
@@ -6697,7 +6536,7 @@
                         // never time out sending all teams + all games through persistPlayerImagesForTeams.
                         let persistedToServer = false;
                         try {
-                            if (navigator.onLine !== false) {
+                            if (canReachServer()) {
                                 await apiRequest(`/api/games/${encodeURIComponent(nextImportedGameId)}`, {
                                     method: 'PUT',
                                     body: JSON.stringify({ game: importedGame })
@@ -6741,7 +6580,7 @@
                 setTeams(normalizedTeams);
                 writeCachedAppState(normalizedTeams, games, statActions, { dirty: true });
                 try {
-                    if (navigator.onLine !== false) {
+                    if (canReachServer()) {
                         const payload = await apiRequest('/api/teams', {
                             method: 'PUT',
                             body: JSON.stringify({ teams: buildTeamsPayload(normalizedTeams, updatedPool) })
@@ -6764,7 +6603,7 @@
                 setFreeAgents(normalizedPool);
                 freeAgentsRef.current = normalizedPool;
                 try {
-                    if (navigator.onLine !== false) {
+                    if (canReachServer()) {
                         await apiRequest('/api/teams', {
                             method: 'PUT',
                             body: JSON.stringify({ teams: buildTeamsPayload(teamsRef.current, normalizedPool) })
@@ -6776,7 +6615,7 @@
             const saveNewGameState = async (newGame, updatedTeams) => {
                 const updatedGames = [newGame, ...games.filter((game) => game?.id !== newGame?.id)];
                 const normalizedTeams = normalizeTeamsForStorage(updatedTeams);
-                const isOnline = navigator.onLine !== false;
+                const isOnline = canReachServer();
 
                 // Always persist the finalized game locally first so the operator can end a
                 // match offline. If offline, keep the cache marked dirty so bootstrap/sync can
@@ -6818,91 +6657,6 @@
                     persistedToServer: didPersist,
                     savedLocally: true
                 };
-            };
-
-            const handleSaveGameVideoLink = async (gameId) => {
-                if (!gameId) return;
-                const normalizedUrl = normalizeYouTubeUrl(historyVideoInput);
-
-                if (historyVideoInput.trim() && !normalizedUrl) {
-                    showToast('Please enter a valid YouTube link.', 'error');
-                    return;
-                }
-
-                const updatedGames = games.map((existingGame) => {
-                    if (existingGame.id !== gameId) return existingGame;
-                    const nextGame = { ...existingGame };
-                    if (normalizedUrl) {
-                        nextGame.youtubeUrl = normalizedUrl;
-                    } else {
-                        delete nextGame.youtubeUrl;
-                    }
-                    return nextGame;
-                });
-
-                pendingYoutubeSaveRef.current[String(gameId)] = {
-                    url: normalizedUrl || '',
-                    expiresAt: Date.now() + 15000
-                };
-
-                writeCachedAppState(teams, updatedGames, statActions, { dirty: true });
-                setGames(updatedGames);
-                try {
-                    const payload = await apiRequest(`/api/games/${encodeURIComponent(gameId)}/video`, {
-                        method: 'PUT',
-                        body: JSON.stringify({ youtubeUrl: normalizedUrl || '' })
-                    });
-
-                    const persistedGame = payload?.game && typeof payload.game === 'object'
-                        ? payload.game
-                        : null;
-
-                    setGames((prevGames) => {
-                        const mergedGames = prevGames.map((existingGame) => {
-                            if (existingGame.id !== gameId) return existingGame;
-                            if (!persistedGame) {
-                                return normalizedUrl
-                                    ? { ...existingGame, youtubeUrl: normalizedUrl }
-                                    : (() => {
-                                        const nextGame = { ...existingGame };
-                                        delete nextGame.youtubeUrl;
-                                        return nextGame;
-                                    })();
-                            }
-                            return {
-                                ...existingGame,
-                                ...persistedGame
-                            };
-                        });
-
-                        writeCachedAppState(teams, mergedGames, statActions, { dirty: false });
-                        return mergedGames;
-                    });
-
-                    delete pendingYoutubeSaveRef.current[String(gameId)];
-                    trackAnalyticsEvent('save_video_link', {
-                        game_id: String(gameId),
-                        has_video_link: normalizedUrl ? 1 : 0
-                    });
-                    showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
-                } catch (error) {
-                    // Backward-compatible fallback for servers that do not yet expose /api/games/:id/video.
-                    const didFallbackSave = await saveFullState(teams, updatedGames);
-                    delete pendingYoutubeSaveRef.current[String(gameId)];
-
-                    if (didFallbackSave) {
-                        trackAnalyticsEvent('save_video_link', {
-                            game_id: String(gameId),
-                            has_video_link: normalizedUrl ? 1 : 0
-                        });
-                        showToast(normalizedUrl ? 'YouTube link saved for this game.' : 'YouTube link removed.', 'success');
-                        return;
-                    }
-
-                    setGames(games);
-                    writeCachedAppState(teams, games, statActions, { dirty: true });
-                    showToast(String(error?.message || 'Could not save YouTube link right now. Please try again.'), 'error');
-                }
             };
 
             const PLAYOFF_SERIES_OPTIONS = [
@@ -6980,363 +6734,6 @@
                 showToast(updated?.underReview ? 'Marked as pending stats review.' : 'Marked as review complete.', 'success');
             };
 
-            const handleGenerateGameWriteup = async ({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers }) => {
-                if (!game || !canOperateLive) return;
-                setGeneratingWriteupGameId(game.id);
-
-                try {
-                    const toPromptPerformer = (entry, teamName) => ({
-                        name: entry.name,
-                        number: entry.number,
-                        teamName,
-                        perScore: Number(entry.perScore || 0),
-                        stats: {
-                            pts: Number(entry.stats?.pts || 0),
-                            reb: Number(entry.stats?.reb || 0),
-                            ast: Number(entry.stats?.ast || 0),
-                            stl: Number(entry.stats?.stl || 0),
-                            blk: Number(entry.stats?.blk || 0),
-                            to: Number(entry.stats?.to || 0)
-                        }
-                    });
-
-                    const standoutPerformersByTeam = {
-                        teamA: (topTeamAPerformers || []).slice(0, 2).map((entry) => toPromptPerformer(entry, game.teamAName)),
-                        teamB: (topTeamBPerformers || []).slice(0, 2).map((entry) => toPromptPerformer(entry, game.teamBName))
-                    };
-
-                    const bestPerformers = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])]
-                        .map((entry) => {
-                            const belongsToTeamA = !!teamAObj?.players?.some((p) => p.id === entry.id);
-                            return toPromptPerformer(entry, belongsToTeamA ? game.teamAName : game.teamBName);
-                        })
-                        .sort((a, b) => b.perScore - a.perScore || b.stats.pts - a.stats.pts)
-                        .slice(0, 8);
-
-                    // Compute original auto-derived POTG for context when a manual POTG differs
-                    const autoPlayerOfTheGame = (() => {
-                        const manualPotgSet = String(game?.manualPotgPlayerId || '').trim();
-                        if (!manualPotgSet) return playerOfTheGame; // No manual override, use current
-                        // Recompute without manual override to find who would naturally be POTG
-                        const topAll = [...(topTeamAPerformers || []), ...(topTeamBPerformers || [])].sort((a, b) => Number(b.perScore || 0) - Number(a.perScore || 0));
-                        return topAll[0] || null;
-                    })();
-
-                    const potgSelectionMode = game?.manualPotgPlayerId ? 'manual' : 'auto';
-
-                    const orderedGameLog = [...(Array.isArray(game.gameLog) ? game.gameLog : [])].reverse();
-                    const isRecapNoiseEvent = (entry, idx, allEntries) => {
-                        const text = String(entry?.text || '').toLowerCase();
-                        const metaType = String(entry?.metaType || '').trim();
-                        if (entry?.hiddenFromLog) return true;
-                        if (entry?.metaType === 'periodCheckpoint') return true;
-                        if (entry?.isUndoCompensation) return true;
-                        if (entry?.kind === 'stat' && entry?.undoOfId) return true;
-                        if (entry?.metaType === 'clockAdjust') return true;
-                        if (/clock adjusted|sync clock|clock updated/.test(text)) return true;
-                        if (/^undo:\s*reversed/i.test(text)) return true;
-                        if (/\bcorrection\b/.test(text)) return true;
-
-                        if (metaType === 'adminFocusSet' || metaType === 'rolePresence') return true;
-
-                        if (entry?.metaType === 'manualPause') return true;
-                        if (text.trim() === 'manual pause' || text.trim() === 'pause game' || text.trim() === 'pause') return true;
-
-                        const isPlayResume = entry?.metaType === 'playResume' || text.startsWith('play resumed');
-                        if (isPlayResume) {
-                            let precedingPauseType = '';
-                            for (let cursor = idx - 1; cursor >= 0; cursor -= 1) {
-                                const prior = allEntries[cursor];
-                                const priorMetaType = String(prior?.metaType || '').trim();
-                                if (!priorMetaType) continue;
-
-                                if (priorMetaType === 'manualPause' || priorMetaType === 'timeout' || priorMetaType === 'officialsTimeout' || priorMetaType === 'foulPause') {
-                                    precedingPauseType = priorMetaType;
-                                    break;
-                                }
-
-                                if (priorMetaType === 'playResume' || priorMetaType === 'timeoutResume' || priorMetaType === 'quarterStart' || priorMetaType === 'matchStart' || priorMetaType === 'hardReset') {
-                                    break;
-                                }
-                            }
-
-                            if (precedingPauseType === 'manualPause') return true;
-                        }
-
-                        if (entry?.kind === 'meta' && entry?.metaType === 'foulPause') return true;
-                        return false;
-                    };
-                    const recapReadyGameLog = orderedGameLog.filter((entry, idx, allEntries) => !isRecapNoiseEvent(entry, idx, allEntries));
-
-                    const finalMomentRawEvents = recapReadyGameLog.slice(-45);
-
-                    const pbpForPrompt = recapReadyGameLog
-                        .slice(-180)
-                        .map((entry) => ({
-                            quarter: Number(entry?.quarter || 0) || 1,
-                            clock: String(entry?.clockRemaining || ''),
-                            team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : 'Neutral',
-                            text: String(entry?.text || '')
-                        }))
-                        .filter((entry) => entry.text.trim());
-
-                    const finalMomentsForPrompt = finalMomentRawEvents
-                        .map((entry) => ({
-                            quarter: Number(entry?.quarter || 0) || 1,
-                            clock: String(entry?.clockRemaining || ''),
-                            team: entry?.isTeamA === true ? game.teamAName : entry?.isTeamA === false ? game.teamBName : 'Neutral',
-                            text: String(entry?.text || '')
-                        }))
-                        .filter((entry) => entry.text.trim());
-
-                    const extractScorePairFromLogText = (text) => {
-                        const normalized = String(text || '');
-                        const legacyMatch = normalized.match(/\[(\d+)\s*-\s*(\d+)\]/);
-                        if (legacyMatch) {
-                            return {
-                                teamAScore: Number(legacyMatch[1]),
-                                teamBScore: Number(legacyMatch[2])
-                            };
-                        }
-
-                        const acronymMatch = normalized.match(/\[[A-Za-z0-9]{2,6}\s+(\d+)\s*-\s*[A-Za-z0-9]{2,6}\s+(\d+)\]/);
-                        if (acronymMatch) {
-                            return {
-                                teamAScore: Number(acronymMatch[1]),
-                                teamBScore: Number(acronymMatch[2])
-                            };
-                        }
-
-                        return null;
-                    };
-
-                    const scoreSnapshots = recapReadyGameLog
-                        .map((entry) => {
-                            const text = String(entry?.text || '');
-                            const parsedScores = extractScorePairFromLogText(text);
-                            if (!parsedScores) return null;
-                            const teamAScore = Number(parsedScores.teamAScore);
-                            const teamBScore = Number(parsedScores.teamBScore);
-                            if (!Number.isFinite(teamAScore) || !Number.isFinite(teamBScore)) return null;
-                            return {
-                                time: String(entry?.time || ''),
-                                teamAScore,
-                                teamBScore,
-                                marginA: teamAScore - teamBScore
-                            };
-                        })
-                        .filter(Boolean);
-
-                    let leadSwingSummary = null;
-                    if (scoreSnapshots.length > 0) {
-                        let largestLead = {
-                            teamKey: 'none',
-                            teamName: 'None',
-                            leadPoints: 0,
-                            atTime: scoreSnapshots[0].time || ''
-                        };
-
-                        scoreSnapshots.forEach((snap) => {
-                            const absLead = Math.abs(Number(snap.marginA || 0));
-                            if (absLead <= largestLead.leadPoints) return;
-                            largestLead = {
-                                teamKey: snap.marginA > 0 ? 'teamA' : (snap.marginA < 0 ? 'teamB' : 'none'),
-                                teamName: snap.marginA > 0 ? game.teamAName : (snap.marginA < 0 ? game.teamBName : 'None'),
-                                leadPoints: absLead,
-                                atTime: snap.time || ''
-                            };
-                        });
-
-                        const peakIndex = scoreSnapshots.findIndex((snap) => {
-                            const absLead = Math.abs(Number(snap.marginA || 0));
-                            return absLead === largestLead.leadPoints;
-                        });
-
-                        const tail = peakIndex >= 0 ? scoreSnapshots.slice(peakIndex + 1) : [];
-                        let leadWasErased = false;
-                        let leadWasNearlyErased = false;
-
-                        if (largestLead.teamKey === 'teamA') {
-                            const minMarginAfterPeak = tail.length ? Math.min(...tail.map((snap) => Number(snap.marginA || 0))) : largestLead.leadPoints;
-                            leadWasErased = minMarginAfterPeak <= 0;
-                            leadWasNearlyErased = minMarginAfterPeak <= 2;
-                        } else if (largestLead.teamKey === 'teamB') {
-                            const maxMarginAfterPeak = tail.length ? Math.max(...tail.map((snap) => Number(snap.marginA || 0))) : -largestLead.leadPoints;
-                            leadWasErased = maxMarginAfterPeak >= 0;
-                            leadWasNearlyErased = maxMarginAfterPeak >= -2;
-                        }
-
-                        leadSwingSummary = {
-                            largestLeadTeam: largestLead.teamName,
-                            largestLeadPoints: Number(largestLead.leadPoints || 0),
-                            largestLeadAtTime: largestLead.atTime,
-                            leadWasErased,
-                            leadWasNearlyErased,
-                            isHugeLead: Number(largestLead.leadPoints || 0) >= 10
-                        };
-                    }
-
-                    const substitutionEvents = recapReadyGameLog.filter((entry) => entry?.kind === 'sub');
-                    const teamASubEvents = substitutionEvents.filter((entry) => entry?.isTeamA === true);
-                    const teamBSubEvents = substitutionEvents.filter((entry) => entry?.isTeamA === false);
-
-                    const classifyRotationPattern = (subCount) => {
-                        if (subCount >= 14) return 'heavy rotation';
-                        if (subCount >= 8) return 'balanced rotation';
-                        if (subCount >= 4) return 'tight rotation';
-                        return 'very tight rotation';
-                    };
-
-                    const buildLineupPattern = (teamObj, subEvents, isTeamA) => {
-                        const playersUsed = (teamObj?.players || []).filter((player) => Boolean(game?.playerStats?.[player.id])).length;
-                        const uniqueSubPlayers = new Set();
-                        subEvents.forEach((event) => {
-                            if (event?.outId) uniqueSubPlayers.add(event.outId);
-                            if (event?.inId) uniqueSubPlayers.add(event.inId);
-                        });
-                        const lateSubCount = finalMomentRawEvents.filter((raw) => raw?.kind === 'sub' && raw?.isTeamA === isTeamA).length;
-
-                        return {
-                            teamName: teamObj?.name || (isTeamA ? game.teamAName : game.teamBName),
-                            subCount: subEvents.length,
-                            playersUsed,
-                            uniqueSubPlayers: uniqueSubPlayers.size,
-                            lateSubCount,
-                            rotationPattern: classifyRotationPattern(subEvents.length)
-                        };
-                    };
-
-                    const lineupPatternSummary = {
-                        teamA: buildLineupPattern(teamAObj, teamASubEvents, true),
-                        teamB: buildLineupPattern(teamBObj, teamBSubEvents, false)
-                    };
-
-                    const response = await apiRequest('/api/generate-writeup', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            game: {
-                                id: game.id,
-                                date: game.date,
-                                teamAName: game.teamAName,
-                                teamBName: game.teamBName,
-                                teamAScore: Number(game.teamAScore || 0),
-                                teamBScore: Number(game.teamBScore || 0)
-                            },
-                            playerOfTheGame: playerOfTheGame ? {
-                                name: playerOfTheGame.name,
-                                number: playerOfTheGame.number,
-                                teamName: playerOfTheGame.teamName,
-                                perScore: Number(playerOfTheGame.perScore || 0),
-                                stats: playerOfTheGame.stats || {}
-                            } : null,
-                            originalPlayerOfTheGame: (potgSelectionMode === 'manual' && autoPlayerOfTheGame && autoPlayerOfTheGame.id !== playerOfTheGame?.id) ? {
-                                name: autoPlayerOfTheGame.name,
-                                number: autoPlayerOfTheGame.number,
-                                teamName: autoPlayerOfTheGame.teamName,
-                                perScore: Number(autoPlayerOfTheGame.perScore || 0),
-                                stats: autoPlayerOfTheGame.stats || {}
-                            } : null,
-                            potgSelectionMode,
-                            bestPerformers,
-                            standoutPerformersByTeam,
-                            playByPlay: pbpForPrompt,
-                            finalMoments: finalMomentsForPrompt,
-                            leadSwingSummary,
-                            lineupPatternSummary
-                        })
-                    });
-
-                    const generated = String(response?.writeup || '').trim();
-                    if (!generated) {
-                        showToast('Could not generate a writeup for this game.', 'error');
-                        return;
-                    }
-
-                    setHistoryWriteupInput(generated);
-                    showToast('Writeup generated. Review and save when ready.', 'success');
-                } catch (error) {
-                    showToast(error?.message || 'Failed to generate writeup.', 'error');
-                } finally {
-                    setGeneratingWriteupGameId(null);
-                }
-            };
-
-            const handleGeneratePotgWriteup = async ({ game, playerOfTheGame, auto = false }) => {
-                if (!game || !playerOfTheGame || !canOperateLive) return;
-                if (generatingPotgWriteupGameId === game.id) return;
-
-                setGeneratingPotgWriteupGameId(game.id);
-
-                try {
-                    const response = await apiRequest('/api/generate-potg-writeup', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            game: {
-                                id: game.id,
-                                date: game.date,
-                                teamAId: game.teamAId,
-                                teamBId: game.teamBId,
-                                teamAName: game.teamAName,
-                                teamBName: game.teamBName,
-                                teamAScore: Number(game.teamAScore || 0),
-                                teamBScore: Number(game.teamBScore || 0)
-                            },
-                            playerOfTheGame: {
-                                id: playerOfTheGame.id,
-                                name: playerOfTheGame.name,
-                                number: playerOfTheGame.number,
-                                teamId: playerOfTheGame.teamId,
-                                teamName: playerOfTheGame.teamName,
-                                stats: playerOfTheGame.stats || {}
-                            }
-                        })
-                    });
-
-                    const generated = String(response?.writeup || '').trim();
-                    if (!generated) {
-                        throw new Error('Could not generate a player spotlight for this game.');
-                    }
-
-                    const updatedGames = games.map((existingGame) => {
-                        if (existingGame.id !== game.id) return existingGame;
-                        return {
-                            ...existingGame,
-                            potgWriteup: generated
-                        };
-                    });
-
-                    setGames(updatedGames);
-                    const updatedGame = updatedGames.find((existingGame) => existingGame.id === game.id) || null;
-                    if (updatedGame && navigator.onLine !== false) {
-                        try {
-                            await apiRequest(`/api/games/${encodeURIComponent(game.id)}`, {
-                                method: 'PUT',
-                                body: JSON.stringify({ game: updatedGame })
-                            });
-                            writeCachedAppState(teams, updatedGames, statActions, { dirty: false });
-                            if (!auto) {
-                                showToast('POTG spotlight generated and saved.', 'success');
-                            }
-                            return;
-                        } catch (patchError) {
-                            // Fall back to the full-state save if the targeted update fails.
-                        }
-                    }
-
-                    await saveFullState(teams, updatedGames);
-                    if (!auto) {
-                        showToast('POTG spotlight generated and saved.', 'success');
-                    }
-                } catch (error) {
-                    if (auto) {
-                        attemptedAutoPotgWriteupRef.current.delete(game.id);
-                    } else {
-                        showToast(error?.message || 'Failed to generate POTG spotlight.', 'error');
-                    }
-                } finally {
-                    setGeneratingPotgWriteupGameId(null);
-                }
-            };
             const handleSetManualPotg = async (gameIdOrPlayerId, maybePlayerId = null) => {
                 if (!isLoggedIn) {
                     showToast('Log in to edit POTG.', 'info');
@@ -7437,7 +6834,7 @@
 
                 setGames(updatedGames);
                 const updatedGame = updatedGames.find((existingGame) => existingGame.id === targetGameId) || null;
-                if (updatedGame && navigator.onLine !== false) {
+                if (updatedGame && canReachServer()) {
                     try {
                         await apiRequest(`/api/games/${encodeURIComponent(targetGameId)}`, {
                             method: 'PUT',
@@ -7825,7 +7222,7 @@
                 // cannot revive stale in-browser session data.
                 clearLocalLiveSessionArtifacts({ keepTeamSelection });
 
-                if (navigator.onLine) {
+                if (canReachServer()) {
                     try {
                         const deleteResult = await apiRequest('/api/active-session', {
                             method: 'DELETE',
@@ -7873,7 +7270,7 @@
             };
 
             const clearAnyRemoteActiveSessionBeforeStart = async () => {
-                if (navigator.onLine === false) return false;
+                if (!canReachServer()) return false;
 
                 try {
                     const payload = await apiRequest('/api/active-session');
@@ -7987,8 +7384,8 @@
                     showToast('Only admin can create a live game.', 'info');
                     return;
                 }
-                if (navigator.onLine === false) {
-                    showToast('Internet connection is required to start a new match.', 'error');
+                if (!canReachServer()) {
+                    showToast('Cannot reach the stats server to start a new match.', 'error');
                     return;
                 }
                 if (!teamAId || !teamBId || teamAId === teamBId) return;
@@ -8233,10 +7630,6 @@
                 await saveSessionToServer(initialSession);
 
                 setIsGameLive(true);
-                trackAnalyticsEvent('start_match', {
-                    team_a_id: resolvedTeamAId,
-                    team_b_id: resolvedTeamBId
-                });
                 showToast('Match started. Press Start Q1 to begin period play.', 'success');
                     } finally {
                         setIsStartingMatch(false);
@@ -10559,7 +9952,7 @@
                     // Do not finalize/clear the live session online until the server confirms
                     // the completed game has been persisted. This prevents refresh from dropping
                     // games that only existed in optimistic local state.
-                    if (navigator.onLine !== false && !saveResult?.persistedToServer) {
+                    if (canReachServer() && !saveResult?.persistedToServer) {
                         setTeams(previousTeamsSnapshot);
                         setGames(previousGamesSnapshot);
                         writeCachedAppState(
@@ -10579,7 +9972,7 @@
                     setSelectedHistoryGameId(newGame.id);
                     if (saveResult?.persistedToServer && didClearLiveSession) {
                         showToast("Live statistics committed to system database successfully!", "success");
-                    } else if (saveResult?.savedLocally && navigator.onLine === false) {
+                    } else if (saveResult?.savedLocally && !canReachServer()) {
                         showToast('Game saved locally. Server sync and live-session cleanup will resume when internet returns.', 'success');
                     } else if (saveResult?.savedLocally && !saveResult?.persistedToServer) {
                         showToast('Game saved locally. Server sync is pending and will retry automatically.', 'success');
@@ -11234,7 +10627,7 @@
                         setTeams(normalizedUpdatedTeams);
                         writeCachedAppState(normalizedUpdatedTeams, updatedGames, statActions, { dirty: true });
 
-                        const isOnline = navigator.onLine !== false;
+                        const isOnline = canReachServer();
                         if (isOnline) {
                             // DELETE and the authoritative state fetch are split into separate
                             // try blocks so a failed state-fetch doesn't resurrect a game that
@@ -11272,20 +10665,17 @@
                                     ? statePayload.games
                                     : updatedGames;
 
-                                delete pendingYoutubeSaveRef.current[String(gameId || '')];
                                 setTeams(authoritativeTeams);
                                 setGames(authoritativeGames);
                                 writeCachedAppState(authoritativeTeams, authoritativeGames, statActions, { dirty: false });
                                 removeGameFromCachedAppState(gameId, authoritativeTeams);
                             } catch (_) {
                                 // State fetch failed but delete succeeded — keep optimistic state.
-                                delete pendingYoutubeSaveRef.current[String(gameId || '')];
                                 writeCachedAppState(normalizedUpdatedTeams, updatedGames, statActions, { dirty: false });
                                 removeGameFromCachedAppState(gameId, normalizedUpdatedTeams);
                             }
                         } else {
                             await saveFullState(normalizedUpdatedTeams, updatedGames);
-                            delete pendingYoutubeSaveRef.current[String(gameId || '')];
                             removeGameFromCachedAppState(gameId, normalizedUpdatedTeams);
                         }
 
@@ -11385,7 +10775,7 @@
                     };
                 });
 
-                if (navigator.onLine !== false) {
+                if (canReachServer()) {
                     try {
                         const payload = await apiRequest(`/api/players/${encodeURIComponent(advancedEditingPlayer.playerId)}/profile`, {
                             method: 'PUT',
@@ -11469,7 +10859,7 @@
                     };
                 });
 
-                if (navigator.onLine !== false) {
+                if (canReachServer()) {
                     try {
                         await apiRequest(`/api/players/${encodeURIComponent(editingPlayer.playerId)}/profile`, {
                             method: 'PUT',
@@ -16898,7 +16288,6 @@
                                         const topTeamBPerformers = getTopTeamPerformers(teamBObj, game, 3);
                                         const teamALeaders = getGameTeamLeaders(teamAObj, game);
                                         const teamBLeaders = getGameTeamLeaders(teamBObj, game);
-                                        const videoEmbedUrl = getYouTubeEmbedUrl(game.youtubeUrl || '');
                                         const tabButtons = [
                                             ...(playerOfTheGame ? [{ id: 'potg', label: 'POTG' }] : []),
                                             { id: 'scoring', label: 'Scoring' },
@@ -16906,7 +16295,6 @@
                                             { id: 'leaders', label: 'Leaders' },
                                             { id: 'home', label: game.teamAName },
                                             { id: 'away', label: game.teamBName },
-                                            { id: 'video', label: 'Video' },
                                             { id: 'pbp', label: 'Play-by-Play' },
                                             ...(canOperateLive ? [{ id: 'game-info', label: 'Game Info' }] : [])
                                         ];
@@ -17149,14 +16537,6 @@
                                                                         <div className="flex justify-end gap-2">
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={() => handleGenerateGameWriteup({ game, teamAObj, teamBObj, playerOfTheGame, topTeamAPerformers, topTeamBPerformers })}
-                                                                                disabled={generatingWriteupGameId === game.id}
-                                                                                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-500/40 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                                                                            >
-                                                                                {generatingWriteupGameId === game.id ? 'Generating...' : 'Generate Recap'}
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
                                                                                 onClick={() => handleSaveGameWriteup(game.id)}
                                                                                 className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
                                                                             >
@@ -17187,46 +16567,6 @@
                                                     ))}
                                                 </div>
 
-                                                {historyDetailTab === 'video' && (
-                                                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-3">
-                                                        {canOperateLive && (
-                                                            <div className="flex flex-col md:flex-row md:items-end gap-2">
-                                                                <div className="flex-1">
-                                                                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">YouTube Game Video</label>
-                                                                    <input
-                                                                        type="url"
-                                                                        value={historyVideoInput}
-                                                                        onChange={(e) => setHistoryVideoInput(e.target.value)}
-                                                                        placeholder="https://www.youtube.com/watch?v=..."
-                                                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
-                                                                    />
-                                                                </div>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleSaveGameVideoLink(game.id)}
-                                                                    className="px-3 py-2 rounded-lg text-xs font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer"
-                                                                >
-                                                                    Save Video Link
-                                                                </button>
-                                                            </div>
-                                                        )}
-
-                                                        {videoEmbedUrl ? (
-                                                            <div className="rounded-xl overflow-hidden border border-slate-800 bg-black">
-                                                                <iframe
-                                                                    src={videoEmbedUrl}
-                                                                    title={`Game video ${game.id}`}
-                                                                    className="w-full aspect-video"
-                                                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                                                                    allowFullScreen
-                                                                />
-                                                            </div>
-                                                        ) : (
-                                                            <p className="text-[11px] text-slate-500">No video attached for this game yet.</p>
-                                                        )}
-                                                    </div>
-                                                )}
-
                                                 {/* PLAYER OF THE GAME */}
                                                 {historyDetailTab === 'potg' && playerOfTheGame && (
                                                     <div className="space-y-3">
@@ -17251,25 +16591,8 @@
                                                                 <div className="text-[11px] text-slate-400 mt-1 whitespace-pre-wrap break-words overflow-hidden">
                                                                     {String(game.potgWriteup || '').trim()
                                                                         ? game.potgWriteup
-                                                                        : (generatingPotgWriteupGameId === game.id
-                                                                            ? 'Generating player spotlight...'
-                                                                            : `PER-style game rating ${Number(playerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.`)}
+                                                                        : `PER-style game rating ${Number(playerOfTheGame.perScore || 0).toFixed(1)} based on scoring efficiency, playmaking, defense, and possession impact.`}
                                                                 </div>
-                                                                {isLoggedIn && (
-                                                                    <div className="mt-2">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleGeneratePotgWriteup({ game, playerOfTheGame })}
-                                                                            disabled={generatingPotgWriteupGameId === game.id}
-                                                                            title="Generate or regenerate POTG writeup"
-                                                                            className="w-full sm:w-auto px-3 py-1.5 rounded-lg text-xs font-bold border border-cyan-500/40 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                                                                        >
-                                                                            {generatingPotgWriteupGameId === game.id
-                                                                                ? 'Generating POTG Writeup...'
-                                                                                : (String(game.potgWriteup || '').trim() ? 'Regenerate POTG Writeup' : 'Generate POTG Writeup')}
-                                                                        </button>
-                                                                    </div>
-                                                                )}
                                                             </div>
                                                             {(() => {
                                                                 const displayedStats = [
